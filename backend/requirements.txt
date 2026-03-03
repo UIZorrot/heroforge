@@ -1,0 +1,6 @@
+flask
+flask-cors
+flask-caching
+openai
+requests
+pillow

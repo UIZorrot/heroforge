@@ -1,0 +1,54 @@
+{
+    "name": "Dante",
+    "description": "Dante is the son of the demon Sparda and a human, making him a half-demon. He is an expert demon hunter with extraordinary combat abilities, including enhanced strength, speed, regeneration, and a wide range of powerful weapons. Throughout the *Devil May Cry* series, he battles demonic forces and god-like beings, showcasing immense power and skill.",
+    "BP": "5500",
+    "state": {
+        "HP": "1200",
+        "MP": "800",
+        "ATK": "150",
+        "DEF": "60",
+        "CC": "60",
+        "SPEED": "80",
+        "CA": "70",
+        "PI": "60",
+        "EV": "40",
+        "AC": "50",
+        "TYPE": "weapon"
+    },
+    "skill": {
+        "s1": {
+            "name": "Rebellion Slash",
+            "description": "Dante unleashes a powerful slash with his sword, dealing massive damage to the enemy and reducing their defense for a short time.",
+            "TYPE": "weapon",
+            "DMG": "200",
+            "BUFF_HP": "",
+            "BUFF_DMG": "",
+            "BUFF_CC": "",
+            "BUFF_MP": "",
+            "BUFF_DEF": "-30",
+            "BUFF_EV": "",
+            "BUFF_AC": "",
+            "IS_STUN": "False",
+            "MP_COST": "50",
+            "BUFF_TIME": "2",
+            "BUFF_NAME": "corrupt"
+        },
+        "s2": {
+            "name": "Devil Trigger",
+            "description": "Dante activates his demon form, greatly enhancing his speed, attack, and critical damage for a few turns.",
+            "TYPE": "weapon",
+            "DMG": "",
+            "BUFF_HP": "",
+            "BUFF_DMG": "50",
+            "BUFF_CC": "40",
+            "BUFF_MP": "",
+            "BUFF_DEF": "",
+            "BUFF_EV": "",
+            "BUFF_AC": "",
+            "IS_STUN": "False",
+            "MP_COST": "100",
+            "BUFF_TIME": "3",
+            "BUFF_NAME": "haste"
+        }
+    }
+}
