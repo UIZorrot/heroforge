@@ -9,8 +9,6 @@ import type { HeroCard as HeroCardType, CardType, Rarity } from '../../types/car
 
 type SortOption = 'bp' | 'date' | 'name';
 
-const rarityOrder: Record<Rarity, number> = { mythic: 4, epic: 3, rare: 2, common: 1 };
-
 export default function VaultPage() {
   const storedCards = cardStorage.getCards();
   const displayCards = storedCards.length > 0 ? storedCards : mockCards;
@@ -37,8 +35,8 @@ export default function VaultPage() {
     return result;
   }, [cards, filterType, filterRarity, sortBy, searchQuery]);
 
-  const mythicCount = cards.filter(c => c.rarity === 'mythic').length;
-  const epicCount = cards.filter(c => c.rarity === 'epic').length;
+  const mythicCount = cards.filter(c => c.rarity === 'Mythic').length;
+  const epicCount = cards.filter(c => c.rarity === 'Epic').length;
   const favoriteCount = cards.filter(c => c.isFavorite).length;
 
   const handleToggleSelect = (cardId: string) => {
@@ -60,150 +58,181 @@ export default function VaultPage() {
   };
 
   return (
-    <div className="min-h-screen bg-[#0a0a0c]">
-      {/* Ambient */}
-      <div className="fixed inset-0 pointer-events-none">
-        <div className="absolute top-0 right-1/4 w-96 h-96 bg-violet-600/4 rounded-full blur-[120px]"></div>
-        <div className="absolute bottom-0 left-1/4 w-80 h-80 bg-amber-400/4 rounded-full blur-[100px]"></div>
-      </div>
-
+    <div className="min-h-screen bg-[#080808]">
       <Navigation />
 
-      <main className="relative pt-20 pb-16 px-6">
+      <main className="relative pt-32 pb-24 px-8">
         <div className="max-w-7xl mx-auto">
 
-          {/* ── Page Header ── */}
-          <div className="pt-8 pb-6">
-            <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
-              <div>
-                <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-amber-400/10 border border-amber-400/20 mb-3">
-                  <i className="ri-archive-fill text-amber-400 text-xs"></i>
-                  <span className="text-amber-400/80 text-xs font-mono tracking-widest uppercase">Relic Vault</span>
-                </div>
-                <h1 className="text-4xl md:text-5xl font-display font-black text-white tracking-wide"
-                  style={{ textShadow: '0 0 30px rgba(234,179,8,0.2)' }}>
-                  THE <span className="text-amber-400">VAULT</span>
-                </h1>
-                <p className="text-gray-600 text-sm font-mono mt-1">{cards.length} RELICS COLLECTED</p>
-              </div>
+          {/* ── Page Title ── */}
+          <div className="text-center mb-20">
+            <p className="text-stone-600 text-xs italic mb-4">"Archive of legends"</p>
+            <h1 className="text-5xl font-light text-stone-200 title-spaced mb-6">
+              V A U L T
+            </h1>
+            <div className="flex items-center justify-center gap-4 mb-8">
+              <div className="w-1 h-1 rotate-45 border border-stone-800"></div>
+              <div className="divider-minimal w-32"></div>
+              <div className="w-1 h-1 rotate-45 border border-stone-800"></div>
+            </div>
 
-              {/* Stats row */}
-              <div className="flex items-center gap-3">
-                <StatChip icon="ri-vip-crown-fill" label="Mythic" value={mythicCount} color="text-amber-400" bg="bg-amber-400/10 border-amber-400/20" />
-                <StatChip icon="ri-sparkling-fill" label="Epic" value={epicCount} color="text-violet-400" bg="bg-violet-400/10 border-violet-400/20" />
-                <StatChip icon="ri-star-fill" label="Favorites" value={favoriteCount} color="text-rose-400" bg="bg-rose-400/10 border-rose-400/20" />
+            {/* Stats - Minimal */}
+            <div className="flex items-center justify-center gap-12 text-stone-600 text-xs font-mono tracking-extra-wide">
+              <div>
+                <span className="text-2xl font-light text-gold-matte block mb-1">{mythicCount}</span>
+                <span>MYTHIC</span>
+              </div>
+              <div className="w-px h-8 bg-stone-800"></div>
+              <div>
+                <span className="text-2xl font-light text-stone-400 block mb-1">{epicCount}</span>
+                <span>EPIC</span>
+              </div>
+              <div className="w-px h-8 bg-stone-800"></div>
+              <div>
+                <span className="text-2xl font-light text-stone-400 block mb-1">{favoriteCount}</span>
+                <span>FAVORITES</span>
+              </div>
+              <div className="w-px h-8 bg-stone-800"></div>
+              <div>
+                <span className="text-2xl font-light text-stone-400 block mb-1">{cards.length}</span>
+                <span>TOTAL</span>
               </div>
             </div>
           </div>
 
-          {/* ── Filter Bar ── */}
-          <div className="rounded-2xl bg-white/[0.02] border border-white/[0.06] p-4 mb-6">
-            <div className="flex flex-wrap gap-3 items-center">
-              {/* Search */}
-              <div className="relative flex-1 min-w-[200px]">
-                <div className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 flex items-center justify-center">
-                  <i className="ri-search-line text-gray-500 text-sm"></i>
+          {/* ── Filter Bar - Minimal Text Buttons ── */}
+          <div className="mb-12">
+            {/* Search */}
+            <div className="max-w-md mx-auto mb-8">
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                placeholder="Search by name..."
+                className="w-full bg-transparent border-0 border-b border-stone-800 px-0 py-3 text-stone-200 placeholder-stone-700 focus:outline-none focus:border-gold-matte transition-colors text-sm tracking-wider"
+              />
+            </div>
+
+            {/* Filters & Sort */}
+            <div className="flex items-center justify-center gap-8 text-xs tracking-ultra-wide">
+              {/* Type Filter */}
+              <div className="flex items-center gap-3">
+                <span className="text-stone-600">TYPE</span>
+                <div className="flex items-center gap-2">
+                  {(['all', 'warrior', 'mage', 'rogue', 'tank', 'support'] as const).map(type => (
+                    <button
+                      key={type}
+                      onClick={() => setFilterType(type)}
+                      className={`px-3 py-1 transition-colors cursor-pointer whitespace-nowrap ${
+                        filterType === type
+                          ? 'text-gold-matte border-b border-gold-matte'
+                          : 'text-stone-600 hover:text-stone-400'
+                      }`}
+                    >
+                      {type.toUpperCase()}
+                    </button>
+                  ))}
                 </div>
-                <input
-                  type="text"
-                  value={searchQuery}
-                  onChange={e => setSearchQuery(e.target.value)}
-                  placeholder="Search heroes..."
-                  className="w-full pl-10 pr-4 py-2.5 bg-white/[0.03] border border-white/[0.08] rounded-xl text-gray-200 placeholder-gray-600 focus:outline-none focus:border-amber-400/30 transition-all text-sm"
-                />
               </div>
 
-              {/* Type filter */}
-              <select
-                value={filterType}
-                onChange={e => setFilterType(e.target.value as CardType | 'all')}
-                className="px-3 py-2.5 bg-white/[0.03] border border-white/[0.08] rounded-xl text-gray-300 focus:outline-none focus:border-amber-400/30 transition-all text-sm cursor-pointer appearance-none pr-8"
-                style={{ backgroundImage: 'url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' fill=\'%236b7280\' viewBox=\'0 0 20 20\'%3E%3Cpath d=\'M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z\'/%3E%3C/svg%3E")', backgroundRepeat: 'no-repeat', backgroundPosition: 'right 8px center', backgroundSize: '16px' }}
-              >
-                <option value="all">All Types</option>
-                <option value="warrior">Warrior</option>
-                <option value="mage">Mage</option>
-                <option value="rogue">Rogue</option>
-                <option value="tank">Tank</option>
-                <option value="support">Support</option>
-              </select>
+              <div className="w-px h-4 bg-stone-800"></div>
 
-              {/* Rarity filter */}
-              <select
-                value={filterRarity}
-                onChange={e => setFilterRarity(e.target.value as Rarity | 'all')}
-                className="px-3 py-2.5 bg-white/[0.03] border border-white/[0.08] rounded-xl text-gray-300 focus:outline-none focus:border-amber-400/30 transition-all text-sm cursor-pointer appearance-none pr-8"
-                style={{ backgroundImage: 'url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' fill=\'%236b7280\' viewBox=\'0 0 20 20\'%3E%3Cpath d=\'M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z\'/%3E%3C/svg%3E")', backgroundRepeat: 'no-repeat', backgroundPosition: 'right 8px center', backgroundSize: '16px' }}
-              >
-                <option value="all">All Rarities</option>
-                <option value="mythic">Mythic</option>
-                <option value="epic">Epic</option>
-                <option value="rare">Rare</option>
-                <option value="common">Common</option>
-              </select>
+              {/* Rarity Filter */}
+              <div className="flex items-center gap-3">
+                <span className="text-stone-600">RARITY</span>
+                <div className="flex items-center gap-2">
+                  {(['all', 'Mythic', 'Epic', 'Rare', 'Common'] as const).map(rarity => (
+                    <button
+                      key={rarity}
+                      onClick={() => setFilterRarity(rarity as Rarity | 'all')}
+                      className={`px-3 py-1 transition-colors cursor-pointer whitespace-nowrap ${
+                        filterRarity === rarity
+                          ? 'text-gold-matte border-b border-gold-matte'
+                          : 'text-stone-600 hover:text-stone-400'
+                      }`}
+                    >
+                      {rarity.toUpperCase()}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="w-px h-4 bg-stone-800"></div>
 
               {/* Sort */}
-              <div className="flex items-center gap-1 bg-white/[0.03] border border-white/[0.06] rounded-xl p-1">
-                {([
-                  { value: 'date', icon: 'ri-time-line', label: 'Latest' },
-                  { value: 'bp',   icon: 'ri-fire-line',  label: 'Power' },
-                  { value: 'name', icon: 'ri-sort-alphabet-asc', label: 'Name' },
-                ] as { value: SortOption; icon: string; label: string }[]).map(opt => (
-                  <button
-                    key={opt.value}
-                    onClick={() => setSortBy(opt.value)}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap cursor-pointer ${
-                      sortBy === opt.value
-                        ? 'bg-amber-400 text-[#0a0a0c]'
-                        : 'text-gray-500 hover:text-gray-300'
-                    }`}
-                  >
-                    <i className={opt.icon}></i>
-                    {opt.label}
-                  </button>
-                ))}
+              <div className="flex items-center gap-3">
+                <span className="text-stone-600">SORT</span>
+                <div className="flex items-center gap-2">
+                  {([
+                    { value: 'date', label: 'LATEST' },
+                    { value: 'bp', label: 'POWER' },
+                    { value: 'name', label: 'NAME' },
+                  ] as const).map(opt => (
+                    <button
+                      key={opt.value}
+                      onClick={() => setSortBy(opt.value)}
+                      className={`px-3 py-1 transition-colors cursor-pointer whitespace-nowrap ${
+                        sortBy === opt.value
+                          ? 'text-gold-matte border-b border-gold-matte'
+                          : 'text-stone-600 hover:text-stone-400'
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
               </div>
 
-              {/* Delete selected */}
+              {/* Delete Selected */}
               {selectedCards.size > 0 && (
-                <button
-                  onClick={() => setConfirmDelete(true)}
-                  className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-rose-900/30 border border-rose-500/30 text-rose-400 text-sm font-semibold hover:bg-rose-900/50 transition-all whitespace-nowrap cursor-pointer"
-                >
-                  <i className="ri-delete-bin-line"></i>
-                  Delete ({selectedCards.size})
-                </button>
+                <>
+                  <div className="w-px h-4 bg-stone-800"></div>
+                  <button
+                    onClick={() => setConfirmDelete(true)}
+                    className="px-3 py-1 text-stone-600 hover:text-red-400 transition-colors cursor-pointer whitespace-nowrap"
+                  >
+                    DELETE ({selectedCards.size})
+                  </button>
+                </>
               )}
             </div>
           </div>
 
-          {/* ── Cards Grid ── */}
+          {/* ── Cards Grid - 3 Columns with Hairline Dividers ── */}
           {filteredAndSortedCards.length > 0 ? (
-            <div className="grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
-              {filteredAndSortedCards.map((card) => (
+            <div className="grid grid-cols-3 gap-x-12 gap-y-16">
+              {filteredAndSortedCards.map((card, index) => (
                 <div key={card.id} className="relative group">
-                  {/* Select checkbox */}
+                  {/* Vertical divider after each card except last in row */}
+                  {(index + 1) % 3 !== 0 && (
+                    <div className="absolute -right-6 top-0 bottom-0 w-px bg-stone-900"></div>
+                  )}
+
+                  {/* Select checkbox - minimal */}
                   <button
                     onClick={e => { e.stopPropagation(); handleToggleSelect(card.id); }}
-                    className={`absolute top-3 left-3 z-30 w-6 h-6 rounded-lg border-2 flex items-center justify-center transition-all cursor-pointer ${
+                    className={`absolute top-3 left-3 z-30 w-5 h-5 border transition-all cursor-pointer ${
                       selectedCards.has(card.id)
-                        ? 'bg-amber-400 border-amber-400'
-                        : 'bg-black/60 border-white/20 opacity-0 group-hover:opacity-100 hover:border-amber-400/60'
+                        ? 'bg-gold-matte border-gold-matte'
+                        : 'bg-transparent border-stone-700 opacity-0 group-hover:opacity-100 hover:border-gold-matte'
                     }`}
+                    style={{ borderWidth: '0.5px' }}
                   >
-                    {selectedCards.has(card.id) && <i className="ri-check-line text-[#0a0a0c] text-xs font-bold"></i>}
+                    {selectedCards.has(card.id) && (
+                      <div className="w-2 h-2 bg-[#080808] mx-auto"></div>
+                    )}
                   </button>
 
-                  {/* Favorite button */}
+                  {/* Favorite button - minimal */}
                   <button
                     onClick={e => { e.stopPropagation(); handleToggleFavorite(card.id); }}
-                    className={`absolute top-3 right-3 z-30 w-7 h-7 rounded-full flex items-center justify-center transition-all cursor-pointer backdrop-blur-sm ${
+                    className={`absolute top-3 right-3 z-30 w-5 h-5 flex items-center justify-center transition-all cursor-pointer ${
                       card.isFavorite
-                        ? 'bg-amber-400/20 border border-amber-400/50'
-                        : 'bg-black/60 border border-white/10 opacity-0 group-hover:opacity-100 hover:border-amber-400/40'
+                        ? 'text-gold-matte'
+                        : 'text-stone-700 opacity-0 group-hover:opacity-100 hover:text-gold-matte'
                     }`}
                   >
-                    <i className={`${card.isFavorite ? 'ri-star-fill text-amber-400' : 'ri-star-line text-gray-400'} text-xs`}></i>
+                    <i className={`${card.isFavorite ? 'ri-star-fill' : 'ri-star-line'} text-xs`}></i>
                   </button>
 
                   <HeroCard card={card} />
@@ -211,21 +240,18 @@ export default function VaultPage() {
               ))}
             </div>
           ) : (
-            <div className="text-center py-24">
-              <div className="w-24 h-24 mx-auto mb-6 rounded-2xl bg-white/[0.03] border border-white/[0.06] flex items-center justify-center">
-                <i className="ri-inbox-line text-5xl text-gray-700"></i>
-              </div>
-              <h3 className="text-xl font-display font-bold text-gray-500 mb-2">No Relics Found</h3>
-              <p className="text-gray-700 text-sm mb-6">
-                {cards.length === 0 ? 'Start forging heroes to build your collection' : 'Try adjusting your filters'}
+            <div className="text-center py-32">
+              <div className="w-1 h-1 rotate-45 border border-stone-800 mx-auto mb-8"></div>
+              <p className="text-stone-600 text-sm tracking-extra-wide mb-2">NO RELICS FOUND</p>
+              <p className="text-stone-700 text-xs tracking-wider mb-12">
+                {cards.length === 0 ? 'Begin forging to build your archive' : 'Adjust filters to reveal hidden relics'}
               </p>
               {cards.length === 0 && (
                 <Link
                   to="/forge"
-                  className="inline-flex items-center gap-2 px-6 py-3 bg-amber-400 text-[#0a0a0c] rounded-xl font-bold text-sm hover:bg-amber-300 transition-all shadow-[0_0_20px_rgba(234,179,8,0.3)] whitespace-nowrap cursor-pointer"
+                  className="inline-block text-stone-600 text-xs tracking-ultra-wide hover:text-gold-matte transition-colors border-b border-stone-800 hover:border-gold-matte pb-1 cursor-pointer whitespace-nowrap"
                 >
-                  <i className="ri-hammer-fill"></i>
-                  Go to Forge
+                  ENTER FORGE
                 </Link>
               )}
             </div>
@@ -233,50 +259,33 @@ export default function VaultPage() {
         </div>
       </main>
 
-      {/* ── Confirm Delete Modal ── */}
+      {/* ── Confirm Delete Modal - Minimal ── */}
       {confirmDelete && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-6">
-          <div className="bg-[#111318] border border-white/10 rounded-2xl p-8 max-w-sm w-full text-center shadow-2xl">
-            <div className="w-14 h-14 mx-auto mb-4 rounded-full bg-rose-900/30 border border-rose-500/30 flex items-center justify-center">
-              <i className="ri-delete-bin-fill text-2xl text-rose-400"></i>
-            </div>
-            <h3 className="text-lg font-display font-bold text-white mb-2">Delete Relics?</h3>
-            <p className="text-gray-500 text-sm mb-6">
-              You are about to permanently destroy <span className="text-rose-400 font-bold">{selectedCards.size}</span> relic(s). This cannot be undone.
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-6">
+          <div className="bg-[#0a0a0a] border border-stone-800 p-12 max-w-md w-full text-center" style={{ borderWidth: '0.5px' }}>
+            <div className="w-1 h-1 rotate-45 border border-stone-800 mx-auto mb-8"></div>
+            <h3 className="text-lg font-light text-stone-200 tracking-extra-wide mb-2">CONFIRM DELETION</h3>
+            <p className="text-stone-600 text-xs tracking-wider mb-12">
+              Permanently destroy <span className="text-gold-matte">{selectedCards.size}</span> relic(s)
             </p>
-            <div className="flex gap-3">
+            <div className="flex items-center justify-center gap-8 text-xs tracking-ultra-wide">
               <button
                 onClick={() => setConfirmDelete(false)}
-                className="flex-1 py-2.5 rounded-xl bg-white/[0.05] border border-white/10 text-gray-300 text-sm font-semibold hover:bg-white/[0.08] transition-all cursor-pointer whitespace-nowrap"
+                className="text-stone-600 hover:text-stone-400 transition-colors border-b border-stone-800 hover:border-stone-600 pb-1 cursor-pointer whitespace-nowrap"
               >
-                Cancel
+                CANCEL
               </button>
+              <div className="w-px h-4 bg-stone-800"></div>
               <button
                 onClick={handleDeleteSelected}
-                className="flex-1 py-2.5 rounded-xl bg-rose-600 text-white text-sm font-bold hover:bg-rose-500 transition-all cursor-pointer whitespace-nowrap"
+                className="text-stone-600 hover:text-red-400 transition-colors border-b border-stone-800 hover:border-red-400 pb-1 cursor-pointer whitespace-nowrap"
               >
-                Destroy
+                DESTROY
               </button>
             </div>
           </div>
         </div>
       )}
-    </div>
-  );
-}
-
-function StatChip({ icon, label, value, color, bg }: {
-  icon: string; label: string; value: number; color: string; bg: string;
-}) {
-  return (
-    <div className={`flex items-center gap-2 px-3 py-2 rounded-xl border ${bg}`}>
-      <div className={`w-4 h-4 flex items-center justify-center ${color}`}>
-        <i className={`${icon} text-xs`}></i>
-      </div>
-      <div>
-        <div className={`text-sm font-bold font-mono ${color}`}>{value}</div>
-        <div className="text-[10px] text-gray-600 leading-none">{label}</div>
-      </div>
     </div>
   );
 }

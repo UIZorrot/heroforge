@@ -65,3 +65,6 @@ export const duelStorage = {
     return this.getDuels().find(d => d.id === id);
   },
 };
+
+/* 新增的命名导出以兼容页面 import */
+export const getCards = () => cardStorage.getCards();

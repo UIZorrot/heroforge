@@ -1,6 +1,6 @@
 import React, { useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Hammer, Sparkles, UploadCloud, AlertCircle } from 'lucide-react';
+import { AlertCircle, Plus } from 'lucide-react';
 import { cn } from '../lib/utils';
 
 interface ForgeProps {
@@ -40,24 +40,25 @@ export const Forge: React.FC<ForgeProps> = ({ onImageSelect, isForging, error })
   };
 
   return (
-    <div className="relative w-full max-w-md mx-auto perspective-1000">
-      <motion.div
-        initial={{ scale: 0.9, opacity: 0 }}
-        animate={{ scale: 1, opacity: 1 }}
-        transition={{ duration: 0.5 }}
+    <div className="relative mx-auto w-full max-w-3xl">
+      <div
         className={cn(
-          "relative flex min-h-[460px] flex-col items-center justify-center rounded-3xl border-2 bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 p-8 shadow-[0_0_60px_-20px_rgba(245,158,11,0.45)] transition-all duration-300",
-          dragActive ? "scale-105 border-amber-400" : "border-slate-700",
-          isForging && "animate-pulse border-amber-500/50"
+          "relative transition-all duration-300 cursor-pointer block",
+          isForging ? "cursor-wait" : ""
         )}
         onDragEnter={handleDrag}
         onDragLeave={handleDrag}
         onDragOver={handleDrag}
         onDrop={handleDrop}
+        onClick={() => {
+          if (!isForging) inputRef.current?.click();
+        }}
       >
-        <div className="pointer-events-none absolute inset-0 rounded-3xl bg-gradient-to-br from-amber-500/10 via-transparent to-indigo-500/10" />
-        <div className="pointer-events-none absolute inset-0 rounded-3xl bg-[url('https://www.transparenttextures.com/patterns/dark-denim-3.png')] opacity-20" />
-        
+        <div className={cn(
+          "absolute inset-0 border-hairline transition-all duration-300 pointer-events-none z-10",
+          dragActive ? "border-gold-matte/70" : isForging ? "border-gold-matte/35" : "border-stone-800 group-hover:border-stone-700"
+        )}></div>
+
         <AnimatePresence mode="wait">
           {isForging ? (
             <motion.div
@@ -65,32 +66,10 @@ export const Forge: React.FC<ForgeProps> = ({ onImageSelect, isForging, error })
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="flex flex-col items-center space-y-6 z-10"
+              className="aspect-[3/2] flex flex-col items-center justify-center bg-transparent"
             >
-              <div className="relative">
-                <motion.div
-                  animate={{ rotate: [0, -45, 0] }}
-                  transition={{ 
-                    duration: 0.8, 
-                    repeat: Infinity, 
-                    repeatType: "reverse", 
-                    ease: "easeInOut" 
-                  }}
-                >
-                  <Hammer size={64} className="text-amber-400" />
-                </motion.div>
-                <motion.div
-                  animate={{ scale: [1, 1.5, 1], opacity: [0, 1, 0] }}
-                  transition={{ duration: 0.8, repeat: Infinity }}
-                  className="absolute -bottom-4 left-1/2 -translate-x-1/2"
-                >
-                  <Sparkles className="text-amber-200" size={32} />
-                </motion.div>
-              </div>
-              <div className="text-center">
-                <h3 className="animate-pulse text-2xl font-bold tracking-wider text-amber-300">SOUL IMPRINTING...</h3>
-                <p className="mt-2 text-sm text-slate-400">Inscribing relic identity and battle memory</p>
-              </div>
+              <MinimalSpinner large />
+              <p className="text-stone-600 text-xs tracking-widest mt-8">EXTRACTING ESSENCE</p>
             </motion.div>
           ) : (
             <motion.div
@@ -98,33 +77,20 @@ export const Forge: React.FC<ForgeProps> = ({ onImageSelect, isForging, error })
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="flex flex-col items-center text-center space-y-4 z-10"
+              className="aspect-[3/2] flex flex-col items-center justify-center gap-6 hover:bg-stone-950/30 transition-all group"
             >
-              <div className="rounded-full border border-amber-500/30 bg-slate-800 p-4 shadow-inner shadow-black/40 transition-transform group-hover:scale-110">
-                <UploadCloud size={48} className="text-slate-300 transition-colors group-hover:text-amber-400" />
+              <div className="w-12 h-12 border-hairline border-stone-800 flex items-center justify-center transition-colors group-hover:border-stone-600 z-20">
+                <Plus size={24} className="text-stone-700 group-hover:text-stone-500 transition-colors" />
               </div>
-              
-              <div>
-                <h3 className="text-xl font-bold text-amber-100">Drop Relic Portrait</h3>
-                <p className="mt-1 text-sm text-slate-400">or click to select from your armory</p>
+              <div className="text-center z-20">
+                <p className="text-stone-600 text-xs tracking-widest mb-2 group-hover:text-stone-400 transition-colors">DROP IMAGE HERE</p>
+                <p className="text-stone-800 text-xs tracking-wide">or click to browse</p>
               </div>
-
-              <button
-                onClick={() => inputRef.current?.click()}
-                className="rounded-lg bg-gradient-to-r from-amber-500 to-yellow-300 px-6 py-2 font-bold text-black shadow-lg shadow-amber-500/20 transition-colors hover:from-amber-400 hover:to-yellow-200"
-              >
-                Select Material
-              </button>
-              
               {error && (
-                <motion.div 
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className="flex items-center gap-2 text-red-400 text-sm bg-red-900/20 px-3 py-2 rounded-lg"
-                >
+                <div className="flex items-center gap-2 text-gold-matte/75 text-xs mt-4 tracking-widest z-20">
                   <AlertCircle size={14} />
                   {error}
-                </motion.div>
+                </div>
               )}
             </motion.div>
           )}
@@ -136,8 +102,18 @@ export const Forge: React.FC<ForgeProps> = ({ onImageSelect, isForging, error })
           accept="image/*"
           className="hidden"
           onChange={handleChange}
+          disabled={isForging}
         />
-      </motion.div>
+      </div>
     </div>
   );
 };
+
+function MinimalSpinner({ large = false }: { large?: boolean }) {
+  const size = large ? 'w-16 h-16' : 'w-10 h-10';
+  return (
+    <div className={`relative ${size} flex flex-col items-center justify-center z-20`}>
+      <div className="absolute inset-1 rotate-45 border-hairline border-stone-800 border-t-gold-matte animate-spin-slow"></div>
+    </div>
+  );
+}

@@ -1,4 +1,3 @@
-
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import Navigation from '../../components/layout/Navigation';
@@ -8,9 +7,9 @@ import { cardStorage } from '../../utils/cardStorage';
 import type { HeroCard as HeroCardType } from '../../types/card';
 
 const FORGE_STEPS = [
-  { icon: 'ri-image-add-line', label: 'Upload Essence' },
-  { icon: 'ri-fire-fill', label: 'Soul Imprinting' },
-  { icon: 'ri-sparkling-2-fill', label: 'Relic Forged' },
+  { label: 'Upload Essence' },
+  { label: 'Soul Imprinting' },
+  { label: 'Relic Forged' },
 ];
 
 export default function ForgePage() {
@@ -98,92 +97,73 @@ export default function ForgePage() {
   };
 
   return (
-    <div className="min-h-screen bg-[#0a0a0c] overflow-hidden">
-      {/* Ambient background */}
-      <div className="fixed inset-0 pointer-events-none">
-        <div className="absolute top-0 left-1/4 w-96 h-96 bg-amber-400/5 rounded-full blur-[120px]"></div>
-        <div className="absolute bottom-1/4 right-1/4 w-80 h-80 bg-violet-600/5 rounded-full blur-[100px]"></div>
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-amber-400/3 rounded-full blur-[150px]"></div>
-      </div>
+    <div className="min-h-screen bg-[#080808] overflow-hidden">
+      {/* Subtle texture overlay */}
+      <div className="fixed inset-0 pointer-events-none opacity-[0.03]"
+        style={{
+          backgroundImage: `radial-gradient(ellipse at 50% 30%, rgba(180, 150, 100, 0.08) 0%, transparent 60%),
+                           radial-gradient(ellipse at 20% 70%, rgba(100, 80, 60, 0.05) 0%, transparent 50%)`
+        }}></div>
 
       <Navigation />
 
-      <main className="relative pt-20 pb-16">
-        {/* Page Header */}
-        <div className="text-center pt-10 pb-8 px-6">
-          <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-amber-400/10 border border-amber-400/20 mb-5">
-            <i className="ri-hammer-fill text-amber-400 text-xs"></i>
-            <span className="text-amber-400/80 text-xs font-mono tracking-widest uppercase">Arcane Forge</span>
-          </div>
-          <h1 className="text-5xl md:text-6xl font-display font-black text-white mb-3 tracking-wide"
-            style={{ textShadow: '0 0 40px rgba(234,179,8,0.3)' }}>
-            THE <span className="text-amber-400">FORGE</span>
+      <main className="relative pt-32 pb-20 px-6">
+        {/* Page Title - Ultra wide spacing */}
+        <div className="text-center mb-20">
+          <p className="text-stone-600 text-xs italic mb-6 tracking-wide">"Illuminate the enemy"</p>
+          <h1 className="text-6xl md:text-7xl font-display font-light text-stone-200 tracking-[0.25em] mb-4">
+            F O R G E
           </h1>
-          <p className="text-gray-500 font-mono text-sm tracking-widest">
-            IMPRINT SOULS · FORGE RELICS · CLAIM POWER
-          </p>
+          <div className="flex items-center justify-center gap-4 mt-8">
+            <div className="w-20 h-px bg-gradient-to-r from-transparent via-stone-700 to-transparent"></div>
+            <div className="w-2 h-2 rotate-45 border border-stone-700"></div>
+            <div className="w-20 h-px bg-gradient-to-r from-transparent via-stone-700 to-transparent"></div>
+          </div>
         </div>
 
-        {/* Step Indicator */}
-        <div className="flex items-center justify-center gap-0 mb-10 px-6">
-          {FORGE_STEPS.map((step, i) => (
-            <div key={i} className="flex items-center">
-              <div className={`flex items-center gap-2 px-4 py-2 rounded-full transition-all duration-500 ${
-                forgeStep === i
-                  ? 'bg-amber-400/15 border border-amber-400/40 text-amber-400'
-                  : forgeStep > i
-                  ? 'text-emerald-400 opacity-70'
-                  : 'text-gray-600'
-              }`}>
-                <div className={`w-5 h-5 flex items-center justify-center`}>
-                  {forgeStep > i
-                    ? <i className="ri-check-line text-sm"></i>
-                    : <i className={`${step.icon} text-sm`}></i>
-                  }
+        {/* Main Content - Single Column Centered */}
+        <div className="max-w-2xl mx-auto">
+          {/* Step Indicator - Vertical Left Side */}
+          <div className="flex items-start gap-12 mb-16">
+            <div className="flex flex-col gap-8 pt-2">
+              {FORGE_STEPS.map((step, i) => (
+                <div key={i} className="flex items-center gap-4">
+                  <div className={`w-1.5 h-1.5 rounded-full transition-all duration-500 ${
+                    forgeStep === i
+                      ? 'bg-gold-400 shadow-[0_0_8px_rgba(180,150,100,0.4)]'
+                      : forgeStep > i
+                      ? 'bg-gold-400/40'
+                      : 'bg-stone-800'
+                  }`}></div>
+                  <span className={`text-xs tracking-widest transition-all duration-500 ${
+                    forgeStep === i
+                      ? 'text-gold-400'
+                      : forgeStep > i
+                      ? 'text-stone-600'
+                      : 'text-stone-800'
+                  }`}>
+                    {step.label.toUpperCase()}
+                  </span>
                 </div>
-                <span className="text-xs font-semibold whitespace-nowrap">{step.label}</span>
-              </div>
-              {i < FORGE_STEPS.length - 1 && (
-                <div className={`w-12 h-px mx-1 transition-all duration-500 ${forgeStep > i ? 'bg-emerald-400/40' : 'bg-white/10'}`}></div>
-              )}
+              ))}
             </div>
-          ))}
-        </div>
 
-        {/* Main Content */}
-        <div className="max-w-6xl mx-auto px-6">
-          <div className="grid lg:grid-cols-[1fr_auto_1fr] gap-6 items-start">
-
-            {/* ── LEFT PANEL: Input ── */}
-            <div className="space-y-4">
-              {/* Panel header */}
-              <div className="flex items-center gap-3 mb-2">
-                <div className="w-8 h-8 flex items-center justify-center rounded-lg bg-amber-400/10 border border-amber-400/20">
-                  <i className="ri-quill-pen-fill text-amber-400 text-sm"></i>
-                </div>
-                <div>
-                  <h2 className="text-sm font-display font-bold text-white tracking-wider">SOUL INSCRIPTION</h2>
-                  <p className="text-xs text-gray-600">Name your hero before forging</p>
-                </div>
-              </div>
-
+            <div className="flex-1 space-y-8">
               {/* Name Input */}
-              <div className="relative">
-                <div className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 flex items-center justify-center">
-                  <i className="ri-quill-pen-line text-amber-400/60 text-sm"></i>
-                </div>
+              <div className="space-y-2">
+                <label className="block text-stone-600 text-xs tracking-widest uppercase">Hero Name</label>
                 <input
                   type="text"
                   value={heroName}
                   onChange={(e) => setHeroName(e.target.value)}
-                  placeholder="Hero name (optional)..."
+                  placeholder="Optional..."
                   maxLength={30}
-                  className="w-full pl-11 pr-4 py-3.5 bg-white/[0.03] border border-white/10 rounded-xl text-gray-100 placeholder-gray-600 focus:outline-none focus:border-amber-400/40 focus:bg-amber-400/5 transition-all text-sm font-medium"
+                  className="w-full px-0 py-3 bg-transparent border-0 border-b border-stone-800 text-stone-200 placeholder-stone-800 focus:outline-none focus:border-gold-400/40 transition-all text-sm tracking-wide"
                   disabled={isForging}
                 />
               </div>
 
-              {/* Upload Zone */}
+              {/* Upload Zone - Minimal Rectangle */}
               <div className="relative">
                 <input
                   type="file"
@@ -199,55 +179,48 @@ export default function ForgePage() {
                   onDragLeave={() => setIsDragOver(false)}
                   onDrop={handleDrop}
                   className={`
-                    block relative rounded-2xl overflow-hidden transition-all duration-300 cursor-pointer
-                    ${isDragOver ? 'border-amber-400 bg-amber-400/10 scale-[1.01]' : ''}
+                    block relative transition-all duration-300 cursor-pointer
                     ${isForging ? 'cursor-wait' : 'cursor-pointer'}
                   `}
                 >
-                  {/* Border */}
-                  <div className={`absolute inset-0 rounded-2xl border-2 border-dashed transition-all duration-300 pointer-events-none z-10 ${
-                    isDragOver ? 'border-amber-400' : isForging ? 'border-amber-400/50' : 'border-white/10 hover:border-amber-400/30'
+                  {/* Minimal border */}
+                  <div className={`absolute inset-0 border-hairline transition-all duration-300 pointer-events-none ${
+                    isDragOver ? 'border-gold-400' : isForging ? 'border-gold-400/30' : 'border-stone-800 hover:border-stone-700'
                   }`}></div>
 
                   {previewImage ? (
-                    /* Preview with overlay */
-                    <div className="relative aspect-[4/3] rounded-2xl overflow-hidden">
+                    /* Preview */
+                    <div className="relative aspect-[4/3] overflow-hidden">
                       <img src={previewImage} alt="Preview" className="w-full h-full object-cover object-top" />
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent"></div>
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent"></div>
                       {isForging && (
-                        <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/60 backdrop-blur-sm">
-                          <ForgeAnimation />
+                        <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/80">
+                          <MinimalSpinner />
+                          <p className="text-stone-600 text-xs tracking-widest mt-6">IMPRINTING</p>
                         </div>
                       )}
                       {!isForging && (
-                        <div className="absolute bottom-4 left-4 right-4 flex items-center justify-between">
-                          <span className="text-xs text-gray-400 font-mono">Image loaded</span>
-                          <span className="text-xs text-amber-400/70 font-mono">Click to change</span>
+                        <div className="absolute bottom-6 left-6 right-6">
+                          <p className="text-stone-600 text-xs tracking-wide">Click to replace</p>
                         </div>
                       )}
                     </div>
                   ) : (
                     /* Empty state */
-                    <div className="aspect-[4/3] rounded-2xl bg-white/[0.02] flex flex-col items-center justify-center gap-4 hover:bg-white/[0.04] transition-all">
+                    <div className="aspect-[4/3] flex flex-col items-center justify-center gap-6 hover:bg-stone-950/30 transition-all">
                       {isForging ? (
-                        <ForgeAnimation />
+                        <>
+                          <MinimalSpinner />
+                          <p className="text-stone-600 text-xs tracking-widest">IMPRINTING</p>
+                        </>
                       ) : (
                         <>
-                          <div className="relative">
-                            <div className="w-16 h-16 rounded-2xl bg-amber-400/10 border border-amber-400/20 flex items-center justify-center">
-                              <i className="ri-image-add-line text-3xl text-amber-400/60"></i>
-                            </div>
-                            <div className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-amber-400/20 border border-amber-400/40 flex items-center justify-center">
-                              <i className="ri-add-line text-amber-400 text-xs"></i>
-                            </div>
+                          <div className="w-12 h-12 border-hairline border-stone-800 flex items-center justify-center">
+                            <i className="ri-add-line text-2xl text-stone-800"></i>
                           </div>
                           <div className="text-center">
-                            <p className="text-gray-300 font-semibold text-sm mb-1">Drop hero image here</p>
-                            <p className="text-gray-600 text-xs">PNG · JPG · WEBP · up to 10MB</p>
-                          </div>
-                          <div className="flex items-center gap-2 px-4 py-2 rounded-full bg-amber-400/10 border border-amber-400/20">
-                            <i className="ri-upload-2-line text-amber-400 text-xs"></i>
-                            <span className="text-amber-400 text-xs font-semibold">Browse Files</span>
+                            <p className="text-stone-600 text-xs tracking-widest mb-2">DROP IMAGE HERE</p>
+                            <p className="text-stone-800 text-xs tracking-wide">or click to browse</p>
                           </div>
                         </>
                       )}
@@ -256,194 +229,97 @@ export default function ForgePage() {
                 </label>
               </div>
 
-              {/* Forge Tips */}
-              <div className="rounded-xl bg-white/[0.02] border border-white/[0.06] p-4">
-                <div className="flex items-center gap-2 mb-3">
-                  <i className="ri-lightbulb-flash-fill text-amber-400/60 text-sm"></i>
-                  <span className="text-xs font-bold text-gray-400 tracking-wider uppercase">Forge Lore</span>
-                </div>
-                <div className="space-y-2">
-                  {[
-                    { icon: 'ri-image-line', text: 'Clear portraits yield stronger relics' },
-                    { icon: 'ri-dice-line', text: 'Rarity is determined by arcane fate' },
-                    { icon: 'ri-refresh-line', text: 'Reforge to roll new attributes' },
-                    { icon: 'ri-archive-line', text: 'Save to Vault to use in duels' },
-                  ].map((tip, i) => (
-                    <div key={i} className="flex items-center gap-2.5">
-                      <div className="w-4 h-4 flex items-center justify-center flex-shrink-0">
-                        <i className={`${tip.icon} text-amber-400/40 text-xs`}></i>
-                      </div>
-                      <span className="text-xs text-gray-600">{tip.text}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            {/* ── CENTER DIVIDER ── */}
-            <div className="hidden lg:flex flex-col items-center gap-3 pt-16">
-              <div className="w-px flex-1 bg-gradient-to-b from-transparent via-white/10 to-transparent"></div>
-              <div className="w-10 h-10 rounded-full bg-amber-400/10 border border-amber-400/20 flex items-center justify-center">
-                <i className="ri-arrow-right-line text-amber-400/60 text-sm"></i>
-              </div>
-              <div className="w-px flex-1 bg-gradient-to-b from-transparent via-white/10 to-transparent"></div>
-            </div>
-
-            {/* ── RIGHT PANEL: Result ── */}
-            <div className="space-y-4">
-              {/* Panel header */}
-              <div className="flex items-center gap-3 mb-2">
-                <div className="w-8 h-8 flex items-center justify-center rounded-lg bg-amber-400/10 border border-amber-400/20">
-                  <i className="ri-sparkling-2-fill text-amber-400 text-sm"></i>
-                </div>
-                <div>
-                  <h2 className="text-sm font-display font-bold text-white tracking-wider">FORGED RELIC</h2>
-                  <p className="text-xs text-gray-600">Your hero card preview</p>
-                </div>
-              </div>
-
+              {/* Result Area */}
               {forgedCard && !isForging ? (
-                <>
+                <div className="space-y-8 pt-8 border-t border-stone-900">
                   {/* Card preview */}
-                  <div className="animate-card-reveal">
+                  <div className="animate-fade-in">
                     <div className="max-w-[280px] mx-auto">
                       <HeroCard card={forgedCard} />
                     </div>
                   </div>
 
-                  {/* Rarity reveal banner */}
-                  <div className={`rounded-xl p-3 border text-center ${
-                    forgedCard.rarity === 'mythic' ? 'bg-amber-900/20 border-amber-400/30' :
-                    forgedCard.rarity === 'epic'   ? 'bg-violet-900/20 border-violet-400/30' :
-                    forgedCard.rarity === 'rare'   ? 'bg-sky-900/20 border-sky-400/30' :
-                    'bg-white/[0.03] border-white/10'
-                  }`}>
-                    <div className="flex items-center justify-center gap-2">
-                      <i className={`ri-sparkling-fill text-sm ${
-                        forgedCard.rarity === 'mythic' ? 'text-amber-400' :
-                        forgedCard.rarity === 'epic'   ? 'text-violet-400' :
-                        forgedCard.rarity === 'rare'   ? 'text-sky-400' : 'text-gray-400'
-                      }`}></i>
-                      <span className={`text-xs font-bold tracking-widest uppercase ${
-                        forgedCard.rarity === 'mythic' ? 'text-amber-400' :
-                        forgedCard.rarity === 'epic'   ? 'text-violet-400' :
-                        forgedCard.rarity === 'rare'   ? 'text-sky-400' : 'text-gray-400'
-                      }`}>
-                        {forgedCard.rarity} relic forged
-                      </span>
-                      <i className={`ri-sparkling-fill text-sm ${
-                        forgedCard.rarity === 'mythic' ? 'text-amber-400' :
-                        forgedCard.rarity === 'epic'   ? 'text-violet-400' :
-                        forgedCard.rarity === 'rare'   ? 'text-sky-400' : 'text-gray-400'
-                      }`}></i>
-                    </div>
+                  {/* Rarity text */}
+                  <div className="text-center">
+                    <p className={`text-xs tracking-[0.2em] uppercase ${
+                      forgedCard.rarity === 'mythic' ? 'text-gold-400' :
+                      forgedCard.rarity === 'epic'   ? 'text-rarity-epic' :
+                      forgedCard.rarity === 'rare'   ? 'text-rarity-rare' :
+                      'text-stone-600'
+                    }`}>
+                      {forgedCard.rarity} Relic
+                    </p>
                   </div>
 
                   {/* Action Buttons */}
                   {showSuccess ? (
-                    <div className="rounded-xl bg-emerald-900/20 border border-emerald-400/30 p-5 text-center">
-                      <div className="w-12 h-12 mx-auto mb-3 rounded-full bg-emerald-400/10 border border-emerald-400/30 flex items-center justify-center">
-                        <i className="ri-checkbox-circle-fill text-2xl text-emerald-400"></i>
-                      </div>
-                      <p className="text-emerald-400 font-bold text-sm mb-1">Relic forged successfully!</p>
-                      <p className="text-gray-500 text-xs">Saved to your Vault</p>
+                    <div className="text-center py-8">
+                      <p className="text-stone-600 text-xs tracking-widest">SAVED TO VAULT</p>
                     </div>
                   ) : (
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="flex items-center justify-center gap-6">
                       <button
                         onClick={handleReforge}
-                        className="flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-white/[0.04] border border-white/10 text-gray-300 font-semibold text-sm hover:border-amber-400/30 hover:text-amber-400 hover:bg-amber-400/5 transition-all whitespace-nowrap cursor-pointer"
+                        className="text-stone-600 text-xs tracking-widest hover:text-stone-400 transition-all cursor-pointer"
                       >
-                        <i className="ri-refresh-line"></i>
-                        Reforge
+                        REFORGE
                       </button>
+                      <div className="w-px h-4 bg-stone-900"></div>
                       <button
                         onClick={handleSaveCard}
-                        className="flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-amber-400 text-[#0a0a0c] font-bold text-sm hover:bg-amber-300 transition-all whitespace-nowrap cursor-pointer shadow-[0_0_20px_rgba(234,179,8,0.3)]"
+                        className="text-gold-400 text-xs tracking-widest hover:text-gold-300 transition-all cursor-pointer"
                       >
-                        <i className="ri-archive-fill"></i>
-                        Save to Vault
+                        SAVE TO VAULT
                       </button>
                     </div>
                   )}
 
-                  <button
-                    onClick={handleReset}
-                    className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-gray-600 text-xs font-semibold hover:text-gray-400 transition-all cursor-pointer"
-                  >
-                    <i className="ri-arrow-left-line text-xs"></i>
-                    Forge another hero
-                  </button>
-                </>
-              ) : isForging ? (
-                /* Forging in progress */
-                <div className="rounded-2xl bg-white/[0.02] border border-amber-400/20 aspect-[3/4] flex flex-col items-center justify-center gap-6">
-                  <ForgeAnimation large />
                   <div className="text-center">
-                    <p className="text-amber-400 font-display font-bold text-lg mb-1">Soul imprinting...</p>
-                    <p className="text-gray-600 text-xs font-mono">Extracting arcane essence</p>
-                  </div>
-                  {/* Fake progress bar */}
-                  <div className="w-48 h-1 bg-white/10 rounded-full overflow-hidden">
-                    <div className="h-full bg-gradient-to-r from-amber-400 to-amber-300 rounded-full animate-[forge-progress_2.2s_ease-in-out_forwards]"
-                      style={{ animation: 'forge-progress 2.2s ease-in-out forwards' }}></div>
+                    <button
+                      onClick={handleReset}
+                      className="text-stone-800 text-xs tracking-wide hover:text-stone-700 transition-all cursor-pointer"
+                    >
+                      ← Forge another
+                    </button>
                   </div>
                 </div>
+              ) : isForging ? (
+                <div className="py-20 text-center border-t border-stone-900">
+                  <MinimalSpinner large />
+                  <p className="text-stone-600 text-xs tracking-widest mt-8">EXTRACTING ESSENCE</p>
+                </div>
               ) : (
-                /* Empty state */
-                <div className="rounded-2xl bg-white/[0.02] border border-dashed border-white/10 aspect-[3/4] flex flex-col items-center justify-center gap-4">
-                  <div className="w-20 h-20 rounded-2xl bg-white/[0.03] border border-white/[0.08] flex items-center justify-center">
-                    <i className="ri-sparkling-2-line text-4xl text-gray-700"></i>
-                  </div>
-                  <div className="text-center">
-                    <p className="text-gray-600 text-sm font-semibold mb-1">Awaiting essence</p>
-                    <p className="text-gray-700 text-xs">Upload an image to begin forging</p>
-                  </div>
+                <div className="py-12 text-center border-t border-stone-900">
+                  <p className="text-stone-800 text-xs tracking-wide">Awaiting essence</p>
                 </div>
               )}
 
               {/* Quick link to vault */}
               {!forgedCard && !isForging && (
-                <Link
-                  to="/vault"
-                  className="flex items-center justify-center gap-2 py-3 rounded-xl bg-white/[0.02] border border-white/[0.06] text-gray-500 text-xs font-semibold hover:text-gray-300 hover:border-white/10 transition-all cursor-pointer"
-                >
-                  <i className="ri-archive-line text-sm"></i>
-                  View your Vault
-                  <i className="ri-arrow-right-line text-xs"></i>
-                </Link>
+                <div className="text-center pt-8">
+                  <Link
+                    to="/vault"
+                    className="inline-flex items-center gap-2 text-stone-700 text-xs tracking-widest hover:text-stone-600 transition-all cursor-pointer"
+                  >
+                    VIEW VAULT
+                    <i className="ri-arrow-right-line text-xs"></i>
+                  </Link>
+                </div>
               )}
             </div>
           </div>
         </div>
       </main>
-
-      <style>{`
-        @keyframes forge-progress {
-          0% { width: 0%; }
-          30% { width: 40%; }
-          70% { width: 75%; }
-          100% { width: 100%; }
-        }
-      `}</style>
     </div>
   );
 }
 
-function ForgeAnimation({ large = false }: { large?: boolean }) {
-  const size = large ? 'w-20 h-20' : 'w-12 h-12';
-  const iconSize = large ? 'text-3xl' : 'text-xl';
+function MinimalSpinner({ large = false }: { large?: boolean }) {
+  const size = large ? 'w-16 h-16' : 'w-10 h-10';
   return (
     <div className={`relative ${size} flex items-center justify-center`}>
-      {/* Outer ring */}
-      <div className={`absolute inset-0 rounded-full border-2 border-amber-400/20 border-t-amber-400 animate-forge-spin`}></div>
-      {/* Inner ring */}
-      <div className={`absolute inset-2 rounded-full border border-amber-400/10 border-b-amber-400/50`}
-        style={{ animation: 'forge-spin 1s linear infinite reverse' }}></div>
-      {/* Center icon */}
-      <div className={`w-5 h-5 flex items-center justify-center`}>
-        <i className={`ri-fire-fill ${iconSize} text-amber-400 animate-glow-pulse`}></i>
-      </div>
+      {/* Single thin ring */}
+      <div className="absolute inset-0 border-hairline border-stone-800 border-t-gold-400 rounded-full animate-spin-slow"></div>
     </div>
   );
 }
