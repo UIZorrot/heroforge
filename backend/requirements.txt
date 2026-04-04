@@ -1,6 +1,10 @@
 flask
 flask-cors
 flask-caching
-openai
 requests
 pillow
+python-dotenv
+google-genai
+psycopg[binary]
+resend
+pytest

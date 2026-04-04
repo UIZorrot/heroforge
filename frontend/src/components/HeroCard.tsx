@@ -1,156 +1,142 @@
-import React from 'react';
 import { cn } from '../lib/utils';
-import type { CharacterData, Rarity, CardType } from '../lib/gameLogic';
-import { calculateRarity, normalizeCardType } from '../lib/gameLogic';
+import type { CharacterData, CardType, Rarity } from '../lib/gameLogic';
+import { calculateRarity, normalizeCardType, toNumber } from '../lib/gameLogic';
+import { StatPill } from './Effects';
 
 interface HeroCardProps {
   character: CharacterData;
-  image: string;
+  image?: string;
   className?: string;
   onClick?: () => void;
   isSelected?: boolean;
+  compact?: boolean;
   infusions?: Array<{
     label: string;
     count: number;
     overlayClass: string;
     particleClass: string;
   }>;
-  compact?: boolean;
 }
 
-const rarityConfig: Record<Rarity, {
-  color: string;
-  label: string;
-  lineClass: string;
-  borderClass: string;
-}> = {
-  common: {
-    color: '#71717a',
-    label: 'COMMON',
-    lineClass: 'from-zinc-600/0 via-zinc-500 to-zinc-600/0',
-    borderClass: 'border-stone-800',
-  },
-  rare: {
-    color: '#5078b4',
-    label: 'RARE',
-    lineClass: 'from-blue-500/0 via-blue-400 to-blue-500/0',
-    borderClass: 'border-blue-900/30',
-  },
-  epic: {
-    color: '#8c64b4',
-    label: 'EPIC',
-    lineClass: 'from-violet-500/0 via-violet-400 to-violet-500/0',
-    borderClass: 'border-violet-900/35',
-  },
-  mythic: {
-    color: '#b49664',
-    label: 'MYTHIC',
-    lineClass: 'from-amber-500/0 via-amber-400 to-amber-500/0',
-    borderClass: 'border-gold-matte/50',
-  },
+const rarityConfig: Record<Rarity, { label: string; accent: string; border: string }> = {
+  common: { label: 'COMMON', accent: 'text-stone-500', border: 'border-stone-800' },
+  rare: { label: 'RARE', accent: 'text-sky-300', border: 'border-sky-400/20' },
+  epic: { label: 'EPIC', accent: 'text-violet-300', border: 'border-violet-400/20' },
+  mythic: { label: 'MYTHIC', accent: 'text-[#f0d8ad]', border: 'border-[#c59a5a]/50' },
 };
 
-const typeConfig: Record<CardType, { label: string }> = {
-  warrior: { label: 'WARRIOR' },
-  mage: { label: 'MAGE' },
-  rogue: { label: 'ROGUE' },
-  tank: { label: 'TANK' },
-  support: { label: 'SUPPORT' },
+const typeLabel: Record<CardType, string> = {
+  warrior: 'WARRIOR',
+  mage: 'MAGE',
+  rogue: 'ROGUE',
+  tank: 'TANK',
+  support: 'SUPPORT',
 };
 
-export const HeroCard: React.FC<HeroCardProps> = ({ character, image, className, onClick, isSelected, infusions = [], compact = false }) => {
-  const rarityKey = calculateRarity(parseInt(character.BP));
-  const typeKey = normalizeCardType(character.state.TYPE);
+function statValue(value: string | number | undefined) {
+  return toNumber(value ?? 0, 0);
+}
+
+export function HeroCard({
+  character,
+  image,
+  className,
+  onClick,
+  isSelected,
+  compact = false,
+  infusions = [],
+}: HeroCardProps) {
+  const rarityKey = calculateRarity(statValue(character.BP));
   const rarity = rarityConfig[rarityKey];
-  const type = typeConfig[typeKey];
+  const typeKey = normalizeCardType(character.state.TYPE);
   const activeInfusions = infusions.filter((item) => item.count > 0);
-  const isMythic = rarityKey === 'mythic';
-  const primarySkill = character.skill.s1?.name || 'No Skill';
-  const secondarySkill = character.skill.s2?.name || 'No Skill';
+
+  const imageNode = image ? (
+    <img
+      src={image}
+      alt={character.name}
+      className="h-full w-full object-cover object-top transition duration-700 group-hover:scale-[1.03]"
+    />
+  ) : (
+    <div className="flex h-full w-full items-center justify-center bg-[radial-gradient(circle_at_top,rgba(197,154,90,0.18),rgba(0,0,0,0.85)_70%)]">
+      <div className="text-center">
+        <div className="text-5xl font-light tracking-[0.25em] text-stone-200">{character.name.slice(0, 1).toUpperCase()}</div>
+        <div className="mt-2 text-[10px] uppercase tracking-[0.32em] text-stone-500">{typeLabel[typeKey]}</div>
+      </div>
+    </div>
+  );
 
   return (
     <div
       onClick={onClick}
       className={cn(
-        'group relative overflow-hidden bg-[#0a0a0a] transition-all duration-500',
-        className,
+        'group relative overflow-hidden border bg-[#090909] text-left transition duration-300',
+        rarity.border,
+        isSelected ? 'scale-[1.01] border-[#c59a5a]/70 shadow-[0_0_0_1px_rgba(197,154,90,0.25)]' : 'hover:-translate-y-1 hover:border-stone-600',
         onClick ? 'cursor-pointer' : '',
-        isSelected ? 'z-20 scale-[1.01]' : 'hover:-translate-y-1'
+        className
       )}
     >
-      <div className={cn('absolute left-0 top-0 bottom-0 z-20 w-[2px] bg-gradient-to-b', rarity.lineClass)} />
-      <div className={cn('absolute inset-0 z-10 border border-hairline transition-colors', isMythic ? 'border-gold-matte/70' : rarity.borderClass)} />
-      {isMythic && (
-        <>
-          <div className="absolute left-2 top-2 z-20 h-1 w-1 rotate-45 border border-gold-matte/80" />
-          <div className="absolute right-2 top-2 z-20 h-1 w-1 rotate-45 border border-gold-matte/80" />
-          <div className="absolute bottom-2 left-2 z-20 h-1 w-1 rotate-45 border border-gold-matte/80" />
-          <div className="absolute bottom-2 right-2 z-20 h-1 w-1 rotate-45 border border-gold-matte/80" />
-        </>
-      )}
+      <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(255,255,255,0.02),transparent_28%,rgba(0,0,0,0.3))]" />
       <div className="relative h-[58%] overflow-hidden">
-        <img
-          src={image}
-          alt={character.name}
-          className="h-full w-full object-cover object-top transition-transform duration-700 group-hover:scale-105"
-        />
-        <div className="absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-[#0a0a0a] to-transparent" />
-        <div className="absolute right-3 top-3 flex items-baseline gap-1">
-          <span className="font-mono text-2xl font-light tracking-wide text-stone-200">{character.BP}</span>
-          <span className="text-[10px] tracking-widest text-stone-500">BP</span>
+        {imageNode}
+        <div className="absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-black via-black/45 to-transparent" />
+        <div className="absolute left-3 top-3 flex items-center gap-2">
+          <span className={cn('text-[10px] uppercase tracking-[0.28em]', rarity.accent)}>{rarity.label}</span>
+          <span className="border border-white/10 bg-black/60 px-2 py-0.5 text-[9px] uppercase tracking-[0.28em] text-stone-300">
+            {typeLabel[typeKey]}
+          </span>
         </div>
-        <div className="absolute left-3 top-3 border border-stone-700/80 bg-black/60 px-2 py-0.5 text-[10px] tracking-widest text-stone-300 backdrop-blur-sm">
-          {type.label}
+        <div className="absolute right-3 top-3 text-right">
+          <div className="text-2xl font-light tracking-[0.12em] text-stone-100">{character.BP}</div>
+          <div className="text-[9px] uppercase tracking-[0.3em] text-stone-500">BP</div>
         </div>
       </div>
-      <div className="flex h-[42%] flex-col justify-between bg-black/70 p-3 backdrop-blur-sm">
-        <div className="space-y-1">
-          <h3 className={cn('truncate text-base font-light tracking-extra-wide text-stone-100', compact ? 'text-sm' : '')}>{character.name}</h3>
-          <div className="flex items-center gap-2">
-            <span className="text-[9px] tracking-ultra-wide" style={{ color: rarity.color }}>
-              {rarity.label}
-            </span>
-            <span className="text-[9px] tracking-widest text-stone-600">TYPE {type.label}</span>
-          </div>
+
+      <div className="flex h-[42%] flex-col gap-3 p-4">
+        <div>
+          <h3 className="text-lg font-light tracking-[0.08em] text-stone-100">{character.name}</h3>
+          <p className="mt-1 line-clamp-2 text-xs leading-5 text-stone-400">{character.description}</p>
         </div>
-        <div className="flex items-center justify-between font-mono text-[11px] text-stone-300">
-          <span>HP {character.state.HP}</span>
-          <span>ATK {character.state.ATK}</span>
-          <span>DEF {character.state.DEF}</span>
-          <span>SPD {character.state.SPEED}</span>
+
+        <div className="flex flex-wrap gap-2">
+          <StatPill label="HP" value={statValue(character.state.HP)} tone="slate" />
+          <StatPill label="ATK" value={statValue(character.state.ATK)} tone="gold" />
+          <StatPill label="DEF" value={statValue(character.state.DEF)} tone="violet" />
+          <StatPill label="SPD" value={statValue(character.state.SPEED)} tone="emerald" />
         </div>
+
         {!compact && (
-          <div className="flex flex-wrap gap-1.5">
-            <span className="border border-hairline border-stone-700 px-2 py-0.5 text-[9px] tracking-wide text-stone-300">{primarySkill}</span>
-            <span className="border border-hairline border-stone-700 px-2 py-0.5 text-[9px] tracking-wide text-stone-300">{secondarySkill}</span>
+          <div className="grid grid-cols-2 gap-2 text-xs text-stone-300">
+            <div className="border border-white/5 bg-black/35 p-2">
+              <div className="text-[9px] uppercase tracking-[0.22em] text-stone-500">Primary</div>
+              <div className="mt-1 line-clamp-1">{character.skill.s1?.name || 'Untitled skill'}</div>
+            </div>
+            <div className="border border-white/5 bg-black/35 p-2">
+              <div className="text-[9px] uppercase tracking-[0.22em] text-stone-500">Secondary</div>
+              <div className="mt-1 line-clamp-1">{character.skill.s2?.name || 'Untitled skill'}</div>
+            </div>
           </div>
         )}
-        {!compact && activeInfusions.length > 0 && (
-          <div className="flex flex-wrap gap-1">
-            {activeInfusions.map((infusion) => (
+
+        <div className="flex flex-wrap gap-1.5">
+          {activeInfusions.length > 0 ? (
+            activeInfusions.map((infusion) => (
               <span
                 key={infusion.label}
-                className="border border-hairline border-stone-700 px-1.5 py-0.5 text-[8px] uppercase tracking-widest text-stone-400"
+                className="border border-[#c59a5a]/25 bg-[#c59a5a]/8 px-2 py-1 text-[9px] uppercase tracking-[0.22em] text-[#e7cfa0]"
               >
-                {infusion.label} ×{infusion.count}
+                {infusion.label} x{infusion.count}
               </span>
-            ))}
-          </div>
-        )}
-      </div>
-      {onClick && (
-        <div className={cn('pointer-events-none absolute inset-0 border border-hairline opacity-0 transition-opacity duration-500 group-hover:opacity-100', isMythic ? 'border-gold-matte/70' : 'border-stone-600')} />
-      )}
-      {isSelected && (
-        <div className="pointer-events-none absolute inset-0 border border-gold-matte/70" />
-      )}
-      {activeInfusions.length > 0 && (
-        <div className="pointer-events-none absolute inset-0 mix-blend-soft-light">
-          {activeInfusions.slice(0, 2).map((infusion, index) => (
-            <div key={`${infusion.label}-${index}`} className={cn('absolute inset-0 opacity-25', infusion.overlayClass)} />
-          ))}
+            ))
+          ) : (
+            <span className="text-[10px] uppercase tracking-[0.24em] text-stone-600">No infusions</span>
+          )}
         </div>
-      )}
+      </div>
+
+      <div className="pointer-events-none absolute inset-0 border border-transparent group-hover:border-[#c59a5a]/30" />
+      {isSelected && <div className="pointer-events-none absolute inset-0 border border-[#c59a5a]/70" />}
     </div>
   );
-};
+}

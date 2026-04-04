@@ -1,98 +1,25 @@
-import { useEffect, useRef } from 'react';
+import { motion } from 'framer-motion';
 
-export const ParticleBackground = () => {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    interface Particle {
-      x: number;
-      y: number;
-      size: number;
-      speedX: number;
-      speedY: number;
-      opacity: number;
-      update: () => void;
-      draw: () => void;
-    }
-
-    let particles: Particle[] = [];
-    const particleCount = 50;
-
-    const resize = () => {
-      canvas.width = window.innerWidth;
-      canvas.height = window.innerHeight;
-    };
-    
-    window.addEventListener('resize', resize);
-    resize();
-
-    class ParticleImpl implements Particle {
-      x: number;
-      y: number;
-      size: number;
-      speedX: number;
-      speedY: number;
-      opacity: number;
-
-      constructor() {
-        this.x = Math.random() * canvas!.width;
-        this.y = Math.random() * canvas!.height;
-        this.size = Math.random() * 2 + 0.5;
-        this.speedX = Math.random() * 0.5 - 0.25;
-        this.speedY = Math.random() * -0.5 - 0.2; // Float upward
-        this.opacity = Math.random() * 0.5 + 0.1;
-      }
-
-      update() {
-        this.x += this.speedX;
-        this.y += this.speedY;
-
-        if (this.x > canvas!.width) this.x = 0;
-        if (this.x < 0) this.x = canvas!.width;
-        if (this.y < 0) { // Reset to bottom when reaching top
-          this.y = canvas!.height;
-          this.x = Math.random() * canvas!.width;
-        }
-      }
-
-      draw() {
-        if (!ctx) return;
-        ctx.fillStyle = `rgba(234, 179, 8, ${this.opacity})`; // Yellow/Gold
-        ctx.beginPath();
-        ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
-        ctx.fill();
-      }
-    }
-
-    const init = () => {
-      particles = [];
-      for (let i = 0; i < particleCount; i++) {
-        particles.push(new ParticleImpl());
-      }
-    };
-
-    const animate = () => {
-      if (!ctx || !canvas) return;
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      particles.forEach((p) => {
-        p.update();
-        p.draw();
-      });
-      requestAnimationFrame(animate);
-    };
-
-    init();
-    animate();
-
-    return () => {
-      window.removeEventListener('resize', resize);
-    };
-  }, []);
-
-  return <canvas ref={canvasRef} className="fixed inset-0 pointer-events-none z-0 opacity-50" />;
-};
+export function ParticleBackground() {
+  return (
+    <div className="pointer-events-none absolute inset-0 overflow-hidden">
+      <motion.div
+        className="absolute -left-24 top-8 h-72 w-72 rounded-full bg-[#c59a5a]/12 blur-3xl"
+        animate={{ x: [0, 18, 0], y: [0, -10, 0], opacity: [0.18, 0.28, 0.18] }}
+        transition={{ duration: 10, repeat: Infinity, ease: 'easeInOut' }}
+      />
+      <motion.div
+        className="absolute right-10 top-1/4 h-96 w-96 rounded-full bg-violet-500/10 blur-3xl"
+        animate={{ x: [0, -20, 0], opacity: [0.1, 0.22, 0.1] }}
+        transition={{ duration: 12, repeat: Infinity, ease: 'easeInOut' }}
+      />
+      <motion.div
+        className="absolute bottom-0 left-1/3 h-80 w-80 rounded-full bg-cyan-400/8 blur-3xl"
+        animate={{ y: [0, -18, 0], opacity: [0.08, 0.18, 0.08] }}
+        transition={{ duration: 14, repeat: Infinity, ease: 'easeInOut' }}
+      />
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(197,154,90,0.10),transparent_28%),radial-gradient(circle_at_bottom_right,rgba(124,58,237,0.10),transparent_24%)]" />
+      <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.018)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.018)_1px,transparent_1px)] bg-[size:44px_44px] opacity-30" />
+    </div>
+  );
+}

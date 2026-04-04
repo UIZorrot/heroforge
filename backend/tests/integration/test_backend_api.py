@@ -1,0 +1,453 @@
+from __future__ import annotations
+
+import base64
+import copy
+import io
+from typing import Any, Dict
+
+import pytest
+from PIL import Image
+
+import battle_logic
+
+
+def _sample_image_base64(color: tuple[int, int, int] = (180, 120, 60)) -> str:
+    image = Image.new("RGB", (4, 4), color=color)
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    return base64.b64encode(buffer.getvalue()).decode("utf-8")
+
+
+def _hero_pair(name: str, template: str, bp: int, attack_type: str, s1_name: str, s2_name: str) -> Dict[str, Any]:
+    weights = {
+        "HP": 8,
+        "MP": 5,
+        "ATK": 8,
+        "DEF": 6,
+        "CC": 7,
+        "SPEED": 6,
+        "CA": 6,
+        "PI": 5,
+        "EV": 5,
+        "AC": 7,
+        "TYPE": attack_type,
+    }
+    skill = {
+        "s1": {
+            "ROLE": "attack",
+            "IS_PASSIVE": False,
+            "name": s1_name,
+            "description": f"{name} strikes hard.",
+            "TYPE": attack_type,
+            "TARGET": "Enemy",
+            "TARGET_NUM": "1",
+            "RANGE": "melee",
+            "IS_STUN": False,
+            "BUFF_TIME": 2,
+            "BUFF_NAME": "wound",
+            "DMG": 1,
+            "BUFF_HP": 0,
+            "BUFF_MP": 0,
+            "BUFF_DMG": 0,
+            "BUFF_CC": 0,
+            "BUFF_DEF": 0,
+            "BUFF_EV": 0,
+            "BUFF_AC": 0,
+        },
+        "s2": {
+            "ROLE": "buff",
+            "IS_PASSIVE": False,
+            "name": s2_name,
+            "description": f"{name} prepares for the next clash.",
+            "TYPE": attack_type,
+            "TARGET": "Self",
+            "TARGET_NUM": "1",
+            "RANGE": "self",
+            "IS_STUN": False,
+            "BUFF_TIME": 2,
+            "BUFF_NAME": "bless",
+            "DMG": 0,
+            "BUFF_HP": 0,
+            "BUFF_MP": 0,
+            "BUFF_DMG": 1,
+            "BUFF_CC": 0,
+            "BUFF_DEF": 0,
+            "BUFF_EV": 0,
+            "BUFF_AC": 0,
+        },
+    }
+    return {
+        "p1": {
+            "name": name,
+            "description": f"{name} is a forged unit for integration tests.",
+            "extra": f"{template} archetype",
+            "BP": str(bp),
+        },
+        "p2": {
+            "name": name,
+            "description": f"{name} is a forged unit for integration tests.",
+            "BP": str(bp),
+            "template": template,
+            "state_weights": weights,
+            "skill": skill,
+        },
+    }
+
+
+def _board_hero(
+    name: str,
+    *,
+    range_mode: str = "melee",
+    target_num: int = 1,
+    hp: int = 1000,
+    mp: int = 120,
+    atk: int = 60,
+    defense: int = 20,
+    speed: int = 30,
+    accuracy: int = 90,
+    evasion: int = 10,
+) -> Dict[str, Any]:
+    return {
+        "name": name,
+        "description": f"{name} board test hero.",
+        "template": "warrior",
+        "BP": "1000",
+        "state": {
+            "HP": hp,
+            "MP": mp,
+            "ATK": atk,
+            "DEF": defense,
+            "CC": 0,
+            "SPEED": speed,
+            "CA": 0,
+            "PI": 0,
+            "EV": evasion,
+            "AC": accuracy,
+            "TYPE": "weapon",
+        },
+        "skill": {
+            "s1": {
+                "ROLE": "attack",
+                "IS_PASSIVE": False,
+                "name": f"{name} Strike",
+                "description": f"{name} strikes from the board.",
+                "TYPE": "weapon",
+                "TARGET": "Enemy",
+                "TARGET_NUM": str(target_num),
+                "RANGE": range_mode,
+                "IS_STUN": False,
+                "BUFF_TIME": 0,
+                "BUFF_NAME": "wound",
+                "DMG": 1,
+                "BUFF_HP": 0,
+                "BUFF_MP": 0,
+                "BUFF_DMG": 0,
+                "BUFF_CC": 0,
+                "BUFF_DEF": 0,
+                "BUFF_EV": 0,
+                "BUFF_AC": 0,
+            },
+            "s2": {
+                "ROLE": "buff",
+                "IS_PASSIVE": False,
+                "name": f"{name} Guard",
+                "description": f"{name} braces for impact.",
+                "TYPE": "weapon",
+                "TARGET": "Self",
+                "TARGET_NUM": "1",
+                "RANGE": "self",
+                "IS_STUN": False,
+                "BUFF_TIME": 1,
+                "BUFF_NAME": "bless",
+                "DMG": 0,
+                "BUFF_HP": 0,
+                "BUFF_MP": 0,
+                "BUFF_DMG": 1,
+                "BUFF_CC": 0,
+                "BUFF_DEF": 0,
+                "BUFF_EV": 0,
+                "BUFF_AC": 0,
+            },
+        },
+    }
+
+
+@pytest.mark.integration
+def test_auth_login_and_initial_economy(harness):
+    email = "integration-auth@example.com"
+    headers = harness.login(email)
+
+    auth_state = harness.auth_me(headers)
+    assert auth_state["authenticated"] is True
+    assert auth_state["user"]["email"] == email
+
+    economy = harness.economy(headers)
+    assert economy["wallet"]["dust_balance"] == 500
+    assert economy["costs"]["forge"] == 120
+    assert economy["costs"]["repair"] == 60
+    assert economy["costs"]["pve_entry"] == 40
+    assert economy["costs"]["pvp_entry"] == 30
+    assert economy["transactions"] == []
+
+    unauthorized = harness.client.get("/api/me/economy")
+    harness.trace("economy-unauthorized", unauthorized)
+    assert unauthorized.status_code == 401
+
+
+@pytest.mark.integration
+def test_forge_and_battle_persistence(harness):
+    email = "integration-battle@example.com"
+    headers = harness.login(email)
+
+    sequence = [
+        _hero_pair("Northwind", "warrior", 1200, "weapon", "Cleave", "Battle Cry"),
+        _hero_pair("Starfall", "mage", 1100, "magic", "Arc Bolt", "Arcane Ward"),
+    ]
+    harness.set_forge_sequence(sequence)
+
+    image_a = _sample_image_base64((180, 120, 60))
+    image_b = _sample_image_base64((60, 120, 180))
+
+    hero_a = harness.forge(headers, image_a, materials={"glowGem": 1})
+    hero_b = harness.forge(headers, image_b, materials={"emberCore": 2})
+
+    assert hero_a["name"] == "Northwind"
+    assert hero_b["name"] == "Starfall"
+    assert int(hero_a["state"]["HP"]) > 0
+    assert int(hero_b["state"]["HP"]) > 0
+    assert hero_a["generation_id"]
+    assert hero_b["generation_id"]
+
+    economy = harness.economy(headers)
+    assert economy["wallet"]["dust_balance"] == 260
+    assert len(economy["transactions"]) == 2
+
+    hero_rows = harness.heroes(headers)
+    assert len(hero_rows) >= 2
+    hero_ids = {row["hero_payload"]["name"]: row["id"] for row in hero_rows}
+    assert set(hero_ids) >= {"Northwind", "Starfall"}
+
+    battle_a = copy.deepcopy(hero_a)
+    battle_b = copy.deepcopy(hero_b)
+    battle_a["id"] = hero_ids["Northwind"]
+    battle_b["id"] = hero_ids["Starfall"]
+    battle_result = harness.battle(headers, battle_a, battle_b)
+
+    assert battle_result["winner"] in {"Northwind", "Starfall", "Tie"}
+    assert len(battle_result["logs"]) > 0
+
+    battles = harness.battles(headers)
+    assert len(battles) >= 1
+
+    battle_count_row = harness.db_module.fetch_one(
+        "SELECT count(*) AS count FROM battles WHERE user_id = %s",
+        (harness.last_user["id"],),
+    )
+    participants_row = harness.db_module.fetch_one(
+        "SELECT count(*) AS count FROM battle_participants WHERE battle_id = (SELECT id FROM battles WHERE user_id = %s ORDER BY created_at DESC LIMIT 1)",
+        (harness.last_user["id"],),
+    )
+    assert int(battle_count_row["count"]) >= 1
+    assert int(participants_row["count"]) == 2
+
+
+@pytest.mark.integration
+def test_repair_pvp_and_pve_entry_costs(harness):
+    email = "integration-economy@example.com"
+    headers = harness.login(email)
+
+    sequence = [
+        _hero_pair("Gatewarden", "knight", 1000, "weapon", "Shield Bash", "Fortify"),
+    ]
+    harness.set_forge_sequence(sequence)
+    hero = harness.forge(headers, _sample_image_base64((90, 140, 90)), materials={})
+
+    hero_rows = harness.heroes(headers)
+    hero_id = hero_rows[0]["id"]
+
+    repair_result = harness.repair(headers, hero_id)
+    assert repair_result["ok"] is True
+    assert repair_result["economy"]["wallet"]["dust_balance"] == 320
+
+    pvp_result = harness.pvp_entry(headers, queue_key="ranked")
+    assert pvp_result["ok"] is True
+    assert pvp_result["queue_key"] == "ranked"
+    assert pvp_result["economy"]["wallet"]["dust_balance"] == 290
+
+    pve_result = harness.pve_start(headers, [hero_id], theme_key="tower")
+    assert pve_result["ok"] is True
+    assert pve_result["run"]["theme_key"] == "tower"
+    assert pve_result["economy"]["wallet"]["dust_balance"] == 250
+    assert len(pve_result["party"]) == 1
+
+    economy = harness.economy(headers)
+    assert economy["wallet"]["dust_balance"] == 250
+    assert len(economy["transactions"]) >= 4
+
+    resource_row = harness.db_module.fetch_one(
+        "SELECT count(*) AS count FROM resource_transactions WHERE user_id = %s",
+        (harness.last_user["id"],),
+    )
+    pve_row = harness.db_module.fetch_one(
+        "SELECT count(*) AS count FROM pve_runs WHERE user_id = %s",
+        (harness.last_user["id"],),
+    )
+    audit_row = harness.db_module.fetch_one(
+        "SELECT count(*) AS count FROM audit_logs WHERE user_id = %s",
+        (harness.last_user["id"],),
+    )
+    assert int(resource_row["count"]) >= 4
+    assert int(pve_row["count"]) >= 1
+    assert int(audit_row["count"]) >= 2
+
+
+@pytest.mark.integration
+def test_pvp_matchmaking_within_bp_window_and_stake_settlement(harness):
+    email_a = "integration-pvp-a@example.com"
+    email_b = "integration-pvp-b@example.com"
+
+    headers_a = harness.login(email_a)
+    harness.set_forge_sequence([
+        _hero_pair("Aegis", "knight", 1000, "weapon", "Shield Line", "Iron Oath"),
+    ])
+    hero_a = harness.forge(headers_a, _sample_image_base64((140, 100, 60)), materials={})
+    hero_a_id = harness.heroes(headers_a)[0]["id"]
+
+    headers_b = harness.login(email_b)
+    harness.set_forge_sequence([
+        _hero_pair("Blitz", "rogue", 1080, "gun", "Quick Shot", "Smoke Step"),
+    ])
+    hero_b = harness.forge(headers_b, _sample_image_base64((80, 120, 170)), materials={})
+    hero_b_id = harness.heroes(headers_b)[0]["id"]
+
+    join_a = harness.pvp_join(headers_a, [hero_a_id], queue_key="ranked", battle_mode="1v1")
+    assert join_a["status"] == "waiting"
+    assert join_a["entry"]["bp_value"] == 1000
+
+    join_b = harness.pvp_join(headers_b, [hero_b_id], queue_key="ranked", battle_mode="1v1")
+    assert join_b["status"] == "matched"
+    assert join_b["match"]["status"] == "resolved"
+    assert join_b["battle"]["winner"] in {"Aegis", "Blitz", "Tie"}
+    assert join_b["battle"]["winnerLabel"] in {"Player A", "Player B", "Tie"}
+
+    status_a = harness.pvp_entry_status(headers_a, join_a["entry"]["id"])
+    assert status_a["entry"]["status"] == "matched"
+    assert status_a["match"]["status"] == "resolved"
+
+    economy_a = harness.economy(headers_a)
+    economy_b = harness.economy(headers_b)
+    total_dust = economy_a["wallet"]["dust_balance"] + economy_b["wallet"]["dust_balance"]
+    assert total_dust == 760
+
+
+@pytest.mark.integration
+def test_pvp_matchmaking_supports_partial_4v4_rosters(harness):
+    email_a = "integration-pvp-partial-a@example.com"
+    email_b = "integration-pvp-partial-b@example.com"
+
+    headers_a = harness.login(email_a)
+    harness.set_forge_sequence([
+        _hero_pair("Anchor", "knight", 1000, "weapon", "Anchor Slash", "Anchor Guard"),
+        _hero_pair("Spark", "mage", 1000, "magic", "Spark Bolt", "Spark Ward"),
+    ])
+    harness.forge(headers_a, _sample_image_base64((150, 100, 60)), materials={})
+    harness.forge(headers_a, _sample_image_base64((160, 110, 70)), materials={})
+    alpha_ids = [row["id"] for row in harness.heroes(headers_a)[:2]]
+
+    headers_b = harness.login(email_b)
+    harness.set_forge_sequence([
+        _hero_pair("Bastion", "tank", 1000, "weapon", "Bastion Strike", "Bastion Wall"),
+        _hero_pair("Nova", "mage", 1000, "magic", "Nova Burst", "Nova Aegis"),
+    ])
+    harness.forge(headers_b, _sample_image_base64((70, 110, 160)), materials={})
+    harness.forge(headers_b, _sample_image_base64((80, 120, 170)), materials={})
+    beta_ids = [row["id"] for row in harness.heroes(headers_b)[:2]]
+
+    join_a = harness.pvp_join(headers_a, alpha_ids, queue_key="ranked-partial", battle_mode="4v4")
+    assert join_a["status"] == "waiting"
+    assert join_a["entry"]["battle_mode"] == "4v4"
+    assert len(join_a["entry"]["team_snapshot"]["team"]) == 2
+
+    join_b = harness.pvp_join(headers_b, beta_ids, queue_key="ranked-partial", battle_mode="4v4")
+    assert join_b["status"] == "matched"
+    assert join_b["battle"]["winner"] in {"Player A", "Player B", "Tie"}
+    assert join_b["battle"]["board"]["topLabel"] == "Player B"
+    assert join_b["battle"]["board"]["bottomLabel"] == "Player A"
+    assert len(join_b["battle"]["board"]["top"]) == 4
+    assert len(join_b["battle"]["board"]["bottom"]) == 4
+
+
+@pytest.mark.integration
+def test_pvp_matchmaking_rejects_large_bp_gap(harness):
+    email_a = "integration-pvp-gap-a@example.com"
+    email_b = "integration-pvp-gap-b@example.com"
+
+    headers_a = harness.login(email_a)
+    harness.set_forge_sequence([
+        _hero_pair("Anchor", "tank", 1000, "weapon", "Hold Line", "Iron Wall"),
+    ])
+    harness.forge(headers_a, _sample_image_base64((120, 80, 60)), materials={})
+    hero_a_id = harness.heroes(headers_a)[0]["id"]
+
+    headers_b = harness.login(email_b)
+    harness.set_forge_sequence([
+        _hero_pair("Titan", "tank", 1300, "weapon", "Crush", "Fortress"),
+    ])
+    harness.forge(headers_b, _sample_image_base64((60, 80, 140)), materials={})
+    hero_b_id = harness.heroes(headers_b)[0]["id"]
+
+    join_a = harness.pvp_join(headers_a, [hero_a_id], queue_key="ranked-gap", battle_mode="1v1")
+    assert join_a["status"] == "waiting"
+
+    join_b = harness.pvp_join(headers_b, [hero_b_id], queue_key="ranked-gap", battle_mode="1v1")
+    assert join_b["status"] == "waiting"
+
+    status_a = harness.pvp_entry_status(headers_a, join_a["entry"]["id"])
+    assert status_a["entry"]["status"] == "waiting"
+    assert status_a["match"] is None
+
+    economy_a = harness.economy(headers_a)
+    economy_b = harness.economy(headers_b)
+    assert economy_a["wallet"]["dust_balance"] == 350
+    assert economy_b["wallet"]["dust_balance"] == 350
+
+
+@pytest.mark.integration
+def test_4v4_board_snapshot_and_range_targeting(harness):
+    email = "integration-board@example.com"
+    headers = harness.login(email)
+
+    team_a = [
+        _board_hero("Alpha", range_mode="ranged", target_num=2, speed=60, accuracy=95, evasion=20),
+        _board_hero("Bravo", range_mode="melee", target_num=1, speed=50, accuracy=90, evasion=18),
+        _board_hero("Charlie", range_mode="melee", target_num=1, speed=45, accuracy=88, evasion=16),
+        _board_hero("Delta", range_mode="ranged", target_num=2, speed=40, accuracy=85, evasion=14),
+    ]
+    team_b = [
+        _board_hero("Echo", range_mode="melee", target_num=1, speed=58, accuracy=92, evasion=18),
+        _board_hero("Foxtrot", range_mode="melee", target_num=1, speed=52, accuracy=90, evasion=16),
+        _board_hero("Gulf", range_mode="melee", target_num=1, speed=48, accuracy=88, evasion=14),
+        _board_hero("Hotel", range_mode="ranged", target_num=2, speed=42, accuracy=86, evasion=12),
+    ]
+
+    result = harness.battle_team(headers, team_a, team_b, size="4v4")
+    assert result["board"]["riverLabel"].startswith("Round")
+    assert len(result["board"]["top"]) == 4
+    assert len(result["board"]["bottom"]) == 4
+    assert result["board"]["round"] >= 1
+
+    attacker = battle_logic.Battler(_board_hero("LaneBreaker", range_mode="ranged", target_num=1), "A", 0)
+    allies = [attacker]
+    melee_target = battle_logic.Battler(_board_hero("Guard", range_mode="melee"), "B", 0)
+    melee_target.hp = 0
+    adjacent_target = battle_logic.Battler(_board_hero("Flank", range_mode="melee"), "B", 1)
+    far_target = battle_logic.Battler(_board_hero("Rear", range_mode="melee"), "B", 3)
+
+    melee_skill = attacker.character["skill"]["s1"] | {"RANGE": "melee"}
+    ranged_skill = attacker.character["skill"]["s1"] | {"RANGE": "ranged"}
+
+    melee_targets = battle_logic._ordered_board_targets(attacker, allies, [melee_target, adjacent_target, far_target], melee_skill)
+    ranged_targets = battle_logic._ordered_board_targets(attacker, allies, [melee_target, adjacent_target, far_target], ranged_skill)
+
+    assert melee_targets == []
+    assert ranged_targets and ranged_targets[0].tag == "B2"

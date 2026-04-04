@@ -1,0 +1,8 @@
+_backup
+_docs
+backend/__pycache__
+images
+.env
+backend/.env
+backend/.env.local
+backend/test-results
