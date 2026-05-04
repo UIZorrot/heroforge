@@ -140,9 +140,10 @@ PvP should also create Dust rewards through winner-takes-all pool settlement, an
 
 PvP reward direction:
 
-- Arena entry Dust forms a match pool.
+- Arena entry costs 30 Dust per player and forms a match pool.
 - Winning grants the Dust pool.
 - Losing grants no Dust in the first MVP.
+- Tie refunds each player's own 30 Dust entry.
 - Low-tier relics can drop from PvP, especially as daily, weekly, or ladder rewards.
 - PvP should not be the best source of rare relics at the start, because Chronicle needs a strong identity as the main relic source.
 
@@ -295,7 +296,7 @@ Forge consumes Dust -> player receives a new card
 PvE consumes entry cost -> player can earn Dust and relics
 Relics influence Forge -> player can create more directed or flash cards
 PvP consumes risk -> dead cards require Dust revival
-Arena consumes entry Dust -> winner takes the Dust pool
+Arena consumes 30 Dust entry -> winner takes the Dust pool, tie refunds entries
 PvP can reward low-tier relics at a small chance
 Unwanted cards decompose -> player recovers Dust
 Daily sign-in and daily tasks provide reliable Dust income

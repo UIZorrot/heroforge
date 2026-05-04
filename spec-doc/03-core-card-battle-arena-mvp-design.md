@@ -723,7 +723,7 @@ MVP rule:
 - Arena charges Dust entry from both players.
 - Winner takes the Arena Dust pool.
 - Loser receives no Dust from the match.
-- Tie refunds both players or splits the pool evenly; this should be selected before implementation.
+- Tie refunds each player's own Arena entry Dust. No winner pool is paid on tie.
 - Low-tier relic drop chance for winner.
 
 ### 14.3 Anti-Abuse Constraints
@@ -742,14 +742,11 @@ MVP can start conservative: winner Dust plus small relic chance.
 
 Arena MVP entry cost:
 
-- Each player pays Dust to enter the Arena queue.
+- Each player pays 30 Dust to enter the Arena queue.
 - The entry cost goes into the match pool when a match is found.
 - If the queue expires or is cancelled before matching, entry Dust is refunded.
 - If the match resolves, the winner receives the pool.
-
-Suggested first value:
-
-- 30 Dust per Arena entry.
+- If the match resolves as a tie, both players receive a 30 Dust refund.
 
 This value can use the existing backend setting and be tuned later.
 
@@ -933,9 +930,10 @@ These should be resolved before implementation planning:
 Already-decided MVP rules:
 
 - Every 0 HP card in Arena becomes pvp_dead.
-- Arena charges Dust entry.
+- Arena charges 30 Dust entry.
 - Winner takes the Dust pool.
 - Loser receives no Dust from the match.
+- Tie refunds each player's own 30 Dust entry.
 - Revive cost is fixed at 200 Dust.
 - Forge cost defaults to 100 Dust.
 

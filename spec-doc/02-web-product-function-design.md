@@ -1241,7 +1241,7 @@ Initial daily tasks:
 
 - `GET /api/daily/me`
 - `POST /api/daily/sign-in/claim`
-- `POST /api/daily/tasks/<task_id>/claim`
+- `POST /api/daily/tasks/<task_key>/claim`
 
 ### 17.6 Backend Responsibilities
 
@@ -1375,7 +1375,7 @@ The web game client should be considered product-complete for the next major ver
 - Arena matching uses a 5% BP rule.
 - PvP death creates a visible card state and Dust revival path.
 - Unwanted cards can be decomposed into Dust.
-- Arena charges Dust entry and winner takes the Dust pool.
+- Arena charges 30 Dust entry, winner takes the 60 Dust pool, and tie refunds both entries.
 - PvP winner has a small chance to receive a low-tier relic.
 - Daily sign-in and daily tasks provide Dust.
 - Relics can influence future Forge attempts.

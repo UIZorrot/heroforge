@@ -386,6 +386,7 @@ Current uses:
 Current MVP cost anchors:
 
 - Forge a new card: 100 Dust.
+- Enter Arena queue: 30 Dust.
 - Revive a PvP-dead card: 200 Dust.
 
 Future uses:
@@ -410,7 +411,7 @@ Avoid making relics direct stat-upgrade currency in the near term.
 
 ### 11.3 Stake PvP
 
-Arena MVP uses Dust entry and winner-takes-all settlement. Each player pays entry Dust, and the winner receives the pool when the match resolves.
+Arena MVP uses Dust entry and winner-takes-all settlement. Each player pays 30 Dust, and the winner receives the 60 Dust pool when the match resolves. If the match is a tie, both players receive their own 30 Dust entry refund.
 
 Ranked ladder should still not depend entirely on stake. A player should be able to care about rank even when Dust rewards are small.
 
