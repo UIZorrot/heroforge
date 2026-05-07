@@ -1,11 +1,20 @@
 import os
 from dataclasses import dataclass
+from pathlib import Path
 from urllib.parse import quote_plus, urlparse
 
 from dotenv import load_dotenv
 
 
-load_dotenv()
+def _load_environment() -> None:
+    env_path = Path(__file__).resolve().with_name(".env")
+    if env_path.exists():
+        load_dotenv(env_path)
+    else:
+        load_dotenv()
+
+
+_load_environment()
 
 
 @dataclass(frozen=True)
@@ -14,6 +23,7 @@ class Settings:
     gemini_model: str
     port: int
     database_url: str
+    db_schema: str
     resend_api_key: str
     email_from: str
     app_url: str
@@ -23,6 +33,7 @@ class Settings:
     dust_cost_repair: int
     dust_cost_pve_entry: int
     dust_cost_pvp_entry: int
+    dust_cost_pvp_revive: int
     pvp_stake_dust: int
     pvp_match_tolerance_pct: int
     pvp_queue_ttl_minutes: int
@@ -44,6 +55,19 @@ def _build_supabase_database_url() -> str:
     if not raw_url or not password:
         return ""
 
+    if raw_url.startswith(("postgres://", "postgresql://")):
+        scheme, _, remainder = raw_url.partition("://")
+        if "@" not in remainder:
+            return ""
+        credentials, _, host_and_path = remainder.rpartition("@")
+        host_port, _, path = host_and_path.partition("/")
+        if not credentials or not host_port or not path:
+            return ""
+
+        user = credentials.split(":", 1)[0].strip() or os.getenv("SUPABASE_DB_USER", "postgres").strip() or "postgres"
+        db_name = path.split("?", 1)[0].strip() or os.getenv("SUPABASE_DB_NAME", "postgres").strip() or "postgres"
+        return f"{scheme}://{user}:{quote_plus(password)}@{host_port}/{db_name}?sslmode=require"
+
     parsed = urlparse(raw_url)
     host = parsed.hostname or ""
     if not host.endswith("supabase.co"):
@@ -64,16 +88,18 @@ def get_settings() -> Settings:
         gemini_model=os.getenv("GEMINI_MODEL", "gemini-1.5-flash").strip(),
         port=int(os.getenv("PORT", "5544")),
         database_url=database_url,
+        db_schema=os.getenv("DB_SCHEMA", "app").strip() or "app",
         resend_api_key=os.getenv("RESEND_API_KEY", "").strip() or os.getenv("RESEND_API", "").strip(),
         email_from=os.getenv("EMAIL_FROM", "no-reply@txzy.net").strip(),
         app_url=os.getenv("APP_URL", "http://localhost:5173").strip(),
         cors_origins=os.getenv("CORS_ORIGINS", "*").strip(),
         starter_dust_balance=_get_int_env("STARTER_DUST_BALANCE", 500),
-        dust_cost_forge=_get_int_env("DUST_COST_FORGE", 120),
+        dust_cost_forge=_get_int_env("DUST_COST_FORGE", 100),
         dust_cost_repair=_get_int_env("DUST_COST_REPAIR", 60),
         dust_cost_pve_entry=_get_int_env("DUST_COST_PVE_ENTRY", 40),
         dust_cost_pvp_entry=_get_int_env("DUST_COST_PVP_ENTRY", 30),
+        dust_cost_pvp_revive=_get_int_env("DUST_COST_PVP_REVIVE", 200),
         pvp_stake_dust=_get_int_env("PVP_STAKE_DUST", _get_int_env("DUST_COST_PVP_ENTRY", 30)),
-        pvp_match_tolerance_pct=_get_int_env("PVP_MATCH_TOLERANCE_PCT", 10),
+        pvp_match_tolerance_pct=_get_int_env("PVP_MATCH_TOLERANCE_PCT", 5),
         pvp_queue_ttl_minutes=_get_int_env("PVP_QUEUE_TTL_MINUTES", 10),
     )

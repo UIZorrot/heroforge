@@ -30,6 +30,7 @@ Required:
 - `DUST_COST_REPAIR`
 - `DUST_COST_PVE_ENTRY`
 - `DUST_COST_PVP_ENTRY`
+- `DUST_COST_PVP_REVIVE`
 - `PVP_STAKE_DUST`
 - `PVP_MATCH_TOLERANCE_PCT`
 - `PVP_QUEUE_TTL_MINUTES`
@@ -42,6 +43,7 @@ Database:
   - `SUB_PASS`
   - optional `SUPABASE_DB_USER`
   - optional `SUPABASE_DB_NAME`
+- `DB_SCHEMA` defaults to `app`
 
 Example Supabase style:
 
@@ -50,6 +52,7 @@ SUB_URL=https://<project-ref>.supabase.co
 SUB_PASS=your-supabase-db-password
 SUPABASE_DB_USER=postgres
 SUPABASE_DB_NAME=postgres
+DB_SCHEMA=app
 ```
 
 ## Run
@@ -110,6 +113,7 @@ The test suite covers:
 
 - Do not commit real secrets into `.env`.
 - `SUB_URL` and `SUB_PASS` are interpreted as a Supabase Postgres connection.
+- Business tables are created in the configured `DB_SCHEMA` instead of `public`.
 - The numeric generator is rule-based; there is no AI in the final stat calculation.
 
 ## Schema Summary
@@ -140,10 +144,11 @@ Generation and progression tables:
 Recommended environment-backed economy defaults:
 
 - `STARTER_DUST_BALANCE=500`
-- `DUST_COST_FORGE=120`
+- `DUST_COST_FORGE=100`
 - `DUST_COST_REPAIR=60`
 - `DUST_COST_PVE_ENTRY=40`
 - `DUST_COST_PVP_ENTRY=30`
+- `DUST_COST_PVP_REVIVE=200`
 - `PVP_STAKE_DUST=30`
-- `PVP_MATCH_TOLERANCE_PCT=10`
+- `PVP_MATCH_TOLERANCE_PCT=5`
 - `PVP_QUEUE_TTL_MINUTES=10`

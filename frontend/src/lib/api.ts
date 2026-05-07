@@ -2,7 +2,9 @@ import type {
   AuthUser,
   BattleHistoryRecord,
   BattleResult,
+  DailySnapshot,
   EconomySnapshot,
+  ArenaFormation,
   CharacterData,
   HeroHistoryRecord,
   LoginCodeResponse,
@@ -160,6 +162,29 @@ export async function fetchEconomy(token?: string | null): Promise<EconomySnapsh
   return payload.data;
 }
 
+export async function fetchDaily(token?: string | null): Promise<DailySnapshot> {
+  const payload = await requestJson<{ data: DailySnapshot }>('/api/daily/me', { method: 'GET' }, token);
+  return payload.data;
+}
+
+export async function claimDailySignIn(token?: string | null): Promise<DailySnapshot> {
+  const payload = await requestJson<{ data: DailySnapshot }>(
+    '/api/daily/sign-in/claim',
+    { method: 'POST' },
+    token
+  );
+  return payload.data;
+}
+
+export async function claimDailyTask(taskKey: string, token?: string | null): Promise<DailySnapshot> {
+  const payload = await requestJson<{ data: DailySnapshot }>(
+    `/api/daily/tasks/${encodeURIComponent(taskKey)}/claim`,
+    { method: 'POST' },
+    token
+  );
+  return payload.data;
+}
+
 export async function fileToBase64(file: File): Promise<string> {
   return await new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -231,6 +256,21 @@ export async function joinPvpQueue(
   );
 }
 
+export async function joinArenaQueue(
+  formation: ArenaFormation,
+  queueKey = 'ranked',
+  token?: string | null
+): Promise<PvpJoinResponse> {
+  return await requestJson<PvpJoinResponse>(
+    '/api/pvp/join',
+    {
+      method: 'POST',
+      body: JSON.stringify({ mode: 'arena_2x3', queueKey, formation }),
+    },
+    token
+  );
+}
+
 export async function fetchPvpEntryStatus(entryId: string, token?: string | null): Promise<PvpEntryStatusResponse> {
   return await requestJson<PvpEntryStatusResponse>(
     `/api/pvp/entries/${entryId}`,
@@ -246,6 +286,14 @@ export async function cancelPvpEntry(entryId: string, token?: string | null): Pr
       method: 'POST',
       body: JSON.stringify({ entryId }),
     },
+    token
+  );
+}
+
+export async function reviveCard(cardId: string, token?: string | null): Promise<{ ok: true; card: HeroHistoryRecord; economy: EconomySnapshot }> {
+  return await requestJson<{ ok: true; card: HeroHistoryRecord; economy: EconomySnapshot }>(
+    `/api/cards/${cardId}/revive`,
+    { method: 'POST' },
     token
   );
 }

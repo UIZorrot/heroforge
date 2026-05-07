@@ -287,6 +287,7 @@ def _apply_test_env(database_url: str) -> None:
             "DATABASE_URL": database_url,
             "SUB_URL": "",
             "SUB_PASS": "",
+            "DB_SCHEMA": "app",
             "GEMINI_API_KEY": "test-gemini-key",
             "GEMINI_MODEL": "gemini-test",
             "RESEND_API_KEY": "test-resend-key",
@@ -294,12 +295,13 @@ def _apply_test_env(database_url: str) -> None:
             "APP_URL": "http://localhost:5173",
             "CORS_ORIGINS": "*",
             "STARTER_DUST_BALANCE": "500",
-            "DUST_COST_FORGE": "120",
+            "DUST_COST_FORGE": "100",
             "DUST_COST_REPAIR": "60",
             "DUST_COST_PVE_ENTRY": "40",
             "DUST_COST_PVP_ENTRY": "30",
+            "DUST_COST_PVP_REVIVE": "200",
             "PVP_STAKE_DUST": "30",
-            "PVP_MATCH_TOLERANCE_PCT": "10",
+            "PVP_MATCH_TOLERANCE_PCT": "5",
             "PVP_QUEUE_TTL_MINUTES": "10",
         }
     )

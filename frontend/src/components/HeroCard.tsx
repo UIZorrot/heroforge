@@ -9,6 +9,8 @@ interface HeroCardProps {
   className?: string;
   onClick?: () => void;
   isSelected?: boolean;
+  statusLabel?: string;
+  disabled?: boolean;
   compact?: boolean;
   infusions?: Array<{
     label: string;
@@ -43,6 +45,8 @@ export function HeroCard({
   className,
   onClick,
   isSelected,
+  statusLabel,
+  disabled,
   compact = false,
   infusions = [],
 }: HeroCardProps) {
@@ -72,8 +76,9 @@ export function HeroCard({
       className={cn(
         'group relative overflow-hidden border bg-[#090909] text-left transition duration-300',
         rarity.border,
+        disabled ? 'opacity-55 grayscale-[0.35]' : '',
         isSelected ? 'scale-[1.01] border-[#c59a5a]/70 shadow-[0_0_0_1px_rgba(197,154,90,0.25)]' : 'hover:-translate-y-1 hover:border-stone-600',
-        onClick ? 'cursor-pointer' : '',
+        onClick && !disabled ? 'cursor-pointer' : '',
         className
       )}
     >
@@ -86,6 +91,11 @@ export function HeroCard({
           <span className="border border-white/10 bg-black/60 px-2 py-0.5 text-[9px] uppercase tracking-[0.28em] text-stone-300">
             {typeLabel[typeKey]}
           </span>
+          {statusLabel && (
+            <span className="border border-rose-300/30 bg-rose-400/15 px-2 py-0.5 text-[9px] uppercase tracking-[0.24em] text-rose-100">
+              {statusLabel}
+            </span>
+          )}
         </div>
         <div className="absolute right-3 top-3 text-right">
           <div className="text-2xl font-light tracking-[0.12em] text-stone-100">{character.BP}</div>
@@ -137,6 +147,7 @@ export function HeroCard({
 
       <div className="pointer-events-none absolute inset-0 border border-transparent group-hover:border-[#c59a5a]/30" />
       {isSelected && <div className="pointer-events-none absolute inset-0 border border-[#c59a5a]/70" />}
+      {disabled && <div className="pointer-events-none absolute inset-0 bg-black/20" />}
     </div>
   );
 }

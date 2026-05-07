@@ -8,7 +8,6 @@ from datetime import datetime, timezone
 from uuid import UUID
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-from dotenv import load_dotenv
 from PIL import Image
 import io
 from pydantic.warnings import PydanticDeprecatedSince212
@@ -32,6 +31,7 @@ from db import (
     get_recent_resource_transactions,
     get_user_relics,
     get_user_wallet,
+    ensure_user_wallet,
     initialize_schema,
     serialize_json,
 )
@@ -39,13 +39,10 @@ from utils import extract_json
 from game_logic import adjust_based_on_bp
 from battle_logic import run_auto_duel, run_team_duel
 
-load_dotenv()
-
 settings = get_settings()
 
 app = Flask(__name__)
-cors_origins = "*" if settings.cors_origins == "*" else [origin.strip() for origin in settings.cors_origins.split(",") if origin.strip()]
-CORS(app, resources={r"/api/*": {"origins": cors_origins}})
+CORS(app, resources={r"/api/*": {"origins": "*"}})
 
 try:
     initialize_schema()
@@ -638,6 +635,7 @@ def economy_snapshot(user):
             "repair": settings.dust_cost_repair,
             "pve_entry": settings.dust_cost_pve_entry,
             "pvp_entry": settings.dust_cost_pvp_entry,
+            "pvp_revive": settings.dust_cost_pvp_revive,
             "pvp_stake": settings.pvp_stake_dust,
         },
         "starter": {
@@ -650,13 +648,188 @@ def economy_snapshot(user):
     }
 
 
+DAILY_SIGN_IN_REWARD_DUST = 30
+DAILY_TASKS = {
+    "forge_one_card": {
+        "title": "Forge one card",
+        "description": "Create one new card in the Forge.",
+        "target": 1,
+        "reward_dust": 20,
+    },
+    "enter_arena_once": {
+        "title": "Enter Arena",
+        "description": "Stake Dust and enter Arena matchmaking once.",
+        "target": 1,
+        "reward_dust": 20,
+    },
+    "win_arena_once": {
+        "title": "Win Arena",
+        "description": "Win one Arena match.",
+        "target": 1,
+        "reward_dust": 30,
+    },
+    "revive_once": {
+        "title": "Revive a card",
+        "description": "Revive one PvP-dead card.",
+        "target": 1,
+        "reward_dust": 25,
+    },
+}
+
+
+def _daily_date_iso():
+    return datetime.now(timezone.utc).date().isoformat()
+
+
+def _ensure_daily_task_rows(user_id):
+    task_date = _daily_date_iso()
+    rows = []
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            for key, config in DAILY_TASKS.items():
+                cur.execute(
+                    """
+                    INSERT INTO daily_task_progress (
+                        user_id, task_date, task_key, target, reward_dust
+                    )
+                    VALUES (%s, %s, %s, %s, %s)
+                    ON CONFLICT (user_id, task_date, task_key) DO UPDATE
+                    SET target = EXCLUDED.target,
+                        reward_dust = EXCLUDED.reward_dust,
+                        updated_at = now()
+                    RETURNING id, user_id, task_date, task_key, progress, target,
+                              reward_dust, claimed_at, created_at, updated_at
+                    """,
+                    (
+                        user_id,
+                        task_date,
+                        key,
+                        int(config["target"]),
+                        int(config["reward_dust"]),
+                    ),
+                )
+                rows.append(cur.fetchone())
+        conn.commit()
+    return rows
+
+
+def _daily_task_payload(row):
+    config = DAILY_TASKS.get(row["task_key"], {})
+    progress = int(row["progress"])
+    target = int(row["target"])
+    claimed = row.get("claimed_at") is not None
+    return {
+        "id": str(row["id"]),
+        "key": row["task_key"],
+        "title": config.get("title", row["task_key"]),
+        "description": config.get("description", ""),
+        "task_date": str(row["task_date"]),
+        "progress": progress,
+        "target": target,
+        "reward_dust": int(row["reward_dust"]),
+        "claimed": claimed,
+        "claimable": progress >= target and not claimed,
+        "claimed_at": row["claimed_at"].isoformat() if row.get("claimed_at") else None,
+    }
+
+
+def daily_snapshot(user):
+    task_date = _daily_date_iso()
+    checkin = fetch_one(
+        """
+        SELECT id, user_id, claim_date, reward_dust, created_at
+        FROM daily_checkins
+        WHERE user_id = %s AND claim_date = %s
+        """,
+        (user["id"], task_date),
+    )
+    tasks = [_daily_task_payload(row) for row in _ensure_daily_task_rows(user["id"])]
+    tasks.sort(key=lambda item: list(DAILY_TASKS).index(item["key"]) if item["key"] in DAILY_TASKS else 999)
+    return {
+        "date": task_date,
+        "checkin": {
+            "claimed": checkin is not None,
+            "claim_date": str(checkin["claim_date"]) if checkin else task_date,
+            "reward_dust": int(checkin["reward_dust"]) if checkin else DAILY_SIGN_IN_REWARD_DUST,
+            "claimed_at": checkin["created_at"].isoformat() if checkin else None,
+        },
+        "tasks": tasks,
+        "economy": economy_snapshot(user),
+    }
+
+
+def _record_daily_task_progress(user_id, task_key, amount=1):
+    if task_key not in DAILY_TASKS:
+        return None
+    task_date = _daily_date_iso()
+    config = DAILY_TASKS[task_key]
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO daily_task_progress (
+                    user_id, task_date, task_key, progress, target, reward_dust
+                )
+                VALUES (%s, %s, %s, %s, %s, %s)
+                ON CONFLICT (user_id, task_date, task_key) DO UPDATE
+                SET progress = LEAST(daily_task_progress.target, daily_task_progress.progress + EXCLUDED.progress),
+                    target = EXCLUDED.target,
+                    reward_dust = EXCLUDED.reward_dust,
+                    updated_at = now()
+                RETURNING id, user_id, task_date, task_key, progress, target,
+                          reward_dust, claimed_at, created_at, updated_at
+                """,
+                (
+                    user_id,
+                    task_date,
+                    task_key,
+                    max(1, int(amount)),
+                    int(config["target"]),
+                    int(config["reward_dust"]),
+                ),
+            )
+            row = cur.fetchone()
+        conn.commit()
+    return row
+
+
+def _safe_record_daily_task_progress(user_id, task_key, amount=1):
+    try:
+        return _record_daily_task_progress(user_id, task_key, amount=amount)
+    except Exception:
+        logging.exception("Failed to record daily task progress: %s", task_key)
+        return None
+
+
 def _normalize_pvp_queue_key(value):
     return (value or "default").strip() or "default"
 
 
+ARENA_SLOT_KEYS = ("front_0", "front_1", "front_2", "back_0", "back_1", "back_2")
+
+
+def _normalize_arena_formation(value):
+    if not isinstance(value, dict):
+        raise ValueError("Arena formation is required")
+
+    formation = {}
+    for slot in ARENA_SLOT_KEYS:
+        raw_hero_id = value.get(slot)
+        hero_id = str(raw_hero_id).strip() if raw_hero_id else None
+        formation[slot] = hero_id or None
+
+    hero_ids = [hero_id for hero_id in formation.values() if hero_id]
+    if not (1 <= len(hero_ids) <= 4):
+        raise ValueError("Place 1 to 4 active cards")
+    if len(set(hero_ids)) != len(hero_ids):
+        raise ValueError("A card can only occupy one Arena slot")
+
+    return formation, hero_ids
+
+
 def _normalize_pvp_battle_mode(value, hero_count: int | None = None):
     mode = (value or "").strip()
-    if mode in {"1v1", "4v4"}:
+    if mode in {"1v1", "4v4", "arena_2x3"}:
         return mode
     if hero_count is not None and 1 < hero_count <= 4:
         return "4v4"
@@ -664,7 +837,7 @@ def _normalize_pvp_battle_mode(value, hero_count: int | None = None):
 
 
 def _pvp_required_team_size(battle_mode: str) -> int:
-    return 4 if battle_mode == "4v4" else 1
+    return 4 if battle_mode in {"4v4", "arena_2x3"} else 1
 
 
 def _hero_bp(hero_payload):
@@ -674,9 +847,9 @@ def _hero_bp(hero_payload):
         return 0
 
 
-def _load_pvp_team_snapshot(user, hero_ids, battle_mode: str):
+def _load_pvp_team_snapshot(user, hero_ids, battle_mode: str, formation=None):
     required_size = _pvp_required_team_size(battle_mode)
-    if battle_mode == "4v4":
+    if battle_mode in {"4v4", "arena_2x3"}:
         if not (1 <= len(hero_ids) <= required_size):
             raise ValueError(f"{battle_mode} requires between 1 and {required_size} heroes")
     elif len(hero_ids) != required_size:
@@ -685,7 +858,7 @@ def _load_pvp_team_snapshot(user, hero_ids, battle_mode: str):
     placeholders = ",".join(["%s"] * len(hero_ids))
     hero_rows = fetch_all(
         f"""
-        SELECT id, hero_payload, created_at
+        SELECT id, hero_payload, pvp_life_state, card_status, active_pvp_entry_id, created_at
         FROM heroes
         WHERE user_id = %s AND id IN ({placeholders})
         """,
@@ -699,11 +872,22 @@ def _load_pvp_team_snapshot(user, hero_ids, battle_mode: str):
     total_bp = 0
     for hero_id in hero_ids:
         row = hero_map[hero_id]
+        if row.get("pvp_life_state") != "active":
+            raise ValueError("This card is dead. Revive it before Arena.")
+        if row.get("card_status") != "active":
+            raise ValueError("This card is not available for Arena.")
+        if row.get("active_pvp_entry_id"):
+            raise ValueError("This card is already queued.")
+
         hero_payload = normalize_json_value(row["hero_payload"])
         total_bp += _hero_bp(hero_payload)
+        slot_key = None
+        if isinstance(formation, dict):
+            slot_key = next((slot for slot, placed_id in formation.items() if placed_id == hero_id), None)
         team_snapshot.append(
             {
                 "id": hero_id,
+                "slot_key": slot_key,
                 "hero_payload": hero_payload,
                 "created_at": row["created_at"].isoformat() if hasattr(row["created_at"], "isoformat") else row["created_at"],
             }
@@ -723,12 +907,135 @@ def _build_pvp_battle_payload(match_row, entry_a, entry_b):
     }
 
 
+def _pvp_entry_hero_ids(entry):
+    snapshot = entry.get("team_snapshot") if isinstance(entry, dict) else None
+    if not isinstance(snapshot, dict):
+        return []
+    hero_ids = snapshot.get("hero_ids")
+    if isinstance(hero_ids, list):
+        return [str(hero_id) for hero_id in hero_ids if str(hero_id).strip()]
+    team = snapshot.get("team")
+    if isinstance(team, list):
+        return [str(item.get("id")) for item in team if isinstance(item, dict) and item.get("id")]
+    return []
+
+
+def _clear_pvp_entry_card_locks_with_cursor(cur, entry):
+    hero_ids = _pvp_entry_hero_ids(entry)
+    entry_id = entry.get("id") if isinstance(entry, dict) else None
+    if not hero_ids or not entry_id:
+        return
+    placeholders = ",".join(["%s"] * len(hero_ids))
+    cur.execute(
+        f"""
+        UPDATE heroes
+        SET active_pvp_entry_id = NULL
+        WHERE id IN ({placeholders})
+          AND active_pvp_entry_id = %s
+        """,
+        (*hero_ids, entry_id),
+    )
+
+
+def _clear_pvp_entry_card_locks(entry):
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            _clear_pvp_entry_card_locks_with_cursor(cur, entry)
+        conn.commit()
+
+
+def _defeated_units_from_board(battle_result, team_a, team_b):
+    board = battle_result.get("board") if isinstance(battle_result, dict) else None
+    if not isinstance(board, dict):
+        return {"A": [], "B": []}
+
+    defeated = {"A": [], "B": []}
+    for side, board_key, team in (("A", "bottom", team_a), ("B", "top", team_b)):
+        units = board.get(board_key) or []
+        if not isinstance(units, list):
+            continue
+        for unit in units:
+            if not isinstance(unit, dict):
+                continue
+            try:
+                hp_after = int(unit.get("hp", 0))
+                slot_index = int(unit.get("slot", 0))
+            except Exception:
+                continue
+            if hp_after > 0 or slot_index < 0 or slot_index >= len(team):
+                continue
+            team_item = team[slot_index]
+            defeated[side].append(
+                {
+                    "hero_id": team_item.get("id"),
+                    "slot_key": team_item.get("slot_key") or str(unit.get("slot", slot_index)),
+                    "hp_after": hp_after,
+                }
+            )
+    return defeated
+
+
+def _apply_arena_card_deaths(match_id, user_id, side, defeated_units):
+    changes = []
+    if not defeated_units:
+        return changes
+
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            for unit in defeated_units:
+                hero_id = unit.get("hero_id")
+                if not hero_id:
+                    continue
+                cur.execute(
+                    """
+                    UPDATE heroes
+                    SET pvp_life_state = 'pvp_dead',
+                        pvp_dead_at = now(),
+                        active_pvp_entry_id = NULL
+                    WHERE id = %s
+                      AND user_id = %s
+                      AND pvp_life_state = 'active'
+                      AND card_status = 'active'
+                    RETURNING id, pvp_life_state, pvp_dead_at
+                    """,
+                    (hero_id, user_id),
+                )
+                row = cur.fetchone()
+                if not row:
+                    continue
+                cur.execute(
+                    """
+                    INSERT INTO card_death_records (
+                        hero_id, user_id, mode, source_type, source_id, side,
+                        slot_key, hp_after, death_state
+                    )
+                    VALUES (%s, %s, 'pvp', 'pvp_match', %s, %s, %s, %s, 'pvp_dead')
+                    """,
+                    (hero_id, user_id, match_id, side, unit.get("slot_key"), int(unit.get("hp_after", 0))),
+                )
+                changes.append(
+                    {
+                        "id": str(row["id"]),
+                        "pvp_life_state": row["pvp_life_state"],
+                        "pvp_dead_at": row["pvp_dead_at"].isoformat() if hasattr(row["pvp_dead_at"], "isoformat") else row["pvp_dead_at"],
+                        "side": side,
+                        "slot_key": unit.get("slot_key"),
+                    }
+                )
+        conn.commit()
+    return changes
+
+
 def _resolve_pvp_match(match_row, entry_a, entry_b, battle_result):
     winner_label = str(battle_result.get("winnerLabel") or battle_result.get("winner") or "Tie")
     battle_mode = match_row["battle_mode"]
     battle_payload = _build_pvp_battle_payload(match_row, entry_a, entry_b)
     team_a = entry_a["team_snapshot"].get("team", []) if isinstance(entry_a.get("team_snapshot"), dict) else []
     team_b = entry_b["team_snapshot"].get("team", []) if isinstance(entry_b.get("team_snapshot"), dict) else []
+    defeated_units = _defeated_units_from_board(battle_result, team_a, team_b)
+    card_state_changes = []
+    card_state_changes.extend(_apply_arena_card_deaths(match_row["id"], str(match_row["user_a_id"]), "A", defeated_units["A"]))
+    card_state_changes.extend(_apply_arena_card_deaths(match_row["id"], str(match_row["user_b_id"]), "B", defeated_units["B"]))
 
     battle_row_a = save_battle_history(
         {"id": str(match_row["user_a_id"])},
@@ -776,6 +1083,16 @@ def _resolve_pvp_match(match_row, entry_a, entry_b, battle_result):
         )
         winner_user_id = None
         winner_side = "Tie"
+        reward_payload = {
+            "entry_cost": int(match_row["stake_dust"]),
+            "dust_pool": int(match_row["stake_dust"]) * 2,
+            "winner_side": "Tie",
+            "winner_user_id": None,
+            "tie_refund": True,
+            "payout_dust": 0,
+            "refund_dust_each": int(match_row["stake_dust"]),
+            "relic_drop": None,
+        }
     else:
         winner_side = "A" if winner_label == "Player A" else ("B" if winner_label == "Player B" else "Tie")
         winner_user_id = str(match_row["user_a_id"]) if winner_side == "A" else str(match_row["user_b_id"]) if winner_side == "B" else None
@@ -788,6 +1105,16 @@ def _resolve_pvp_match(match_row, entry_a, entry_b, battle_result):
                 ref_id=str(match_row["id"]),
                 metadata={"winner_side": winner_side, "battle_mode": battle_mode},
             )
+        reward_payload = {
+            "entry_cost": int(match_row["stake_dust"]),
+            "dust_pool": int(match_row["stake_dust"]) * 2,
+            "winner_side": winner_side,
+            "winner_user_id": winner_user_id,
+            "tie_refund": False,
+            "payout_dust": int(match_row["stake_dust"]) * 2 if winner_user_id else 0,
+            "refund_dust_each": 0,
+            "relic_drop": None,
+        }
 
     with get_connection() as conn:
         with conn.cursor() as cur:
@@ -797,6 +1124,8 @@ def _resolve_pvp_match(match_row, entry_a, entry_b, battle_result):
                 SET status = 'resolved',
                     battle_payload = %s::jsonb,
                     battle_result = %s::jsonb,
+                    reward_payload = %s::jsonb,
+                    card_state_changes = %s::jsonb,
                     battle_id = %s,
                     winner_user_id = %s,
                     winner_side = %s,
@@ -806,6 +1135,8 @@ def _resolve_pvp_match(match_row, entry_a, entry_b, battle_result):
                 (
                     serialize_json(battle_payload),
                     serialize_json(battle_result),
+                    serialize_json(reward_payload),
+                    serialize_json(card_state_changes),
                     str(battle_row_a["id"]) if battle_row_a else None,
                     winner_user_id,
                     winner_side,
@@ -822,7 +1153,12 @@ def _resolve_pvp_match(match_row, entry_a, entry_b, battle_result):
                 """,
                 (match_row["id"], match_row["entry_a_id"], match_row["entry_b_id"]),
             )
+            _clear_pvp_entry_card_locks_with_cursor(cur, entry_a)
+            _clear_pvp_entry_card_locks_with_cursor(cur, entry_b)
         conn.commit()
+
+    if winner_user_id:
+        _safe_record_daily_task_progress(winner_user_id, "win_arena_once")
 
     return {
         "battle": normalize_json_value(battle_result),
@@ -830,13 +1166,23 @@ def _resolve_pvp_match(match_row, entry_a, entry_b, battle_result):
         "battleRowB": normalize_json_value(battle_row_b) if battle_row_b else None,
         "winner_user_id": winner_user_id,
         "winner_side": winner_side,
+        "reward_payload": reward_payload,
+        "card_state_changes": card_state_changes,
     }
 
 
 def _join_pvp_queue(user, data, require_team_payload: bool = False):
     queue_key = _normalize_pvp_queue_key(data.get("queueKey") or data.get("queue_key"))
-    hero_ids = data.get("heroIds") or data.get("hero_ids") or []
-    battle_mode = _normalize_pvp_battle_mode(data.get("battleMode") or data.get("battle_mode"), len(hero_ids) if isinstance(hero_ids, list) else None)
+    formation_snapshot = {}
+    mode = data.get("mode") or data.get("battleMode") or data.get("battle_mode")
+    if mode == "arena_2x3" or isinstance(data.get("formation"), dict):
+        formation, hero_ids = _normalize_arena_formation(data.get("formation"))
+        formation_snapshot = {"mode": "arena_2x3", "board": formation}
+        battle_mode = "arena_2x3"
+    else:
+        hero_ids = data.get("heroIds") or data.get("hero_ids") or []
+        battle_mode = _normalize_pvp_battle_mode(data.get("battleMode") or data.get("battle_mode"), len(hero_ids) if isinstance(hero_ids, list) else None)
+        formation = None
 
     if not isinstance(hero_ids, list):
         raise ValueError("heroIds must be an array")
@@ -848,7 +1194,9 @@ def _join_pvp_queue(user, data, require_team_payload: bool = False):
     if not hero_ids:
         return None
 
-    team_snapshot, total_bp = _load_pvp_team_snapshot(user, hero_ids, battle_mode)
+    team_snapshot, total_bp = _load_pvp_team_snapshot(user, hero_ids, battle_mode, formation=formation)
+    if total_bp <= 0:
+        raise ValueError("Arena team BP must be greater than 0")
     stake_dust = settings.pvp_stake_dust
 
     stake_row = adjust_dust_balance(
@@ -856,7 +1204,7 @@ def _join_pvp_queue(user, data, require_team_payload: bool = False):
         -stake_dust,
         "pvp_stake",
         ref_type="pvp_queue",
-        metadata={"queue_key": queue_key, "battle_mode": battle_mode, "hero_ids": hero_ids, "bp_value": total_bp},
+            metadata={"queue_key": queue_key, "battle_mode": battle_mode, "hero_ids": hero_ids, "bp_value": total_bp, "formation": formation_snapshot},
     )
 
     queue_entry = None
@@ -870,10 +1218,10 @@ def _join_pvp_queue(user, data, require_team_payload: bool = False):
             cur.execute(
                 """
                 INSERT INTO pvp_queue_entries (
-                    user_id, queue_key, battle_mode, stake_dust, bp_value, team_snapshot, expires_at
+                    user_id, queue_key, battle_mode, stake_dust, bp_value, team_snapshot, formation_snapshot, expires_at
                 )
-                VALUES (%s, %s, %s, %s, %s, %s::jsonb, now() + (%s || ' minutes')::interval)
-                RETURNING id, user_id, queue_key, battle_mode, stake_dust, bp_value, status, team_snapshot, opponent_entry_id, match_id, expires_at, matched_at, cancelled_at, created_at
+                VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, now() + (%s || ' minutes')::interval)
+                RETURNING id, user_id, queue_key, battle_mode, stake_dust, bp_value, status, team_snapshot, formation_snapshot, opponent_entry_id, match_id, expires_at, matched_at, cancelled_at, created_at
                 """,
                 (
                     user["id"],
@@ -882,21 +1230,37 @@ def _join_pvp_queue(user, data, require_team_payload: bool = False):
                     int(stake_dust),
                     int(total_bp),
                     serialize_json({"hero_ids": hero_ids, "team": team_snapshot, "total_bp": total_bp}),
+                    serialize_json(formation_snapshot),
                     settings.pvp_queue_ttl_minutes,
                 ),
             )
             queue_entry = cur.fetchone()
+            lock_placeholders = ",".join(["%s"] * len(hero_ids))
+            cur.execute(
+                f"""
+                UPDATE heroes
+                SET active_pvp_entry_id = %s
+                WHERE user_id = %s
+                  AND id IN ({lock_placeholders})
+                  AND active_pvp_entry_id IS NULL
+                RETURNING id
+                """,
+                (queue_entry["id"], user["id"], *hero_ids),
+            )
+            locked_rows = cur.fetchall()
+            if len(locked_rows) != len(hero_ids):
+                raise ValueError("This card is already queued.")
 
             cur.execute(
                 """
-                SELECT id, user_id, queue_key, battle_mode, stake_dust, bp_value, status, team_snapshot, opponent_entry_id, match_id, expires_at, matched_at, cancelled_at, created_at
+                SELECT id, user_id, queue_key, battle_mode, stake_dust, bp_value, status, team_snapshot, formation_snapshot, opponent_entry_id, match_id, expires_at, matched_at, cancelled_at, created_at
                 FROM pvp_queue_entries
                 WHERE queue_key = %s
                   AND battle_mode = %s
                   AND status = 'waiting'
                   AND user_id <> %s
                   AND expires_at > now()
-                  AND ABS(bp_value - %s) <= GREATEST(bp_value, %s) * (%s / 100.0)
+                  AND ABS(bp_value - %s) <= LEAST(bp_value, %s) * (%s / 100.0)
                 ORDER BY ABS(bp_value - %s) ASC, created_at ASC
                 FOR UPDATE SKIP LOCKED
                 LIMIT 1
@@ -939,14 +1303,14 @@ def _join_pvp_queue(user, data, require_team_payload: bool = False):
                     INSERT INTO pvp_matches (
                         queue_key, battle_mode, entry_a_id, entry_b_id,
                         user_a_id, user_b_id, stake_dust, bp_a, bp_b, bp_gap_pct,
-                        status, battle_payload
+                        status, battle_payload, formation_a, formation_b
                     )
                     VALUES (
                         %s, %s, %s, %s,
                         %s, %s, %s, %s, %s, %s,
-                        'created', %s::jsonb
+                        'created', %s::jsonb, %s::jsonb, %s::jsonb
                     )
-                    RETURNING id, queue_key, battle_mode, entry_a_id, entry_b_id, user_a_id, user_b_id, stake_dust, bp_a, bp_b, bp_gap_pct, status, battle_payload, battle_result, battle_id, winner_user_id, winner_side, created_at, resolved_at
+                    RETURNING id, queue_key, battle_mode, entry_a_id, entry_b_id, user_a_id, user_b_id, stake_dust, bp_a, bp_b, bp_gap_pct, status, battle_payload, battle_result, formation_a, formation_b, reward_payload, card_state_changes, battle_id, winner_user_id, winner_side, created_at, resolved_at
                     """,
                     (
                         queue_key,
@@ -958,7 +1322,7 @@ def _join_pvp_queue(user, data, require_team_payload: bool = False):
                         int(stake_dust),
                         int(opponent_entry["bp_value"]),
                         int(queue_entry["bp_value"]),
-                        round(abs(int(opponent_entry["bp_value"]) - int(queue_entry["bp_value"])) / max(int(opponent_entry["bp_value"]), int(queue_entry["bp_value"]), 1) * 100, 2),
+                        round(abs(int(opponent_entry["bp_value"]) - int(queue_entry["bp_value"])) / max(min(int(opponent_entry["bp_value"]), int(queue_entry["bp_value"])), 1) * 100, 2),
                         serialize_json(
                             {
                                 "queue_key": queue_key,
@@ -966,10 +1330,14 @@ def _join_pvp_queue(user, data, require_team_payload: bool = False):
                                 "tolerance_pct": tolerance_pct,
                             }
                         ),
+                        serialize_json(normalize_json_value(opponent_entry.get("formation_snapshot") or {})),
+                        serialize_json(normalize_json_value(queue_entry.get("formation_snapshot") or {})),
                     ),
                 )
                 match_row = cur.fetchone()
         conn.commit()
+
+    _safe_record_daily_task_progress(user["id"], "enter_arena_once")
 
     if not match_row:
         return {
@@ -999,7 +1367,10 @@ def _join_pvp_queue(user, data, require_team_payload: bool = False):
         resolved = _resolve_pvp_match(match_row, entry_a, entry_b, battle_result)
         updated_match_row = fetch_one(
             """
-            SELECT id, queue_key, battle_mode, entry_a_id, entry_b_id, user_a_id, user_b_id, stake_dust, bp_a, bp_b, bp_gap_pct, status, battle_payload, battle_result, battle_id, winner_user_id, winner_side, created_at, resolved_at
+            SELECT id, queue_key, battle_mode, entry_a_id, entry_b_id, user_a_id, user_b_id,
+                   stake_dust, bp_a, bp_b, bp_gap_pct, status, battle_payload, battle_result,
+                   formation_a, formation_b, reward_payload, card_state_changes,
+                   battle_id, winner_user_id, winner_side, created_at, resolved_at
             FROM pvp_matches
             WHERE id = %s
             """,
@@ -1022,6 +1393,8 @@ def _join_pvp_queue(user, data, require_team_payload: bool = False):
             "battle_record_a": normalize_json_value(resolved["battleRowA"]) if resolved["battleRowA"] else None,
             "battle_record_b": normalize_json_value(resolved["battleRowB"]) if resolved["battleRowB"] else None,
             "battle_payload": battle_payload,
+            "reward": normalize_json_value(resolved["reward_payload"]),
+            "card_state_changes": normalize_json_value(resolved["card_state_changes"]),
             "economy": economy_snapshot(user),
             "winner_side": resolved["winner_side"],
         }
@@ -1077,6 +1450,8 @@ def _join_pvp_queue(user, data, require_team_payload: bool = False):
                     """,
                     (queue_entry["id"], opponent_entry["id"]),
                 )
+                _clear_pvp_entry_card_locks_with_cursor(cur, queue_entry)
+                _clear_pvp_entry_card_locks_with_cursor(cur, opponent_entry)
             conn.commit()
         raise
 
@@ -1132,6 +1507,105 @@ def auth_logout():
 def me_economy():
     user = current_user()
     return jsonify({"data": economy_snapshot(user)})
+
+
+@app.route("/api/daily/me", methods=["GET"])
+@auth_required
+def daily_me():
+    user = current_user()
+    return jsonify({"ok": True, "data": daily_snapshot(user)})
+
+
+@app.route("/api/daily/sign-in/claim", methods=["POST"])
+@auth_required
+def daily_sign_in_claim():
+    user = current_user()
+    task_date = _daily_date_iso()
+    try:
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO daily_checkins (user_id, claim_date, reward_dust)
+                    VALUES (%s, %s, %s)
+                    ON CONFLICT (user_id, claim_date) DO NOTHING
+                    RETURNING id
+                    """,
+                    (user["id"], task_date, DAILY_SIGN_IN_REWARD_DUST),
+                )
+                row = cur.fetchone()
+                if not row:
+                    return jsonify({"error": "Daily sign-in already claimed"}), 400
+            conn.commit()
+
+        adjust_dust_balance(
+            user["id"],
+            DAILY_SIGN_IN_REWARD_DUST,
+            "daily_sign_in",
+            ref_type="daily_checkin",
+            ref_id=str(row["id"]),
+            metadata={"claim_date": task_date},
+        )
+        return jsonify({"ok": True, "data": daily_snapshot(user)})
+    except Exception as exc:
+        logging.exception("daily_sign_in_claim failed")
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/api/daily/tasks/<task_key>/claim", methods=["POST"])
+@auth_required
+def daily_task_claim(task_key):
+    user = current_user()
+    if task_key not in DAILY_TASKS:
+        return jsonify({"error": "Unknown daily task"}), 404
+
+    try:
+        task_date = _daily_date_iso()
+        _ensure_daily_task_rows(user["id"])
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT id, progress, target, reward_dust, claimed_at
+                    FROM daily_task_progress
+                    WHERE user_id = %s AND task_date = %s AND task_key = %s
+                    FOR UPDATE
+                    """,
+                    (user["id"], task_date, task_key),
+                )
+                row = cur.fetchone()
+                if not row:
+                    return jsonify({"error": "Daily task not found"}), 404
+                if row["claimed_at"] is not None:
+                    return jsonify({"error": "Daily task already claimed"}), 400
+                if int(row["progress"]) < int(row["target"]):
+                    return jsonify({"error": "Daily task not complete"}), 400
+
+                cur.execute(
+                    """
+                    UPDATE daily_task_progress
+                    SET claimed_at = now(),
+                        updated_at = now()
+                    WHERE id = %s
+                    RETURNING id, reward_dust
+                    """,
+                    (row["id"],),
+                )
+                claimed = cur.fetchone()
+            conn.commit()
+
+        adjust_dust_balance(
+            user["id"],
+            int(claimed["reward_dust"]),
+            "daily_task_reward",
+            ref_type="daily_task_progress",
+            ref_id=str(claimed["id"]),
+            metadata={"task_key": task_key, "task_date": task_date},
+        )
+        return jsonify({"ok": True, "data": daily_snapshot(user)})
+    except Exception as exc:
+        logging.exception("daily_task_claim failed")
+        return jsonify({"error": str(exc)}), 500
 
 
 @app.route("/api/health", methods=["GET"])
@@ -1202,6 +1676,7 @@ def forge():
             status="completed",
         )
         save_hero_history(user, p2_input, final_hero)
+        _safe_record_daily_task_progress(user["id"], "forge_one_card")
 
         response = dict(final_hero)
         response["generation_id"] = str(generation_row["id"]) if generation_row else None
@@ -1504,6 +1979,8 @@ def pvp_join():
         if result is None:
             return jsonify({"error": "heroIds are required for PvP matchmaking"}), 400
         return jsonify(result)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
     except Exception as e:
         logging.exception(e)
         return jsonify({"error": str(e)}), 500
@@ -1515,7 +1992,8 @@ def pvp_entry_status(entry_id):
     user = current_user()
     entry = fetch_one(
         """
-        SELECT id, user_id, queue_key, battle_mode, stake_dust, bp_value, status, team_snapshot, opponent_entry_id, match_id, expires_at, matched_at, cancelled_at, created_at
+        SELECT id, user_id, queue_key, battle_mode, stake_dust, bp_value, status, team_snapshot,
+               formation_snapshot, opponent_entry_id, match_id, expires_at, matched_at, cancelled_at, created_at
         FROM pvp_queue_entries
         WHERE id = %s AND user_id = %s
         """,
@@ -1550,12 +2028,16 @@ def pvp_entry_status(entry_id):
                 """,
                 (entry["id"],),
             )
+            _clear_pvp_entry_card_locks(entry)
             entry["status"] = "expired"
             entry["cancelled_at"] = datetime.now(timezone.utc).isoformat()
 
     match = fetch_one(
         """
-        SELECT id, queue_key, battle_mode, entry_a_id, entry_b_id, user_a_id, user_b_id, stake_dust, bp_a, bp_b, bp_gap_pct, status, battle_payload, battle_result, battle_id, winner_user_id, winner_side, created_at, resolved_at
+        SELECT id, queue_key, battle_mode, entry_a_id, entry_b_id, user_a_id, user_b_id,
+               stake_dust, bp_a, bp_b, bp_gap_pct, status, battle_payload, battle_result,
+               formation_a, formation_b, reward_payload, card_state_changes,
+               battle_id, winner_user_id, winner_side, created_at, resolved_at
         FROM pvp_matches
         WHERE entry_a_id = %s OR entry_b_id = %s
         ORDER BY created_at DESC
@@ -1580,7 +2062,8 @@ def pvp_cancel():
 
         entry = fetch_one(
             """
-            SELECT id, user_id, queue_key, battle_mode, stake_dust, bp_value, status, team_snapshot, opponent_entry_id, match_id, expires_at, matched_at, cancelled_at, created_at
+            SELECT id, user_id, queue_key, battle_mode, stake_dust, bp_value, status, team_snapshot,
+                   formation_snapshot, opponent_entry_id, match_id, expires_at, matched_at, cancelled_at, created_at
             FROM pvp_queue_entries
             WHERE id = %s AND user_id = %s
             """,
@@ -1608,7 +2091,117 @@ def pvp_cancel():
             """,
             (entry["id"],),
         )
-        return jsonify({"ok": True, "entry": normalize_json_value({**entry, "status": "cancelled"})})
+        _clear_pvp_entry_card_locks(entry)
+        return jsonify({"ok": True, "entry": normalize_json_value({**entry, "status": "cancelled"}), "economy": economy_snapshot(user)})
+    except Exception as e:
+        logging.exception(e)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/cards/<card_id>/revive", methods=["POST"])
+@auth_required
+def revive_card(card_id):
+    user = current_user()
+    try:
+        UUID(str(card_id))
+    except Exception:
+        return jsonify({"error": "Invalid card id"}), 400
+
+    try:
+        ensure_user_wallet(user["id"])
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT id, user_id, hero_payload, pvp_life_state, pve_life_state,
+                           card_status, locked_reason, pvp_dead_at, decomposed_at,
+                           active_pvp_entry_id, created_at
+                    FROM heroes
+                    WHERE id = %s AND user_id = %s
+                    FOR UPDATE
+                    """,
+                    (card_id, user["id"]),
+                )
+                hero = cur.fetchone()
+                if not hero:
+                    return jsonify({"error": "Card not found"}), 404
+                if hero["pvp_life_state"] != "pvp_dead":
+                    return jsonify({"error": "Only pvp_dead cards can be revived"}), 400
+                if hero["card_status"] != "active":
+                    return jsonify({"error": "Only active cards can be revived"}), 400
+
+                cur.execute(
+                    """
+                    SELECT dust_balance
+                    FROM user_wallets
+                    WHERE user_id = %s
+                    FOR UPDATE
+                    """,
+                    (user["id"],),
+                )
+                wallet = cur.fetchone()
+                current_balance = int(wallet["dust_balance"] if wallet else 0)
+                next_balance = current_balance - int(settings.dust_cost_pvp_revive)
+                if next_balance < 0:
+                    return jsonify({"error": "Insufficient dust"}), 400
+
+                cur.execute(
+                    """
+                    UPDATE user_wallets
+                    SET dust_balance = %s, updated_at = now()
+                    WHERE user_id = %s
+                    """,
+                    (next_balance, user["id"]),
+                )
+                cur.execute(
+                    """
+                    INSERT INTO resource_transactions (
+                        user_id, resource_type, delta, balance_after, reason, ref_type, ref_id, metadata
+                    )
+                    VALUES (%s, 'dust', %s, %s, 'pvp_revive', 'hero', %s, %s::jsonb)
+                    """,
+                    (
+                        user["id"],
+                        -int(settings.dust_cost_pvp_revive),
+                        next_balance,
+                        card_id,
+                        serialize_json({"cost": settings.dust_cost_pvp_revive}),
+                    ),
+                )
+                cur.execute(
+                    """
+                    UPDATE heroes
+                    SET pvp_life_state = 'active',
+                        pvp_dead_at = NULL
+                    WHERE id = %s AND user_id = %s
+                    RETURNING id, hero_payload, pvp_life_state, pve_life_state, card_status,
+                              locked_reason, pvp_dead_at, decomposed_at, active_pvp_entry_id, created_at
+                    """,
+                    (card_id, user["id"]),
+                )
+                revived = cur.fetchone()
+                cur.execute(
+                    """
+                    UPDATE card_death_records
+                    SET revived_at = now()
+                    WHERE id = (
+                        SELECT id
+                        FROM card_death_records
+                        WHERE hero_id = %s
+                          AND user_id = %s
+                          AND mode = 'pvp'
+                          AND death_state = 'pvp_dead'
+                          AND revived_at IS NULL
+                        ORDER BY created_at DESC
+                        LIMIT 1
+                    )
+                    """,
+                    (card_id, user["id"]),
+                )
+            conn.commit()
+
+        _safe_record_daily_task_progress(user["id"], "revive_once")
+        return jsonify({"ok": True, "card": normalize_json_value(revived), "economy": economy_snapshot(user)})
     except Exception as e:
         logging.exception(e)
         return jsonify({"error": str(e)}), 500
@@ -1620,7 +2213,8 @@ def list_my_heroes():
     user = current_user()
     rows = fetch_all(
         """
-        SELECT id, hero_payload, created_at
+        SELECT id, hero_payload, pvp_life_state, pve_life_state, card_status,
+               locked_reason, pvp_dead_at, decomposed_at, active_pvp_entry_id, created_at
         FROM heroes
         WHERE user_id = %s
         ORDER BY created_at DESC

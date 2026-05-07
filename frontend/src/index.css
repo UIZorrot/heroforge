@@ -1,17 +1,22 @@
-@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700;900&family=Orbitron:wght@400;500;600;700;900&family=Inter:wght@300;400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;500;600;700;800&family=Cormorant+Garamond:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Manrope:wght@300;400;500;600;700;800&display=swap');
 @import "tailwindcss";
 
 @layer base {
   body {
     @apply bg-[#080808] text-stone-200 antialiased;
-    font-family: Inter, sans-serif;
+    font-family: Manrope, sans-serif;
     background-image: 
-      radial-gradient(ellipse at 30% 40%, rgba(40, 30, 20, 0.15) 0%, transparent 50%),
-      radial-gradient(ellipse at 70% 60%, rgba(30, 25, 20, 0.12) 0%, transparent 50%);
+      radial-gradient(ellipse at 18% 22%, rgba(40, 30, 20, 0.18) 0%, transparent 46%),
+      radial-gradient(ellipse at 78% 28%, rgba(40, 30, 80, 0.12) 0%, transparent 42%),
+      radial-gradient(ellipse at 72% 76%, rgba(30, 50, 35, 0.10) 0%, transparent 38%);
   }
   
   h1, h2, h3, h4, h5, h6 {
-    font-family: Cinzel, serif;
+    font-family: 'Cormorant Garamond', serif;
+  }
+
+  .font-logo {
+    font-family: 'Cinzel', serif;
   }
 }
 

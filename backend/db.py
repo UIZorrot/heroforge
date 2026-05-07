@@ -4,6 +4,7 @@ from functools import lru_cache
 from typing import Any, Dict, Iterable, Optional
 
 import psycopg
+from psycopg import sql
 from psycopg.rows import dict_row
 
 from config import get_settings
@@ -51,10 +52,22 @@ CREATE TABLE IF NOT EXISTS heroes (
     user_id uuid REFERENCES users(id) ON DELETE SET NULL,
     source_payload jsonb NOT NULL,
     hero_payload jsonb NOT NULL,
-    created_at timestamptz NOT NULL DEFAULT now()
+    pvp_life_state text NOT NULL DEFAULT 'active',
+    pve_life_state text NOT NULL DEFAULT 'active',
+    card_status text NOT NULL DEFAULT 'active',
+    locked_reason text,
+    pvp_dead_at timestamptz,
+    decomposed_at timestamptz,
+    active_pvp_entry_id uuid,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    CHECK (pvp_life_state IN ('active', 'pvp_dead')),
+    CHECK (pve_life_state IN ('active', 'pve_injured')),
+    CHECK (card_status IN ('active', 'locked', 'decomposed'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_heroes_user_id_created_at ON heroes(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_heroes_user_pvp_life_state ON heroes(user_id, pvp_life_state);
+CREATE INDEX IF NOT EXISTS idx_heroes_active_pvp_entry ON heroes(active_pvp_entry_id);
 
 CREATE TABLE IF NOT EXISTS battles (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -206,6 +219,7 @@ CREATE TABLE IF NOT EXISTS pvp_queue_entries (
     bp_value integer NOT NULL DEFAULT 0,
     status text NOT NULL DEFAULT 'waiting',
     team_snapshot jsonb NOT NULL DEFAULT '{}'::jsonb,
+    formation_snapshot jsonb NOT NULL DEFAULT '{}'::jsonb,
     opponent_entry_id uuid REFERENCES pvp_queue_entries(id) ON DELETE SET NULL,
     match_id uuid,
     expires_at timestamptz NOT NULL DEFAULT (now() + interval '10 minutes'),
@@ -215,7 +229,7 @@ CREATE TABLE IF NOT EXISTS pvp_queue_entries (
     CHECK (stake_dust >= 0),
     CHECK (bp_value >= 0),
     CHECK (status IN ('waiting', 'matched', 'cancelled', 'expired')),
-    CHECK (battle_mode IN ('1v1', '4v4'))
+    CHECK (battle_mode IN ('1v1', '4v4', 'arena_2x3'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_pvp_queue_entries_lookup ON pvp_queue_entries(queue_key, battle_mode, status, bp_value, created_at DESC);
@@ -236,6 +250,10 @@ CREATE TABLE IF NOT EXISTS pvp_matches (
     status text NOT NULL DEFAULT 'resolved',
     battle_payload jsonb NOT NULL DEFAULT '{}'::jsonb,
     battle_result jsonb NOT NULL DEFAULT '{}'::jsonb,
+    formation_a jsonb NOT NULL DEFAULT '{}'::jsonb,
+    formation_b jsonb NOT NULL DEFAULT '{}'::jsonb,
+    reward_payload jsonb NOT NULL DEFAULT '{}'::jsonb,
+    card_state_changes jsonb NOT NULL DEFAULT '[]'::jsonb,
     battle_id uuid REFERENCES battles(id) ON DELETE SET NULL,
     winner_user_id uuid REFERENCES users(id) ON DELETE SET NULL,
     winner_side text,
@@ -248,6 +266,87 @@ CREATE TABLE IF NOT EXISTS pvp_matches (
 CREATE INDEX IF NOT EXISTS idx_pvp_matches_queue_created_at ON pvp_matches(queue_key, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_pvp_matches_user_a_created_at ON pvp_matches(user_a_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_pvp_matches_user_b_created_at ON pvp_matches(user_b_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS card_death_records (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    hero_id uuid NOT NULL REFERENCES heroes(id) ON DELETE CASCADE,
+    user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    mode text NOT NULL,
+    source_type text NOT NULL,
+    source_id uuid,
+    side text,
+    slot_key text,
+    hp_before integer,
+    hp_after integer,
+    death_state text NOT NULL,
+    revived_at timestamptz,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    CHECK (mode IN ('pvp', 'pve')),
+    CHECK (death_state IN ('pvp_dead', 'pve_injured'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_card_death_records_user_created_at ON card_death_records(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_card_death_records_hero_created_at ON card_death_records(hero_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS daily_checkins (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    claim_date date NOT NULL,
+    reward_dust bigint NOT NULL DEFAULT 0,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (user_id, claim_date),
+    CHECK (reward_dust >= 0)
+);
+
+CREATE INDEX IF NOT EXISTS idx_daily_checkins_user_date ON daily_checkins(user_id, claim_date DESC);
+
+CREATE TABLE IF NOT EXISTS daily_task_progress (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    task_date date NOT NULL,
+    task_key text NOT NULL,
+    progress integer NOT NULL DEFAULT 0,
+    target integer NOT NULL DEFAULT 1,
+    reward_dust bigint NOT NULL DEFAULT 0,
+    claimed_at timestamptz,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (user_id, task_date, task_key),
+    CHECK (progress >= 0),
+    CHECK (target > 0),
+    CHECK (reward_dust >= 0)
+);
+
+CREATE INDEX IF NOT EXISTS idx_daily_task_progress_user_date ON daily_task_progress(user_id, task_date DESC);
+
+ALTER TABLE heroes ADD COLUMN IF NOT EXISTS pvp_life_state text NOT NULL DEFAULT 'active';
+ALTER TABLE heroes ADD COLUMN IF NOT EXISTS pve_life_state text NOT NULL DEFAULT 'active';
+ALTER TABLE heroes ADD COLUMN IF NOT EXISTS card_status text NOT NULL DEFAULT 'active';
+ALTER TABLE heroes ADD COLUMN IF NOT EXISTS locked_reason text;
+ALTER TABLE heroes ADD COLUMN IF NOT EXISTS pvp_dead_at timestamptz;
+ALTER TABLE heroes ADD COLUMN IF NOT EXISTS decomposed_at timestamptz;
+ALTER TABLE heroes ADD COLUMN IF NOT EXISTS active_pvp_entry_id uuid;
+ALTER TABLE pvp_queue_entries ADD COLUMN IF NOT EXISTS formation_snapshot jsonb NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE pvp_matches ADD COLUMN IF NOT EXISTS formation_a jsonb NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE pvp_matches ADD COLUMN IF NOT EXISTS formation_b jsonb NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE pvp_matches ADD COLUMN IF NOT EXISTS reward_payload jsonb NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE pvp_matches ADD COLUMN IF NOT EXISTS card_state_changes jsonb NOT NULL DEFAULT '[]'::jsonb;
+
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'pvp_queue_entries_battle_mode_check'
+          AND conrelid = 'pvp_queue_entries'::regclass
+    ) THEN
+        ALTER TABLE pvp_queue_entries DROP CONSTRAINT pvp_queue_entries_battle_mode_check;
+    END IF;
+
+    ALTER TABLE pvp_queue_entries
+    ADD CONSTRAINT pvp_queue_entries_battle_mode_check
+    CHECK (battle_mode IN ('1v1', '4v4', 'arena_2x3'));
+END $$;
 """
 
 
@@ -256,16 +355,33 @@ def get_database_url() -> str:
     return get_settings().database_url
 
 
+def get_database_schema() -> str:
+    return get_settings().db_schema
+
+
+def _set_search_path(conn) -> None:
+    schema = get_database_schema()
+    with conn.cursor() as cur:
+        cur.execute(sql.SQL("SET search_path TO {}, public").format(sql.Identifier(schema)))
+
+
 def _connect():
     database_url = get_database_url()
     if not database_url:
-        raise RuntimeError("DATABASE_URL or SUB_URL/SUB_PASS is not configured")
-    return psycopg.connect(database_url, row_factory=dict_row)
+        raise RuntimeError(
+            "DATABASE_URL is not configured and SUB_URL/SUB_PASS could not be converted into a database URL"
+        )
+    conn = psycopg.connect(database_url, row_factory=dict_row)
+    _set_search_path(conn)
+    return conn
 
 
 def initialize_schema() -> None:
     with _connect() as conn:
         with conn.cursor() as cur:
+            schema = get_database_schema()
+            cur.execute(sql.SQL("CREATE SCHEMA IF NOT EXISTS {}").format(sql.Identifier(schema)))
+            cur.execute(sql.SQL("SET search_path TO {}, public").format(sql.Identifier(schema)))
             cur.execute(SCHEMA_SQL)
         conn.commit()
 

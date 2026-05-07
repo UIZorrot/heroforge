@@ -4,10 +4,10 @@ import { CheckCircle2, Clock3, RefreshCw, Search, Swords, Trash2, Zap } from 'lu
 import { BattleVisualizer } from './BattleVisualizer';
 import { EmptyState, MetricCard, SectionHeader, StatPill, StatusPill } from './Effects';
 import { HeroCard } from './HeroCard';
-import { cancelPvpEntry, fetchPvpEntryStatus, getStoredToken, joinPvpQueue } from '../lib/api';
+import { cancelPvpEntry, fetchPvpEntryStatus, getStoredToken, joinArenaQueue, reviveCard } from '../lib/api';
 import { cn } from '../lib/utils';
 import { toNumber } from '../lib/gameLogic';
-import type { BattleResult, EconomySnapshot, PvpMatchRecord, PvpQueueEntry, SavedHero } from '../types';
+import type { ArenaFormation, ArenaSlotKey, BattleResult, EconomySnapshot, PvpMatchRecord, PvpQueueEntry, SavedHero } from '../types';
 
 type StoredArenaState = {
   selectedHeroIds: string[];
@@ -18,6 +18,11 @@ type StoredArenaState = {
 const STORAGE_KEY = 'hf.pvp.arena.v1';
 const DEFAULT_QUEUE_KEY = 'ranked';
 const MAX_TEAM_SIZE = 4;
+const ARENA_ROWS: Array<{ label: string; slots: ArenaSlotKey[] }> = [
+  { label: 'Front', slots: ['front_0', 'front_1', 'front_2'] },
+  { label: 'Back', slots: ['back_0', 'back_1', 'back_2'] },
+];
+const ARENA_SLOT_ORDER: ArenaSlotKey[] = ['front_0', 'front_1', 'front_2', 'back_0', 'back_1', 'back_2'];
 
 function readStoredArenaState(): StoredArenaState | null {
   if (typeof window === 'undefined') return null;
@@ -62,6 +67,17 @@ function rankHeroes(heroes: SavedHero[]) {
   return [...heroes].sort((a, b) => heroTotalBp(b) - heroTotalBp(a));
 }
 
+function isArenaEligible(hero: SavedHero) {
+  return hero.pvpLifeState !== 'pvp_dead' && hero.cardStatus !== 'decomposed' && !hero.activePvpEntryId;
+}
+
+function buildArenaFormation(heroIds: string[]): ArenaFormation {
+  return ARENA_SLOT_ORDER.reduce((formation, slot, index) => {
+    formation[slot] = heroIds[index] ?? null;
+    return formation;
+  }, {} as ArenaFormation);
+}
+
 function resolveBattleResult(match?: PvpMatchRecord | null, battle?: BattleResult | null) {
   return battle ?? match?.battle_result ?? null;
 }
@@ -82,6 +98,7 @@ export function PvpArena({ heroes, economy, token, onRefresh }: PvpArenaProps) {
   const [matchRecord, setMatchRecord] = useState<PvpMatchRecord | null>(null);
   const [battleResult, setBattleResult] = useState<BattleResult | null>(null);
   const [busy, setBusy] = useState(false);
+  const [revivingHeroId, setRevivingHeroId] = useState<string | null>(null);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [now, setNow] = useState(Date.now());
@@ -97,14 +114,15 @@ export function PvpArena({ heroes, economy, token, onRefresh }: PvpArenaProps) {
     if (initializedRef.current || !heroes.length) return;
     initializedRef.current = true;
     const stored = readStoredArenaState();
+    const eligibleHeroes = heroes.filter(isArenaEligible);
     if (stored) {
-      const validIds = stored.selectedHeroIds.filter((id) => heroes.some((hero) => hero.id === id)).slice(0, MAX_TEAM_SIZE);
-      setSelectedHeroIds(validIds.length > 0 ? validIds : rankHeroes(heroes).slice(0, MAX_TEAM_SIZE).map((hero) => hero.id));
+      const validIds = stored.selectedHeroIds.filter((id) => eligibleHeroes.some((hero) => hero.id === id)).slice(0, MAX_TEAM_SIZE);
+      setSelectedHeroIds(validIds.length > 0 ? validIds : rankHeroes(eligibleHeroes).slice(0, MAX_TEAM_SIZE).map((hero) => hero.id));
       setQueueKey(stored.queueKey || DEFAULT_QUEUE_KEY);
       setResumeEntryId(stored.resumeEntryId);
       return;
     }
-    setSelectedHeroIds(rankHeroes(heroes).slice(0, MAX_TEAM_SIZE).map((hero) => hero.id));
+    setSelectedHeroIds(rankHeroes(eligibleHeroes).slice(0, MAX_TEAM_SIZE).map((hero) => hero.id));
   }, [heroes]);
 
   useEffect(() => {
@@ -133,17 +151,22 @@ export function PvpArena({ heroes, economy, token, onRefresh }: PvpArenaProps) {
     () => selectedHeroIds.map((id) => heroes.find((hero) => hero.id === id)).filter((hero): hero is SavedHero => Boolean(hero)),
     [heroes, selectedHeroIds]
   );
+  const arenaFormation = useMemo(() => buildArenaFormation(selectedHeroIds), [selectedHeroIds]);
 
   const totalBp = useMemo(() => selectedHeroes.reduce((sum, hero) => sum + heroTotalBp(hero), 0), [selectedHeroes]);
   const tolerancePct = economy?.pvp.match_tolerance_pct ?? 10;
   const stakeDust = economy?.costs.pvp_stake ?? economy?.costs.pvp_entry ?? 30;
-  const lowerBp = totalBp > 0 ? Math.floor(totalBp * (1 - tolerancePct / 100)) : 0;
-  const upperBp = totalBp > 0 ? Math.ceil(totalBp * (1 + tolerancePct / 100)) : 0;
-  const queueReady = selectedHeroes.length > 0 && selectedHeroes.length <= MAX_TEAM_SIZE && !busy;
+  const reviveDust = economy?.costs.pvp_revive ?? 200;
+  const walletDust = economy?.wallet?.dust_balance ?? economy?.starter.dust_balance ?? 0;
+  const lowerBp = totalBp > 0 ? Math.ceil(totalBp / (1 + tolerancePct / 100)) : 0;
+  const upperBp = totalBp > 0 ? Math.floor(totalBp * (1 + tolerancePct / 100)) : 0;
+  const selectedHeroesEligible = selectedHeroes.every(isArenaEligible);
+  const queueReady = selectedHeroes.length > 0 && selectedHeroes.length <= MAX_TEAM_SIZE && selectedHeroesEligible && walletDust >= stakeDust && !busy;
   const waiting = queueEntry?.status === 'waiting';
   const matchResolved = Boolean(battleResult);
   const queueCountdown = formatCountdown(queueEntry?.expires_at, now);
   const activeTeamNames = selectedHeroes.map((hero) => hero.character.name);
+  const deadHeroes = heroes.filter((hero) => hero.pvpLifeState === 'pvp_dead');
 
   const clearQueueArtifacts = () => {
     setQueueEntry(null);
@@ -170,6 +193,11 @@ export function PvpArena({ heroes, economy, token, onRefresh }: PvpArenaProps) {
       setError('Cancel the current queue before changing your lineup.');
       return;
     }
+    const hero = heroes.find((item) => item.id === heroId);
+    if (hero && !isArenaEligible(hero)) {
+      setError(hero.pvpLifeState === 'pvp_dead' ? 'This card is dead. Revive it before Arena.' : 'This card is not available for Arena.');
+      return;
+    }
     setError('');
     setMessage('');
     setSelectedHeroIds((current) => {
@@ -190,21 +218,29 @@ export function PvpArena({ heroes, economy, token, onRefresh }: PvpArenaProps) {
       return;
     }
     if (!queueReady) {
-      setError('Choose between 1 and 4 heroes first.');
+      if (selectedHeroes.length === 0 || selectedHeroes.length > MAX_TEAM_SIZE) {
+        setError('Choose between 1 and 4 heroes first.');
+      } else if (!selectedHeroesEligible) {
+        setError('Every deployed card must be active before entering Arena.');
+      } else if (walletDust < stakeDust) {
+        setError(`Need ${stakeDust} Dust to enter Arena.`);
+      } else {
+        setError('Arena lineup is not ready.');
+      }
       return;
     }
     setBusy(true);
     setError('');
     setMessage('');
     try {
-      const response = await joinPvpQueue(selectedHeroIds, '4v4', queueKey, currentToken);
+      const response = await joinArenaQueue(arenaFormation, queueKey, currentToken);
       setQueueEntry(response.entry);
       setMatchRecord(response.match ?? null);
       const battle = resolveBattleResult(response.match, response.battle);
       setBattleResult(battle);
       setResumeEntryId(response.status === 'waiting' ? response.entry.id : null);
       if (response.status === 'waiting') {
-        setMessage('Queued. Waiting for a rival within the 10% BP window.');
+        setMessage(`Queued. Waiting for a rival within the ${tolerancePct}% BP window.`);
         try {
           await onRefresh();
         } catch {
@@ -217,6 +253,29 @@ export function PvpArena({ heroes, economy, token, onRefresh }: PvpArenaProps) {
       setError(err instanceof Error ? err.message : 'Failed to join PvP queue');
     } finally {
       setBusy(false);
+    }
+  };
+
+  const handleRevive = async (heroId: string) => {
+    if (!currentToken) {
+      setError('Please login first.');
+      return;
+    }
+    if (walletDust < reviveDust) {
+      setError(`Need ${reviveDust} Dust to revive this card.`);
+      return;
+    }
+    setRevivingHeroId(heroId);
+    setError('');
+    setMessage('');
+    try {
+      await reviveCard(heroId, currentToken);
+      setMessage(`Card revived for ${reviveDust} Dust.`);
+      await onRefresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to revive card');
+    } finally {
+      setRevivingHeroId(null);
     }
   };
 
@@ -310,13 +369,13 @@ export function PvpArena({ heroes, economy, token, onRefresh }: PvpArenaProps) {
         <SectionHeader
           eyebrow="Arena"
           title="Ranked PvP"
-          description="This is the formal battle lobby. Bring up to 4 heroes, enter the queue, and fight only opponents within a 10% total BP window."
+          description="This is the formal battle lobby. Bring up to 4 heroes, place them into a 2 by 3 formation, and fight only opponents inside the 5% BP window."
         />
         <div className="flex flex-wrap items-center gap-2">
           <StatusPill tone={waiting ? 'amber' : matchResolved ? 'emerald' : 'slate'}>
             {waiting ? 'Waiting' : matchResolved ? 'Resolved' : 'Idle'}
           </StatusPill>
-          <StatusPill tone="gold">4v4 board</StatusPill>
+          <StatusPill tone="gold">2x3 board</StatusPill>
           <StatusPill tone="violet">Dust stake {stakeDust}</StatusPill>
         </div>
       </div>
@@ -343,7 +402,7 @@ export function PvpArena({ heroes, economy, token, onRefresh }: PvpArenaProps) {
           <div className="grid gap-4 2xl:grid-cols-[1.1fr_0.9fr]">
             <div className="space-y-4">
               <div className="flex items-center justify-between gap-3">
-                <SectionHeader eyebrow="Vault" title="Select your roster" description="Click cards to toggle them into the ranked lineup. You can only queue with 1-4 heroes." />
+                <SectionHeader eyebrow="Vault" title="Select your roster" description="Click cards to place them into the Arena formation. MVP fills slots front-left to back-right." />
                 <div className="flex items-center gap-2 border border-stone-800 bg-black/35 px-3 py-2">
                   <Search size={14} className="text-stone-500" />
                   <input
@@ -357,19 +416,36 @@ export function PvpArena({ heroes, economy, token, onRefresh }: PvpArenaProps) {
 
               {filteredHeroes.length > 0 ? (
                 <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                  {filteredHeroes.map((hero) => (
-                    <HeroCard
-                      key={hero.id}
-                      character={hero.character}
-                      compact
-                      className={cn(
-                        'min-h-[340px]',
-                        selectedHeroIds.includes(hero.id) && 'ring-1 ring-[#c59a5a]/60 shadow-[0_0_0_1px_rgba(197,154,90,0.25)]'
-                      )}
-                      isSelected={selectedHeroIds.includes(hero.id)}
-                      onClick={waiting ? undefined : () => handleToggleHero(hero.id)}
-                    />
-                  ))}
+                  {filteredHeroes.map((hero) => {
+                    const dead = hero.pvpLifeState === 'pvp_dead';
+                    const eligible = isArenaEligible(hero);
+                    return (
+                      <div key={hero.id} className="space-y-2">
+                        <HeroCard
+                          character={hero.character}
+                          compact
+                          disabled={!eligible}
+                          statusLabel={dead ? 'Dead' : !eligible ? 'Locked' : undefined}
+                          className={cn(
+                            'min-h-[340px]',
+                            selectedHeroIds.includes(hero.id) && 'ring-1 ring-[#c59a5a]/60 shadow-[0_0_0_1px_rgba(197,154,90,0.25)]'
+                          )}
+                          isSelected={selectedHeroIds.includes(hero.id)}
+                          onClick={waiting ? undefined : () => handleToggleHero(hero.id)}
+                        />
+                        {dead && (
+                          <button
+                            type="button"
+                            onClick={() => handleRevive(hero.id)}
+                            disabled={revivingHeroId === hero.id || walletDust < reviveDust}
+                            className="w-full border border-emerald-400/25 bg-emerald-400/10 px-3 py-2 text-[10px] uppercase tracking-[0.24em] text-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {revivingHeroId === hero.id ? 'Reviving...' : `Revive for ${reviveDust} Dust`}
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               ) : (
                 <EmptyState
@@ -384,11 +460,38 @@ export function PvpArena({ heroes, economy, token, onRefresh }: PvpArenaProps) {
                 <div className="flex items-center justify-between">
                   <div>
                     <div className="text-[10px] uppercase tracking-[0.28em] text-stone-500">Lineup</div>
-                    <div className="mt-1 text-sm text-stone-300">Up to four heroes, one board</div>
+                    <div className="mt-1 text-sm text-stone-300">2 rows, 3 lanes, up to 4 heroes</div>
                   </div>
                   <div className="text-[10px] uppercase tracking-[0.28em] text-stone-500">Locked when queued</div>
                 </div>
-                <div className="space-y-2">
+                <div className="space-y-3">
+                  <div className="space-y-2">
+                    {ARENA_ROWS.map((row) => (
+                      <div key={row.label} className="grid grid-cols-[72px_repeat(3,minmax(0,1fr))] gap-2">
+                        <div className="flex items-center text-[10px] uppercase tracking-[0.24em] text-stone-500">{row.label}</div>
+                        {row.slots.map((slot) => {
+                          const heroId = arenaFormation[slot];
+                          const hero = heroId ? heroes.find((item) => item.id === heroId) : null;
+                          return (
+                            <button
+                              key={slot}
+                              type="button"
+                              disabled={waiting || busy}
+                              onClick={() => hero && handleToggleHero(hero.id)}
+                              className={cn(
+                                'min-h-20 border bg-black/35 px-3 py-2 text-left transition disabled:cursor-not-allowed disabled:opacity-60',
+                                hero ? 'border-[#c59a5a]/35 text-stone-100' : 'border-dashed border-stone-800 text-stone-600'
+                              )}
+                            >
+                              <div className="text-[9px] uppercase tracking-[0.2em] text-stone-500">{slot}</div>
+                              <div className="mt-2 truncate text-sm">{hero?.character.name ?? 'Empty'}</div>
+                              {hero && <div className="mt-1 text-[10px] uppercase tracking-[0.18em] text-stone-500">BP {hero.character.BP}</div>}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ))}
+                  </div>
                   {selectedSummary}
                   {Array.from({ length: Math.max(0, MAX_TEAM_SIZE - selectedHeroes.length) }).map((_, index) => (
                     <div key={`empty-slot-${index}`} className="border border-dashed border-stone-800 bg-black/25 px-3 py-4 text-center text-[10px] uppercase tracking-[0.28em] text-stone-600">
@@ -404,7 +507,7 @@ export function PvpArena({ heroes, economy, token, onRefresh }: PvpArenaProps) {
                     <div className="text-[10px] uppercase tracking-[0.28em] text-stone-500">Match control</div>
                     <div className="mt-1 text-sm text-stone-300">Queue, cancel, and watch the lobby resolve</div>
                   </div>
-                  <div className="text-[10px] uppercase tracking-[0.28em] text-stone-500">10% window</div>
+                  <div className="text-[10px] uppercase tracking-[0.28em] text-stone-500">{tolerancePct}% window</div>
                 </div>
                 <div className="grid gap-2 sm:grid-cols-2">
                   <div className="border border-stone-800 bg-black/30 p-3">
@@ -498,15 +601,15 @@ export function PvpArena({ heroes, economy, token, onRefresh }: PvpArenaProps) {
               </div>
               <div className="border border-stone-800 bg-black/30 p-3">
                 <div className="text-[10px] uppercase tracking-[0.24em] text-stone-500">Wallet</div>
-                <div className="mt-1 text-lg text-stone-100">{economy?.wallet?.dust_balance ?? economy?.starter.dust_balance ?? 0}</div>
+                <div className="mt-1 text-lg text-stone-100">{walletDust}</div>
               </div>
             </div>
             <div className="mt-3 text-sm leading-7 text-stone-400">
               {waiting
-                ? `You are in the lobby. The backend only matches opponents whose total BP stays inside the ±${tolerancePct}% window.`
+                ? `You are in the lobby. The backend only matches opponents whose total BP stays inside the +/-${tolerancePct}% window.`
                 : matchResolved
-                  ? 'The board has been resolved. The result panel below shows the full 4v4 river battle.'
-                  : 'Queue your lineup to enter ranked PvP. You can only bring up to 4 heroes, but empty slots are allowed.'}
+                  ? 'The board has been resolved. The result panel below shows the Arena battle.'
+                  : 'Queue your 2 by 3 formation to enter ranked PvP. You can bring 1 to 4 heroes, and empty slots are allowed.'}
             </div>
           </div>
 
@@ -552,7 +655,7 @@ export function PvpArena({ heroes, economy, token, onRefresh }: PvpArenaProps) {
           ) : (
             <EmptyState
               title="No active queue"
-              description="Choose up to four heroes from the vault, then enter the ranked arena to fight within the 10% BP band."
+              description={`Choose up to four heroes from the vault, then enter the ranked arena to fight within the ${tolerancePct}% BP band.`}
             />
           )}
 
@@ -569,6 +672,33 @@ export function PvpArena({ heroes, economy, token, onRefresh }: PvpArenaProps) {
               </div>
               <div className="mt-2 text-xs uppercase tracking-[0.22em] text-stone-500">
                 Participants: {activeTeamNames.join(' / ') || 'Unknown lineup'}
+              </div>
+            </div>
+          )}
+
+          {deadHeroes.length > 0 && (
+            <div className="border border-rose-300/20 bg-rose-400/10 p-4">
+              <div className="text-[10px] uppercase tracking-[0.28em] text-rose-100">Revival needed</div>
+              <div className="mt-2 text-sm text-stone-300">
+                PvP-dead cards cannot enter Arena. Revive costs {reviveDust} Dust.
+              </div>
+              <div className="mt-4 space-y-2">
+                {deadHeroes.map((hero) => (
+                  <div key={hero.id} className="flex items-center justify-between gap-3 border border-rose-200/10 bg-black/30 px-3 py-3">
+                    <div className="min-w-0">
+                      <div className="truncate text-sm text-stone-100">{hero.character.name}</div>
+                      <div className="mt-1 text-[10px] uppercase tracking-[0.22em] text-rose-100">PvP dead</div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleRevive(hero.id)}
+                      disabled={revivingHeroId === hero.id || walletDust < reviveDust}
+                      className="shrink-0 border border-emerald-300/25 bg-emerald-400/10 px-3 py-2 text-[10px] uppercase tracking-[0.22em] text-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {revivingHeroId === hero.id ? 'Reviving' : `Revive ${reviveDust}`}
+                    </button>
+                  </div>
+                ))}
               </div>
             </div>
           )}

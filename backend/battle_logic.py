@@ -756,7 +756,7 @@ def run_team_duel(team_a: List[Dict[str, Any]], team_b: List[Dict[str, Any]], si
             "details": result,
         }
 
-    lanes = 4 if size == "4v4" else 3
+    lanes = 4 if size in {"4v4", "arena_2x3"} else 3
     result = _run_board_duel(team_a, team_b, label_a, label_b, lanes)
     return {
         "winner": result["winner"],

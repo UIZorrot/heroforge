@@ -30,9 +30,9 @@ export default {
         },
       },
       fontFamily: {
-        display: ['Cinzel', 'serif'],
-        mono: ['Orbitron', 'monospace'],
-        body: ['Inter', 'sans-serif'],
+        display: ['Cormorant Garamond', 'serif'],
+        mono: ['IBM Plex Mono', 'monospace'],
+        body: ['Manrope', 'sans-serif'],
       },
       letterSpacing: {
         'ultra-wide': '0.25em',

@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import copy
 import io
+import uuid
 from typing import Any, Dict
 
 import pytest
@@ -183,15 +184,349 @@ def test_auth_login_and_initial_economy(harness):
 
     economy = harness.economy(headers)
     assert economy["wallet"]["dust_balance"] == 500
-    assert economy["costs"]["forge"] == 120
+    assert economy["costs"]["forge"] == 100
     assert economy["costs"]["repair"] == 60
     assert economy["costs"]["pve_entry"] == 40
     assert economy["costs"]["pvp_entry"] == 30
+    assert economy["costs"]["pvp_stake"] == 30
+    assert economy["costs"]["pvp_revive"] == 200
+    assert economy["pvp"]["match_tolerance_pct"] == 5
     assert economy["transactions"] == []
 
     unauthorized = harness.client.get("/api/me/economy")
     harness.trace("economy-unauthorized", unauthorized)
     assert unauthorized.status_code == 401
+
+
+@pytest.mark.integration
+def test_arena_lifecycle_schema_exists(harness):
+    with harness.db_module.get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_schema = current_schema()
+                  AND table_name = 'heroes'
+                  AND column_name IN (
+                    'pvp_life_state',
+                    'pve_life_state',
+                    'card_status',
+                    'locked_reason',
+                    'pvp_dead_at',
+                    'decomposed_at',
+                    'active_pvp_entry_id'
+                  )
+                """
+            )
+            hero_columns = {row["column_name"] for row in cur.fetchall()}
+
+            cur.execute(
+                """
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_schema = current_schema()
+                  AND table_name = 'pvp_queue_entries'
+                  AND column_name = 'formation_snapshot'
+                """
+            )
+            queue_columns = {row["column_name"] for row in cur.fetchall()}
+
+            cur.execute(
+                """
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_schema = current_schema()
+                  AND table_name = 'pvp_matches'
+                  AND column_name IN (
+                    'formation_a',
+                    'formation_b',
+                    'reward_payload',
+                    'card_state_changes'
+                  )
+                """
+            )
+            match_columns = {row["column_name"] for row in cur.fetchall()}
+
+            cur.execute("SELECT to_regclass('card_death_records') AS table_name")
+            death_table = cur.fetchone()["table_name"]
+
+            cur.execute("SELECT to_regclass('daily_checkins') AS table_name")
+            checkin_table = cur.fetchone()["table_name"]
+
+            cur.execute("SELECT to_regclass('daily_task_progress') AS table_name")
+            task_table = cur.fetchone()["table_name"]
+
+    assert hero_columns == {
+        "pvp_life_state",
+        "pve_life_state",
+        "card_status",
+        "locked_reason",
+        "pvp_dead_at",
+        "decomposed_at",
+        "active_pvp_entry_id",
+    }
+    assert queue_columns == {"formation_snapshot"}
+    assert match_columns == {"formation_a", "formation_b", "reward_payload", "card_state_changes"}
+    assert death_table is not None
+    assert checkin_table is not None
+    assert task_table is not None
+
+
+@pytest.mark.integration
+def test_daily_sign_in_can_only_claim_once(harness):
+    headers = harness.login("integration-daily-signin@example.com")
+
+    first = harness.client.post("/api/daily/sign-in/claim", headers=headers)
+    harness.trace("daily-sign-in-first", first)
+    assert first.status_code == 200
+    first_payload = first.get_json()["data"]
+    assert first_payload["checkin"]["claimed"] is True
+    assert first_payload["checkin"]["reward_dust"] == 30
+    assert first_payload["economy"]["wallet"]["dust_balance"] == 530
+
+    second = harness.client.post("/api/daily/sign-in/claim", headers=headers)
+    harness.trace("daily-sign-in-second", second)
+    assert second.status_code == 400
+    assert "already claimed" in second.get_json()["error"]
+
+
+@pytest.mark.integration
+def test_daily_task_claim_requires_completion(harness):
+    headers = harness.login("integration-daily-locked-task@example.com")
+
+    response = harness.client.post("/api/daily/tasks/win_arena_once/claim", headers=headers)
+    harness.trace("daily-claim-incomplete", response)
+
+    assert response.status_code == 400
+    assert "not complete" in response.get_json()["error"]
+
+
+@pytest.mark.integration
+def test_daily_forge_task_progress_and_claim(harness):
+    headers = harness.login("integration-daily-forge-task@example.com")
+
+    initial = harness.client.get("/api/daily/me", headers=headers)
+    harness.trace("daily-initial", initial)
+    assert initial.status_code == 200
+    initial_tasks = {task["key"]: task for task in initial.get_json()["data"]["tasks"]}
+    assert initial_tasks["forge_one_card"]["progress"] == 0
+    assert initial_tasks["forge_one_card"]["target"] == 1
+
+    harness.set_forge_sequence([
+        _hero_pair("Daily Smith", "warrior", 1000, "weapon", "Hammer Cut", "Temper"),
+    ])
+    harness.forge(headers, _sample_image_base64((150, 120, 70)), materials={})
+
+    progressed = harness.client.get("/api/daily/me", headers=headers)
+    harness.trace("daily-progressed", progressed)
+    progressed_tasks = {task["key"]: task for task in progressed.get_json()["data"]["tasks"]}
+    assert progressed_tasks["forge_one_card"]["progress"] == 1
+    assert progressed_tasks["forge_one_card"]["claimable"] is True
+
+    claimed = harness.client.post("/api/daily/tasks/forge_one_card/claim", headers=headers)
+    harness.trace("daily-claim-forge", claimed)
+    assert claimed.status_code == 200
+    claimed_payload = claimed.get_json()["data"]
+    claimed_tasks = {task["key"]: task for task in claimed_payload["tasks"]}
+    assert claimed_tasks["forge_one_card"]["claimed"] is True
+    assert claimed_payload["economy"]["wallet"]["dust_balance"] == 420
+
+
+@pytest.mark.integration
+def test_list_heroes_includes_lifecycle_fields(harness):
+    headers = harness.login("integration-lifecycle@example.com")
+    hero_payload = _hero_pair("Lifecycle", "warrior", 1000, "weapon", "Slash", "Guard")["p2"]
+    harness.db_module.execute(
+        """
+        INSERT INTO heroes (user_id, source_payload, hero_payload)
+        VALUES (%s, %s::jsonb, %s::jsonb)
+        """,
+        (
+            harness.last_user["id"],
+            harness.db_module.serialize_json({"source": "integration"}),
+            harness.db_module.serialize_json(hero_payload),
+        ),
+    )
+
+    heroes = harness.heroes(headers)
+    hero = heroes[0]
+
+    assert hero["pvp_life_state"] == "active"
+    assert hero["pve_life_state"] == "active"
+    assert hero["card_status"] == "active"
+    assert "locked_reason" in hero
+    assert "pvp_dead_at" in hero
+    assert "decomposed_at" in hero
+    assert "active_pvp_entry_id" in hero
+
+
+@pytest.mark.integration
+def test_arena_join_rejects_empty_formation(harness):
+    headers = harness.login("integration-empty-arena@example.com")
+    response = harness.client.post(
+        "/api/pvp/join",
+        headers=headers,
+        json={"mode": "arena_2x3", "queueKey": "ranked", "formation": {}},
+    )
+    harness.trace("arena-empty-formation", response)
+
+    assert response.status_code == 400
+    assert "Place 1 to 4 active cards" in response.get_json()["error"]
+
+
+@pytest.mark.integration
+def test_arena_join_rejects_more_than_four_cards(harness):
+    headers = harness.login("integration-five-arena@example.com")
+    hero_ids = []
+    for index in range(5):
+        hero_payload = _hero_pair(f"Arena {index}", "warrior", 1000, "weapon", "Slash", "Guard")["p2"]
+        row = harness.db_module.fetch_one(
+            """
+            INSERT INTO heroes (user_id, source_payload, hero_payload)
+            VALUES (%s, %s::jsonb, %s::jsonb)
+            RETURNING id
+            """,
+            (
+                harness.last_user["id"],
+                harness.db_module.serialize_json({"source": "integration"}),
+                harness.db_module.serialize_json(hero_payload),
+            ),
+        )
+        hero_ids.append(str(row["id"]))
+
+    response = harness.client.post(
+        "/api/pvp/join",
+        headers=headers,
+        json={
+            "mode": "arena_2x3",
+            "queueKey": "ranked",
+            "formation": {
+                "front_0": hero_ids[0],
+                "front_1": hero_ids[1],
+                "front_2": hero_ids[2],
+                "back_0": hero_ids[3],
+                "back_1": hero_ids[4],
+                "back_2": None,
+            },
+        },
+    )
+    harness.trace("arena-five-formation", response)
+
+    assert response.status_code == 400
+    assert "Place 1 to 4 active cards" in response.get_json()["error"]
+
+
+@pytest.mark.integration
+def test_pvp_dead_card_cannot_queue_until_revived(harness):
+    headers = harness.login("integration-dead-card@example.com")
+    hero_payload = _hero_pair("Fallen", "warrior", 1000, "weapon", "Last Cut", "Still Guard")["p2"]
+    hero_id = str(uuid.uuid4())
+    harness.db_module.execute(
+        """
+        INSERT INTO heroes (id, user_id, source_payload, hero_payload, pvp_life_state, pvp_dead_at)
+        VALUES (%s, %s, %s::jsonb, %s::jsonb, 'pvp_dead', now())
+        """,
+        (
+            hero_id,
+            harness.last_user["id"],
+            harness.db_module.serialize_json({"source": "integration"}),
+            harness.db_module.serialize_json(hero_payload),
+        ),
+    )
+
+    response = harness.client.post(
+        "/api/pvp/join",
+        headers=headers,
+        json={
+            "mode": "arena_2x3",
+            "queueKey": "ranked",
+            "formation": {"front_1": hero_id},
+        },
+    )
+    harness.trace("arena-dead-card", response)
+
+    assert response.status_code == 400
+    assert "Revive it before Arena" in response.get_json()["error"]
+
+
+@pytest.mark.integration
+def test_revive_card_costs_200_dust_and_restores_arena_eligibility(harness):
+    headers = harness.login("integration-revive-card@example.com")
+    hero_payload = _hero_pair("Returned", "paladin", 1000, "weapon", "Dawn Cut", "Oath Light")["p2"]
+    hero_id = str(uuid.uuid4())
+    harness.db_module.execute(
+        """
+        INSERT INTO heroes (id, user_id, source_payload, hero_payload, pvp_life_state, pvp_dead_at)
+        VALUES (%s, %s, %s::jsonb, %s::jsonb, 'pvp_dead', now())
+        """,
+        (
+            hero_id,
+            harness.last_user["id"],
+            harness.db_module.serialize_json({"source": "integration"}),
+            harness.db_module.serialize_json(hero_payload),
+        ),
+    )
+
+    response = harness.client.post(f"/api/cards/{hero_id}/revive", headers=headers)
+    harness.trace("revive-card", response)
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["card"]["pvp_life_state"] == "active"
+    assert payload["card"]["pvp_dead_at"] is None
+    assert payload["economy"]["wallet"]["dust_balance"] == 300
+
+    join_response = harness.client.post(
+        "/api/pvp/join",
+        headers=headers,
+        json={
+            "mode": "arena_2x3",
+            "queueKey": "ranked-revived",
+            "formation": {"front_1": hero_id},
+        },
+    )
+    harness.trace("arena-revived-card", join_response)
+    assert join_response.status_code == 200
+    assert join_response.get_json()["status"] == "waiting"
+
+
+@pytest.mark.integration
+def test_arena_waiting_entry_locks_card_and_cancel_clears_lock(harness):
+    headers = harness.login("integration-arena-lock@example.com")
+    harness.set_forge_sequence([
+        _hero_pair("Lockstep", "warrior", 1000, "weapon", "Step Cut", "Brace"),
+    ])
+    harness.forge(headers, _sample_image_base64((110, 90, 130)), materials={})
+    hero_id = harness.heroes(headers)[0]["id"]
+
+    join = harness.pvp_join(headers, [hero_id], queue_key="ranked-lock", battle_mode="1v1")
+    assert join["status"] == "waiting"
+
+    locked_row = harness.db_module.fetch_one(
+        "SELECT active_pvp_entry_id FROM heroes WHERE id = %s",
+        (hero_id,),
+    )
+    assert str(locked_row["active_pvp_entry_id"]) == join["entry"]["id"]
+
+    duplicate = harness.client.post(
+        "/api/pvp/join",
+        headers=headers,
+        json={"queueKey": "ranked-lock", "heroIds": [hero_id], "battleMode": "1v1"},
+    )
+    harness.trace("arena-duplicate-lock", duplicate)
+    assert duplicate.status_code == 400
+    assert "already queued" in duplicate.get_json()["error"]
+
+    cancel = harness.pvp_cancel(headers, join["entry"]["id"])
+    assert cancel["ok"] is True
+    assert cancel["entry"]["status"] == "cancelled"
+    assert cancel["economy"]["wallet"]["dust_balance"] == 400
+
+    unlocked_row = harness.db_module.fetch_one(
+        "SELECT active_pvp_entry_id FROM heroes WHERE id = %s",
+        (hero_id,),
+    )
+    assert unlocked_row["active_pvp_entry_id"] is None
 
 
 @pytest.mark.integration
@@ -219,7 +554,7 @@ def test_forge_and_battle_persistence(harness):
     assert hero_b["generation_id"]
 
     economy = harness.economy(headers)
-    assert economy["wallet"]["dust_balance"] == 260
+    assert economy["wallet"]["dust_balance"] == 300
     assert len(economy["transactions"]) == 2
 
     hero_rows = harness.heroes(headers)
@@ -267,21 +602,21 @@ def test_repair_pvp_and_pve_entry_costs(harness):
 
     repair_result = harness.repair(headers, hero_id)
     assert repair_result["ok"] is True
-    assert repair_result["economy"]["wallet"]["dust_balance"] == 320
+    assert repair_result["economy"]["wallet"]["dust_balance"] == 340
 
     pvp_result = harness.pvp_entry(headers, queue_key="ranked")
     assert pvp_result["ok"] is True
     assert pvp_result["queue_key"] == "ranked"
-    assert pvp_result["economy"]["wallet"]["dust_balance"] == 290
+    assert pvp_result["economy"]["wallet"]["dust_balance"] == 310
 
     pve_result = harness.pve_start(headers, [hero_id], theme_key="tower")
     assert pve_result["ok"] is True
     assert pve_result["run"]["theme_key"] == "tower"
-    assert pve_result["economy"]["wallet"]["dust_balance"] == 250
+    assert pve_result["economy"]["wallet"]["dust_balance"] == 270
     assert len(pve_result["party"]) == 1
 
     economy = harness.economy(headers)
-    assert economy["wallet"]["dust_balance"] == 250
+    assert economy["wallet"]["dust_balance"] == 270
     assert len(economy["transactions"]) >= 4
 
     resource_row = harness.db_module.fetch_one(
@@ -315,7 +650,7 @@ def test_pvp_matchmaking_within_bp_window_and_stake_settlement(harness):
 
     headers_b = harness.login(email_b)
     harness.set_forge_sequence([
-        _hero_pair("Blitz", "rogue", 1080, "gun", "Quick Shot", "Smoke Step"),
+        _hero_pair("Blitz", "rogue", 1050, "gun", "Quick Shot", "Smoke Step"),
     ])
     hero_b = harness.forge(headers_b, _sample_image_base64((80, 120, 170)), materials={})
     hero_b_id = harness.heroes(headers_b)[0]["id"]
@@ -334,10 +669,15 @@ def test_pvp_matchmaking_within_bp_window_and_stake_settlement(harness):
     assert status_a["entry"]["status"] == "matched"
     assert status_a["match"]["status"] == "resolved"
 
+    lock_a = harness.db_module.fetch_one("SELECT active_pvp_entry_id FROM heroes WHERE id = %s", (hero_a_id,))
+    lock_b = harness.db_module.fetch_one("SELECT active_pvp_entry_id FROM heroes WHERE id = %s", (hero_b_id,))
+    assert lock_a["active_pvp_entry_id"] is None
+    assert lock_b["active_pvp_entry_id"] is None
+
     economy_a = harness.economy(headers_a)
     economy_b = harness.economy(headers_b)
     total_dust = economy_a["wallet"]["dust_balance"] + economy_b["wallet"]["dust_balance"]
-    assert total_dust == 760
+    assert total_dust == 800
 
 
 @pytest.mark.integration
@@ -408,8 +748,8 @@ def test_pvp_matchmaking_rejects_large_bp_gap(harness):
 
     economy_a = harness.economy(headers_a)
     economy_b = harness.economy(headers_b)
-    assert economy_a["wallet"]["dust_balance"] == 350
-    assert economy_b["wallet"]["dust_balance"] == 350
+    assert economy_a["wallet"]["dust_balance"] == 370
+    assert economy_b["wallet"]["dust_balance"] == 370
 
 
 @pytest.mark.integration
