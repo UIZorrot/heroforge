@@ -1,11 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Gem, Swords, X, Plus, Search, ChevronRight, ChevronDown, Mail, RefreshCw, ArrowRight, Sparkles, Send } from 'lucide-react';
+import { Gem, Swords, X, Plus, Search, ChevronRight, ChevronDown, Mail, RefreshCw, ArrowRight, Sparkles, Send, Trophy } from 'lucide-react';
 import { HeroCard } from './components/HeroCard';
 import { Forge } from './components/Forge';
 import { BattleVisualizer } from './components/BattleVisualizer';
 import { PvpArena } from './components/PvpArena';
 import { AppLogo } from './components/AppLogo';
 import { DailyActivity } from './components/DailyActivity';
+import { LadderPanel } from './components/LadderPanel';
 import { motion, AnimatePresence } from 'framer-motion';
 import { forgeHero, fetchHeroes, fetchEconomy, fetchCurrentUser, getStoredSession, getStoredToken, verifyLoginCode, requestLoginCode, clearStoredSession } from './lib/api';
 import { calculateRarity, normalizeCharacterData, toNumber, type CharacterData, type Rarity } from './lib/gameLogic';
@@ -16,7 +17,7 @@ import type { BattleEvent, BattleResult } from './lib/battleTypes';
 import { SectionHeader } from './components/Effects';
 import { Shield } from 'lucide-react';
 
-type SectionKey = 'barracks' | 'forge' | 'train' | 'duel' | 'chronicle' | 'profile';
+type SectionKey = 'barracks' | 'forge' | 'train' | 'duel' | 'ladder' | 'chronicle' | 'profile';
 type DuelSize = '1v1' | '3v3' | '4v4';
 type VaultSort = 'date' | 'bp' | 'name';
 
@@ -44,6 +45,7 @@ const App: React.FC = () => {
     { key: 'barracks', label: 'VAULT', icon: Search },
     { key: 'train', label: 'TRAIN', icon: Swords },
     { key: 'duel', label: 'DUEL', icon: Swords },
+    { key: 'ladder', label: 'RANKED', icon: Trophy },
     { key: 'chronicle', label: 'CHRONICLE', icon: Shield },
   ];
   const [route, setRoute] = useState<'landing' | 'login' | 'dashboard'>('landing');
@@ -421,6 +423,7 @@ const App: React.FC = () => {
     if (activeSection === 'barracks') return '牌库总览';
     if (activeSection === 'forge') return '英雄锻造';
     if (activeSection === 'duel') return '对战控制台';
+    if (activeSection === 'ladder') return '天梯档案';
     return 'Chronicle';
   }, [activeSection]);
   const duelSlotIndices = duelSize === '3v3' ? [0, 1, 2] : [0];
@@ -663,7 +666,7 @@ const App: React.FC = () => {
             <div className="border-r border-stone-800/70 pr-6">
               <p className="text-[10px] uppercase tracking-[0.25em] text-stone-500">OVERVIEW</p>
               <h1 className="mt-3 text-5xl font-light tracking-[0.3em] text-stone-200">
-                {activeSection === 'forge' ? 'FORGE' : activeSection === 'barracks' ? 'VAULT' : activeSection === 'duel' ? 'DUEL' : 'CHRONICLE'}
+                {activeSection === 'forge' ? 'FORGE' : activeSection === 'barracks' ? 'VAULT' : activeSection === 'duel' ? 'DUEL' : activeSection === 'ladder' ? 'RANKED' : 'CHRONICLE'}
               </h1>
               <div className="mt-6 flex items-center gap-4">
                 <div className="h-px w-16 bg-stone-700" />
@@ -1466,6 +1469,9 @@ const App: React.FC = () => {
                     token={session?.token ?? getStoredToken()}
                     onRefresh={() => reloadCollections()}
                   />
+                )}
+                {activeSection === 'ladder' && (
+                  <LadderPanel token={session?.token ?? getStoredToken()} />
                 )}
                   </motion.div>
                 </AnimatePresence>

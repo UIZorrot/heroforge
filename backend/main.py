@@ -801,6 +801,97 @@ def _safe_record_daily_task_progress(user_id, task_key, amount=1):
         return None
 
 
+LADDER_BASE_RATING = 1000
+LADDER_WIN_DELTA = 25
+LADDER_TIE_DELTA = 5
+LADDER_LOSS_DELTA = -15
+
+
+def _ladder_tier(rating):
+    if rating >= 1400:
+        return "Mythic"
+    if rating >= 1250:
+        return "Gold"
+    if rating >= 1100:
+        return "Silver"
+    return "Bronze"
+
+
+def ladder_snapshot(user):
+    rows = fetch_all(
+        """
+        SELECT id, queue_key, battle_mode, user_a_id, user_b_id, stake_dust,
+               bp_a, bp_b, winner_user_id, winner_side, created_at, resolved_at
+        FROM pvp_matches
+        WHERE status = 'resolved'
+          AND battle_mode = 'arena_2x3'
+          AND (user_a_id = %s OR user_b_id = %s)
+        ORDER BY COALESCE(resolved_at, created_at) DESC
+        """,
+        (user["id"], user["id"]),
+    )
+
+    user_id = str(user["id"])
+    wins = losses = ties = 0
+    rating_delta = 0
+    recent_matches = []
+
+    for row in rows:
+        winner_user_id = str(row["winner_user_id"]) if row.get("winner_user_id") else None
+        if row.get("winner_side") == "Tie":
+            result = "tie"
+            ties += 1
+            delta = LADDER_TIE_DELTA
+        elif winner_user_id == user_id:
+            result = "win"
+            wins += 1
+            delta = LADDER_WIN_DELTA
+        else:
+            result = "loss"
+            losses += 1
+            delta = LADDER_LOSS_DELTA
+
+        rating_delta += delta
+        if len(recent_matches) < 10:
+            is_side_a = str(row["user_a_id"]) == user_id
+            recent_matches.append(
+                {
+                    "id": str(row["id"]),
+                    "queue_key": row["queue_key"],
+                    "result": result,
+                    "rating_delta": delta,
+                    "opponent_user_id": str(row["user_b_id"] if is_side_a else row["user_a_id"]),
+                    "bp": int(row["bp_a"] if is_side_a else row["bp_b"]),
+                    "opponent_bp": int(row["bp_b"] if is_side_a else row["bp_a"]),
+                    "stake_dust": int(row["stake_dust"]),
+                    "resolved_at": row["resolved_at"].isoformat() if row.get("resolved_at") else None,
+                    "created_at": row["created_at"].isoformat() if row.get("created_at") else None,
+                }
+            )
+
+    played = wins + losses + ties
+    rating = max(0, LADDER_BASE_RATING + rating_delta)
+    return {
+        "rating": rating,
+        "tier": _ladder_tier(rating),
+        "record": {
+            "played": played,
+            "wins": wins,
+            "losses": losses,
+            "ties": ties,
+        },
+        "win_rate": round((wins / played) * 100) if played else 0,
+        "rules": {
+            "base_rating": LADDER_BASE_RATING,
+            "win_delta": LADDER_WIN_DELTA,
+            "tie_delta": LADDER_TIE_DELTA,
+            "loss_delta": LADDER_LOSS_DELTA,
+            "source": "resolved arena_2x3 matches",
+        },
+        "recent_matches": recent_matches,
+    }
+
+
 def _normalize_pvp_queue_key(value):
     return (value or "default").strip() or "default"
 
@@ -1606,6 +1697,13 @@ def daily_task_claim(task_key):
     except Exception as exc:
         logging.exception("daily_task_claim failed")
         return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/api/ladder/me", methods=["GET"])
+@auth_required
+def ladder_me():
+    user = current_user()
+    return jsonify({"ok": True, "data": ladder_snapshot(user)})
 
 
 @app.route("/api/health", methods=["GET"])

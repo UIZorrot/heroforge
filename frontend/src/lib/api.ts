@@ -7,6 +7,7 @@ import type {
   ArenaFormation,
   CharacterData,
   HeroHistoryRecord,
+  LadderSnapshot,
   LoginCodeResponse,
   PvpEntryStatusResponse,
   PvpJoinResponse,
@@ -182,6 +183,11 @@ export async function claimDailyTask(taskKey: string, token?: string | null): Pr
     { method: 'POST' },
     token
   );
+  return payload.data;
+}
+
+export async function fetchLadder(token?: string | null): Promise<LadderSnapshot> {
+  const payload = await requestJson<{ data: LadderSnapshot }>('/api/ladder/me', { method: 'GET' }, token);
   return payload.data;
 }
 

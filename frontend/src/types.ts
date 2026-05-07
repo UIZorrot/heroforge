@@ -152,6 +152,37 @@ export interface DailySnapshot {
   economy: EconomySnapshot;
 }
 
+export interface LadderSnapshot {
+  rating: number;
+  tier: 'Bronze' | 'Silver' | 'Gold' | 'Mythic' | string;
+  record: {
+    played: number;
+    wins: number;
+    losses: number;
+    ties: number;
+  };
+  win_rate: number;
+  rules: {
+    base_rating: number;
+    win_delta: number;
+    tie_delta: number;
+    loss_delta: number;
+    source: string;
+  };
+  recent_matches: Array<{
+    id: string;
+    queue_key: string;
+    result: 'win' | 'loss' | 'tie';
+    rating_delta: number;
+    opponent_user_id: string;
+    bp: number;
+    opponent_bp: number;
+    stake_dust: number;
+    resolved_at?: string | null;
+    created_at?: string | null;
+  }>;
+}
+
 export interface SessionSnapshot {
   token: string;
   email: string;

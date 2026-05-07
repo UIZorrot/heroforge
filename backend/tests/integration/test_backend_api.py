@@ -334,6 +334,88 @@ def test_daily_forge_task_progress_and_claim(harness):
 
 
 @pytest.mark.integration
+def test_ladder_me_returns_empty_profile(harness):
+    headers = harness.login("integration-ladder-empty@example.com")
+
+    response = harness.client.get("/api/ladder/me", headers=headers)
+    harness.trace("ladder-empty", response)
+
+    assert response.status_code == 200
+    payload = response.get_json()["data"]
+    assert payload["rating"] == 1000
+    assert payload["tier"] == "Bronze"
+    assert payload["record"] == {"played": 0, "wins": 0, "losses": 0, "ties": 0}
+    assert payload["win_rate"] == 0
+    assert payload["recent_matches"] == []
+
+
+@pytest.mark.integration
+def test_ladder_me_summarizes_arena_results(harness):
+    headers_a = harness.login("integration-ladder-a@example.com")
+    user_a_id = harness.last_user["id"]
+    headers_b = harness.login("integration-ladder-b@example.com")
+    user_b_id = harness.last_user["id"]
+
+    def insert_match(winner_user_id, winner_side):
+        with harness.db_module.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO pvp_queue_entries (
+                        user_id, queue_key, battle_mode, stake_dust, bp_value, status,
+                        team_snapshot, formation_snapshot, matched_at
+                    )
+                    VALUES (%s, 'ranked', 'arena_2x3', 30, 1000, 'matched', '{}'::jsonb, '{}'::jsonb, now())
+                    RETURNING id
+                    """,
+                    (user_a_id,),
+                )
+                entry_a = cur.fetchone()
+                cur.execute(
+                    """
+                    INSERT INTO pvp_queue_entries (
+                        user_id, queue_key, battle_mode, stake_dust, bp_value, status,
+                        team_snapshot, formation_snapshot, matched_at
+                    )
+                    VALUES (%s, 'ranked', 'arena_2x3', 30, 1000, 'matched', '{}'::jsonb, '{}'::jsonb, now())
+                    RETURNING id
+                    """,
+                    (user_b_id,),
+                )
+                entry_b = cur.fetchone()
+                cur.execute(
+                    """
+                    INSERT INTO pvp_matches (
+                        queue_key, battle_mode, entry_a_id, entry_b_id, user_a_id, user_b_id,
+                        stake_dust, bp_a, bp_b, bp_gap_pct, status, winner_user_id, winner_side, resolved_at
+                    )
+                    VALUES (
+                        'ranked', 'arena_2x3', %s, %s, %s, %s,
+                        30, 1000, 1000, 0, 'resolved', %s, %s, now()
+                    )
+                    """,
+                    (entry_a["id"], entry_b["id"], user_a_id, user_b_id, winner_user_id, winner_side),
+                )
+            conn.commit()
+
+    insert_match(user_a_id, "A")
+    insert_match(user_b_id, "B")
+    insert_match(None, "Tie")
+
+    response = harness.client.get("/api/ladder/me", headers=headers_a)
+    harness.trace("ladder-summary", response)
+
+    assert response.status_code == 200
+    payload = response.get_json()["data"]
+    assert payload["rating"] == 1015
+    assert payload["tier"] == "Bronze"
+    assert payload["record"] == {"played": 3, "wins": 1, "losses": 1, "ties": 1}
+    assert payload["win_rate"] == 33
+    assert len(payload["recent_matches"]) == 3
+    assert payload["recent_matches"][0]["result"] in {"win", "loss", "tie"}
+
+
+@pytest.mark.integration
 def test_list_heroes_includes_lifecycle_fields(harness):
     headers = harness.login("integration-lifecycle@example.com")
     hero_payload = _hero_pair("Lifecycle", "warrior", 1000, "weapon", "Slash", "Guard")["p2"]
