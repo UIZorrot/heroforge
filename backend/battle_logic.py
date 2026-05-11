@@ -252,6 +252,21 @@ class BattleController(Protocol):
 
 
 class ProgramBattleController:
+    def _pick_target_tag(self, observation: Dict[str, Any], target_mode: str) -> str | None:
+        actor = observation.get("actor") or {}
+        allies = [unit for unit in observation.get("allies") or [] if isinstance(unit, dict) and unit.get("alive", True)]
+        enemies = [unit for unit in observation.get("enemies") or [] if isinstance(unit, dict) and unit.get("alive", True)]
+
+        if target_mode == "self":
+            return actor.get("tag")
+        if target_mode == "ally":
+            if actor in allies:
+                return actor.get("tag")
+            return allies[0].get("tag") if allies else actor.get("tag")
+        if target_mode == "enemy":
+            return enemies[0].get("tag") if enemies else None
+        return None
+
     def choose_action(self, observation: Dict[str, Any]) -> BattleAction:
         actor = observation.get("actor") or {}
         skills = actor.get("skills") or {}
@@ -270,7 +285,7 @@ class ProgramBattleController:
             return BattleAction(kind="attack")
 
         if random.random() < 0.35:
-            return BattleAction(kind="attack")
+            return BattleAction(kind="attack", target_tag=self._pick_target_tag(observation, "enemy"))
 
         chosen_slot, chosen_skill, _ = max(
             available_skills,
@@ -289,8 +304,48 @@ class ProgramBattleController:
             chosen_skill = skills.get(chosen_slot) or chosen_skill
 
         target_mode = str((chosen_skill or {}).get("TARGET") or "Enemy").strip().lower()
-        target_tag = None if target_mode in {"enemy", "ally", "self"} else None
+        target_tag = self._pick_target_tag(observation, target_mode)
         return BattleAction(kind="skill", target_tag=target_tag, skill_slot=chosen_slot)
+
+
+def _coerce_battle_action(action: Any) -> BattleAction:
+    if isinstance(action, BattleAction):
+        return action
+    if isinstance(action, dict):
+        kind = str(action.get("kind") or action.get("action") or "attack").strip().lower()
+        if kind not in {"attack", "skill", "pass"}:
+            kind = "attack"
+        skill_slot = action.get("skill_slot")
+        if skill_slot not in {"s1", "s2"}:
+            skill_slot = None
+        target_tag = action.get("target_tag")
+        if target_tag is not None:
+            target_tag = str(target_tag)
+        return BattleAction(kind=kind, target_tag=target_tag, skill_slot=skill_slot)
+    return BattleAction(kind="attack")
+
+
+def _controller_mode_name(controller: BattleController | None) -> str:
+    if controller is None:
+        return "program"
+    if isinstance(controller, ProgramBattleController):
+        return "program"
+    name = controller.__class__.__name__.replace("BattleController", "").replace("Controller", "")
+    return name.lower() or "program"
+
+
+def _choose_battle_action(
+    controller: BattleController | None,
+    actor: Battler,
+    own_team: List[Battler],
+    enemy_team: List[Battler],
+    round_num: int,
+    label_a: str,
+    label_b: str,
+) -> tuple[Dict[str, Any], BattleAction]:
+    battle_controller = controller or ProgramBattleController()
+    observation = build_public_battle_observation(round_num, actor, own_team, enemy_team, label_a, label_b)
+    return observation, _coerce_battle_action(battle_controller.choose_action(observation))
 
 
 def _board_snapshot(round_num: int, team_a: List[Battler], team_b: List[Battler], label_a: str, label_b: str) -> Dict[str, Any]:
@@ -372,9 +427,19 @@ def _flatten_buffs(team: List[Battler]) -> List[Dict[str, Any]]:
     return buffs
 
 
-def _run_board_duel(team_a: List[Dict[str, Any]], team_b: List[Dict[str, Any]], label_a: str, label_b: str, lanes: int):
+def _run_board_duel(
+    team_a: List[Dict[str, Any]],
+    team_b: List[Dict[str, Any]],
+    label_a: str,
+    label_b: str,
+    lanes: int,
+    controller: BattleController | None = None,
+    control_mode: str | None = None,
+):
     team_a_units = [Battler(hero, "A", index) for index, hero in enumerate(team_a[:lanes])]
     team_b_units = [Battler(hero, "B", index) for index, hero in enumerate(team_b[:lanes])]
+    battle_controller = controller or ProgramBattleController()
+    control_mode = control_mode or _controller_mode_name(controller)
 
     while len(team_a_units) < lanes:
         team_a_units.append(None)
@@ -470,7 +535,18 @@ def _run_board_duel(team_a: List[Dict[str, Any]], team_b: List[Dict[str, Any]], 
             )
             return
 
-        chosen_skill = _pick_skill(actor, round_num)
+        own_team = team_a_units if actor.tag.startswith("A") else team_b_units
+        observation, action = _choose_battle_action(battle_controller, actor, own_team, enemy_team, round_num, label_a, label_b)
+        chosen_skill = None
+        if action.kind == "skill" and action.skill_slot in {"s1", "s2"}:
+            skills = actor.character.get("skill", {})
+            if isinstance(skills, dict):
+                chosen_skill = skills.get(action.skill_slot)
+        if action.kind == "skill" and not isinstance(chosen_skill, dict):
+            chosen_skill = _pick_skill(actor, round_num)
+        if action.kind != "skill":
+            chosen_skill = None
+
         skill_cost = _infer_skill_cost(chosen_skill) if chosen_skill else 0
         if chosen_skill and actor.mp < skill_cost:
             chosen_skill = None
@@ -478,9 +554,17 @@ def _run_board_duel(team_a: List[Dict[str, Any]], team_b: List[Dict[str, Any]], 
 
         actor.mp = max(0, actor.mp - skill_cost)
 
-        own_team = team_a_units if actor.tag.startswith("A") else team_b_units
         targets = _ordered_board_targets(actor, own_team, enemy_team, chosen_skill)
-        if not targets:
+        target = None
+        if action.target_tag:
+            for candidate in targets:
+                if candidate.tag == action.target_tag:
+                    target = candidate
+                    break
+        if target is None and targets:
+            target = targets[0]
+
+        if not target:
             push_event(
                 round_num,
                 actor.tag,
@@ -501,7 +585,6 @@ def _run_board_duel(team_a: List[Dict[str, Any]], team_b: List[Dict[str, Any]], 
         buff_name = str((chosen_skill or {}).get("BUFF_NAME") or "").strip().lower()
         skill_role = str((chosen_skill or {}).get("ROLE") or "").strip().lower()
         range_mode = _skill_range(chosen_skill) if chosen_skill else None
-        target = targets[0]
         hit_chance = max(0.2, min(1.5, 1 + (actor.ac - target.ev) / 100.0))
 
         if random.random() > hit_chance:
@@ -620,6 +703,7 @@ def _run_board_duel(team_a: List[Dict[str, Any]], team_b: List[Dict[str, Any]], 
     return {
         "winner": winner_name,
         "winnerLabel": winner_label,
+        "controlMode": control_mode,
         "logs": logs,
         "events": events,
         "finalHpA": total_a,
@@ -660,9 +744,30 @@ def _pick_skill(atk: Battler, round_num: int) -> Dict[str, Any] | None:
     return planned or s1 or s2
 
 
-def run_auto_duel(hero_a: Dict[str, Any], hero_b: Dict[str, Any], label_a: str = "A", label_b: str = "B"):
+def _skill_slot_for_choice(atk: Battler, skill: Dict[str, Any] | None) -> str | None:
+    if not isinstance(skill, dict):
+        return None
+    skills = atk.character.get("skill", {})
+    if not isinstance(skills, dict):
+        return None
+    for slot in ("s1", "s2"):
+        if skills.get(slot) == skill:
+            return slot
+    return None
+
+
+def run_auto_duel(
+    hero_a: Dict[str, Any],
+    hero_b: Dict[str, Any],
+    label_a: str = "A",
+    label_b: str = "B",
+    controller: BattleController | None = None,
+    control_mode: str | None = None,
+):
     p_a = Battler(hero_a, "A")
     p_b = Battler(hero_b, "B")
+    battle_controller = controller or ProgramBattleController()
+    control_mode = control_mode or _controller_mode_name(controller)
 
     events = []
     logs = []
@@ -734,7 +839,18 @@ def run_auto_duel(hero_a: Dict[str, Any], hero_b: Dict[str, Any], label_a: str =
             push_event(round_num, atk.tag, "stunned", 0, False, False, False)
             return
 
-        chosen_skill = _pick_skill(atk, round_num)
+        observation, action = _choose_battle_action(battle_controller, atk, [atk], [defen], round_num, label_a, label_b)
+        chosen_skill = None
+        if action.kind == "skill" and action.skill_slot in {"s1", "s2"}:
+            skills = atk.character.get("skill", {})
+            if isinstance(skills, dict):
+                chosen_skill = skills.get(action.skill_slot)
+        if action.kind == "skill" and not isinstance(chosen_skill, dict):
+            chosen_skill = _pick_skill(atk, round_num)
+            action = BattleAction(kind="skill", target_tag=action.target_tag, skill_slot=_skill_slot_for_choice(atk, chosen_skill))
+        if action.kind != "skill":
+            chosen_skill = None
+
         skill_cost = _infer_skill_cost(chosen_skill) if chosen_skill else 0
         if chosen_skill and atk.mp < skill_cost:
             chosen_skill = None
@@ -747,7 +863,8 @@ def run_auto_duel(hero_a: Dict[str, Any], hero_b: Dict[str, Any], label_a: str =
         buff_name = str((chosen_skill or {}).get("BUFF_NAME") or "").strip().lower()
         skill_role = str((chosen_skill or {}).get("ROLE") or "").strip().lower()
         range_mode = _skill_range(chosen_skill) if chosen_skill else None
-        hit_chance = max(0.2, min(1.5, 1 + (atk.ac - defen.ev) / 100.0))
+        target = atk if action.target_tag == atk.tag else defen
+        hit_chance = max(0.2, min(1.5, 1 + (atk.ac - target.ev) / 100.0))
 
         if random.random() > hit_chance:
             push_event(
@@ -760,20 +877,24 @@ def run_auto_duel(hero_a: Dict[str, Any], hero_b: Dict[str, Any], label_a: str =
                 False,
                 chosen_skill.get("name") if chosen_skill else None,
                 skill_cost,
+                attack_type=attack_type,
+                buff_name=buff_name or None,
+                skill_role=skill_role or None,
+                range_mode=range_mode,
             )
             return
 
         is_crit = random.random() < atk.cc / 100.0
         crit_multiplier = 1 + atk.ca / 100.0 if is_crit else 1.0
-        mitigation = max(0.0, (defen.def_val - atk.pi * 0.5) / 100.0)
+        mitigation = max(0.0, (target.def_val - atk.pi * 0.5) / 100.0)
 
         raw_damage = (atk.atk + skill_damage) * crit_multiplier
         final_damage = max(1, int(raw_damage * (1.0 - mitigation)))
-        defen.hp = max(0, defen.hp - final_damage)
+        target.hp = max(0, target.hp - final_damage)
 
         applied_stun = False
         if chosen_skill:
-            target = _target_for_skill(atk, defen, chosen_skill)
+            target = _target_for_skill(atk, target, chosen_skill)
             buff_name = str(chosen_skill.get("BUFF_NAME", "")).strip().lower()
             duration = max(0, int(chosen_skill.get("BUFF_TIME", 0)))
 
@@ -845,6 +966,7 @@ def run_auto_duel(hero_a: Dict[str, Any], hero_b: Dict[str, Any], label_a: str =
     return {
         "winner": winner_name,
         "winnerLabel": winner_label,
+        "controlMode": control_mode,
         "logs": logs,
         "events": events,
         "finalHpA": p_a.hp,
@@ -856,11 +978,20 @@ def run_auto_duel(hero_a: Dict[str, Any], hero_b: Dict[str, Any], label_a: str =
     }
 
 
-def run_team_duel(team_a: List[Dict[str, Any]], team_b: List[Dict[str, Any]], size: str, label_a: str, label_b: str):
+def run_team_duel(
+    team_a: List[Dict[str, Any]],
+    team_b: List[Dict[str, Any]],
+    size: str,
+    label_a: str,
+    label_b: str,
+    controller: BattleController | None = None,
+    control_mode: str | None = None,
+):
     if size == "1v1":
-        result = run_auto_duel(team_a[0], team_b[0], label_a, label_b)
+        result = run_auto_duel(team_a[0], team_b[0], label_a, label_b, controller=controller, control_mode=control_mode)
         return {
             "winnerLabel": result["winnerLabel"],
+            "controlMode": result["controlMode"],
             "summary": f"{label_a} vs {label_b} ({size}) winner: {result['winnerLabel']}",
             "logs": result["logs"],
             "events": result["events"],
@@ -868,10 +999,11 @@ def run_team_duel(team_a: List[Dict[str, Any]], team_b: List[Dict[str, Any]], si
         }
 
     lanes = 4 if size in {"4v4", "arena_2x3"} else 3
-    result = _run_board_duel(team_a, team_b, label_a, label_b, lanes)
+    result = _run_board_duel(team_a, team_b, label_a, label_b, lanes, controller=controller, control_mode=control_mode)
     return {
         "winner": result["winner"],
         "winnerLabel": result["winnerLabel"],
+        "controlMode": result["controlMode"],
         "summary": f"{label_a} vs {label_b} ({size}) winner: {result['winnerLabel']}",
         "logs": result["logs"],
         "events": result["events"],

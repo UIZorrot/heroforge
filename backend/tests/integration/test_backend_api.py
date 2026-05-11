@@ -1001,3 +1001,69 @@ def test_public_battle_observation_exposes_only_visible_state():
     assert observation["actor"]["mp"] == attacker.mp
     assert observation["enemies"][0]["tag"].startswith("B")
     assert "secret" not in observation
+
+
+@pytest.mark.integration
+def test_program_controller_targets_self_skill_at_actor(monkeypatch):
+    hero = _board_hero("Mage", range_mode="ranged", target_num=1)
+    hero["skill"]["s1"]["TARGET"] = "Self"
+    hero["skill"]["s1"]["TARGET_NUM"] = 1
+    hero["skill"]["s1"]["MP_COST"] = 0
+    hero["skill"]["s2"]["MP_COST"] = 9999
+    actor = battle_logic.Battler(hero, "A", 0)
+    enemy = battle_logic.Battler(_board_hero("Target", range_mode="melee", target_num=1), "B", 0)
+    controller = battle_logic.ProgramBattleController()
+    observation = battle_logic.build_public_battle_observation(
+        round_num=1,
+        actor=actor,
+        allies=[actor],
+        enemies=[enemy],
+        label_a="Player A",
+        label_b="Player B",
+    )
+
+    monkeypatch.setattr(battle_logic.random, "random", lambda: 0.99)
+    action = controller.choose_action(observation)
+
+    assert action.kind == "skill"
+    assert action.skill_slot == "s1"
+    assert action.target_tag == actor.tag
+
+
+@pytest.mark.integration
+def test_battle_core_accepts_a_controller_and_reports_control_mode():
+    hero_a = _board_hero("Alpha", range_mode="ranged", target_num=1)
+    hero_b = _board_hero("Bravo", range_mode="melee", target_num=1)
+
+    result = battle_logic.run_auto_duel(
+        hero_a,
+        hero_b,
+        label_a="Alpha",
+        label_b="Bravo",
+        controller=battle_logic.ProgramBattleController(),
+    )
+
+    assert result["controlMode"] == "program"
+    assert result["winner"] in {"Alpha", "Bravo", "Tie"}
+
+
+@pytest.mark.integration
+def test_battle_route_echoes_requested_control_mode(monkeypatch):
+    import importlib
+
+    backend_main = importlib.import_module("main")
+    monkeypatch.setattr(backend_main, "current_user", lambda: {"id": "integration-user"})
+    monkeypatch.setattr(backend_main, "save_battle_history", lambda *args, **kwargs: None)
+
+    client = backend_main.app.test_client()
+    hero_a = _board_hero("Alpha", range_mode="ranged", target_num=1)
+    hero_b = _board_hero("Bravo", range_mode="melee", target_num=1)
+
+    response = client.post(
+        "/api/battle",
+        json={"heroA": hero_a, "heroB": hero_b, "controlMode": "ai"},
+    )
+    assert response.status_code == 200, response.get_data(as_text=True)
+    payload = response.get_json()
+
+    assert payload["controlMode"] == "ai"

@@ -1856,11 +1856,12 @@ def battle():
         data = request.json or {}
         hero_a = data.get("heroA")
         hero_b = data.get("heroB")
+        control_mode = str(data.get("controlMode") or "program").strip().lower() or "program"
         
         if not hero_a or not hero_b:
             return jsonify({"error": "Two heroes required for battle"}), 400
             
-        result = run_auto_duel(hero_a, hero_b)
+        result = run_auto_duel(hero_a, hero_b, control_mode=control_mode)
         try:
             save_battle_history(current_user(), "1v1", data, result)
         except Exception:
@@ -1881,11 +1882,12 @@ def battle_team():
         size = data.get("size", "1v1")
         label_a = data.get("labelA", "Team A")
         label_b = data.get("labelB", "Team B")
+        control_mode = str(data.get("controlMode") or "program").strip().lower() or "program"
         
         if not team_a or not team_b:
             return jsonify({"error": "Two teams required for battle"}), 400
             
-        result = run_team_duel(team_a, team_b, size, label_a, label_b)
+        result = run_team_duel(team_a, team_b, size, label_a, label_b, control_mode=control_mode)
         try:
             save_battle_history(current_user(), size, data, result)
         except Exception:
