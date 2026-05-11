@@ -40,6 +40,7 @@ from relic_catalog import get_low_tier_relic_types, get_relic_catalog, get_relic
 from utils import extract_json
 from game_logic import adjust_based_on_bp
 from battle_logic import run_auto_duel, run_team_duel
+import battle_sessions
 
 settings = get_settings()
 
@@ -1894,6 +1895,93 @@ def battle_team():
             logging.exception("Failed to persist team battle history")
         return jsonify(result)
         
+    except Exception as e:
+        logging.exception(e)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/battle/sessions", methods=["POST"])
+@auth_required
+def create_battle_session_route():
+    try:
+        data = request.json or {}
+        battle_mode = str(data.get("battleMode") or "1v1").strip()
+        control_mode = str(data.get("controlMode") or "rest").strip().lower() or "rest"
+        label_a = str(data.get("labelA") or "Team A").strip()
+        label_b = str(data.get("labelB") or "Team B").strip()
+        team_a = data.get("teamA") or []
+        team_b = data.get("teamB") or []
+
+        if control_mode != "rest":
+            return jsonify({"error": "Battle sessions currently support rest control only"}), 400
+        if not isinstance(team_a, list) or not isinstance(team_b, list) or not team_a or not team_b:
+            return jsonify({"error": "Two teams are required"}), 400
+
+        session = battle_sessions.create_battle_session(
+            battle_mode=battle_mode,
+            control_mode=control_mode,
+            label_a=label_a,
+            label_b=label_b,
+            team_a=team_a,
+            team_b=team_b,
+        )
+        return jsonify({"data": session.public_snapshot()}), 201
+    except Exception as e:
+        logging.exception(e)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/battle/sessions/<session_id>", methods=["GET"])
+@auth_required
+def get_battle_session_route(session_id):
+    try:
+        battle_sessions.advance_due_sessions()
+        session = battle_sessions.get_battle_session(session_id)
+        if not session:
+            return jsonify({"error": "Battle session not found"}), 404
+        return jsonify({"data": session.public_snapshot()})
+    except Exception as e:
+        logging.exception(e)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/battle/sessions/<session_id>/actions", methods=["POST"])
+@auth_required
+def advance_battle_session_route(session_id):
+    try:
+        battle_sessions.advance_due_sessions()
+        session = battle_sessions.get_battle_session(session_id)
+        if not session:
+            return jsonify({"error": "Battle session not found"}), 404
+
+        data = request.json or {}
+        action = data.get("action")
+        if not isinstance(action, dict):
+            return jsonify({"error": "action is required"}), 400
+
+        snapshot = session.submit_action(action)
+        if snapshot.get("status") == "resolved":
+            try:
+                save_battle_history(
+                    current_user(),
+                    f"battle_session_{session.battle_mode}",
+                    {
+                        "sessionId": session.session_id,
+                        "battleMode": session.battle_mode,
+                        "controlMode": session.control_mode,
+                        "labelA": session.label_a,
+                        "labelB": session.label_b,
+                        "teamA": session.team_a_payload,
+                        "teamB": session.team_b_payload,
+                    },
+                    session.result,
+                )
+            except Exception:
+                logging.exception("Failed to persist battle session history")
+
+        return jsonify({"data": snapshot})
+    except battle_sessions.BattleSessionError as e:
+        return jsonify({"error": str(e)}), 409
     except Exception as e:
         logging.exception(e)
         return jsonify({"error": str(e)}), 500

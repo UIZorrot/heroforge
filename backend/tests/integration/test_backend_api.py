@@ -1067,3 +1067,103 @@ def test_battle_route_echoes_requested_control_mode(monkeypatch):
     payload = response.get_json()
 
     assert payload["controlMode"] == "ai"
+
+
+@pytest.mark.integration
+def test_create_battle_session_returns_public_snapshot_only():
+    import battle_sessions
+
+    hero_a = _board_hero("Alpha", range_mode="ranged", target_num=1)
+    hero_b = _board_hero("Bravo", range_mode="melee", target_num=1)
+
+    session = battle_sessions.create_battle_session(
+        battle_mode="1v1",
+        control_mode="rest",
+        label_a="Alpha",
+        label_b="Bravo",
+        team_a=[hero_a],
+        team_b=[hero_b],
+        wait_seconds=30,
+    )
+
+    snapshot = session.public_snapshot()
+
+    assert session.session_id
+    assert snapshot["sessionId"] == session.session_id
+    assert snapshot["battleMode"] == "1v1"
+    assert snapshot["controlMode"] == "rest"
+    assert snapshot["status"] == "awaiting_action"
+    assert snapshot["waitingUntil"] > 0
+    assert snapshot["observation"]["actor"]["tag"].startswith("A")
+    assert "internal_turn_queue" not in snapshot
+
+
+@pytest.mark.integration
+def test_battle_session_route_create_and_submit_action(monkeypatch):
+    import importlib
+
+    backend_main = importlib.import_module("main")
+    monkeypatch.setattr(backend_main, "current_user", lambda: {"id": "integration-user"})
+    monkeypatch.setattr(backend_main, "save_battle_history", lambda *args, **kwargs: None)
+
+    client = backend_main.app.test_client()
+    hero_a = _board_hero("Alpha", range_mode="ranged", target_num=1)
+    hero_b = _board_hero("Bravo", range_mode="melee", target_num=1)
+
+    create_response = client.post(
+        "/api/battle/sessions",
+        json={
+            "battleMode": "1v1",
+            "controlMode": "rest",
+            "labelA": "Alpha",
+            "labelB": "Bravo",
+            "teamA": [hero_a],
+            "teamB": [hero_b],
+        },
+    )
+    assert create_response.status_code == 201, create_response.get_data(as_text=True)
+    create_payload = create_response.get_json()["data"]
+    session_id = create_payload["sessionId"]
+    actor_tag = create_payload["activeActorTag"]
+    target_tag = "B1" if actor_tag.startswith("A") else "A1"
+
+    step_response = client.post(
+        f"/api/battle/sessions/{session_id}/actions",
+        json={"action": {"actorTag": actor_tag, "kind": "attack", "targetTag": target_tag}},
+    )
+    assert step_response.status_code == 200, step_response.get_data(as_text=True)
+    step_payload = step_response.get_json()["data"]
+
+    assert step_payload["lastActionSource"] == "rest"
+    assert step_payload["activeActorTag"]
+    assert step_payload["activeActorTag"] != actor_tag
+
+
+@pytest.mark.integration
+def test_battle_session_timeout_falls_back_to_program():
+    import battle_sessions
+
+    hero_a = _board_hero("Alpha", range_mode="ranged", target_num=1)
+    hero_b = _board_hero("Bravo", range_mode="melee", target_num=1)
+
+    session = battle_sessions.create_battle_session(
+        battle_mode="1v1",
+        control_mode="rest",
+        label_a="Alpha",
+        label_b="Bravo",
+        team_a=[hero_a],
+        team_b=[hero_b],
+        wait_seconds=1,
+    )
+
+    initial_actor_tag = session.active_actor_tag
+    assert session.waiting_until_ms is not None
+
+    assert session.auto_advance_due(now_ms=session.waiting_until_ms - 1) is False
+    assert session.last_action_source is None
+
+    assert session.auto_advance_due(now_ms=session.waiting_until_ms + 1) is True
+    snapshot = session.public_snapshot()
+
+    assert snapshot["lastActionSource"] == "program"
+    assert snapshot["activeActorTag"] != initial_actor_tag
