@@ -1,6 +1,7 @@
 import random
 import time
-from typing import Any, Dict, List
+from dataclasses import dataclass
+from typing import Any, Dict, List, Literal, Protocol
 
 
 BUFF_ALIASES = {
@@ -180,6 +181,116 @@ def _unit_snapshot(unit: Battler, side: str, slot_index: int) -> Dict[str, Any]:
             "AC": unit.base_ac,
         },
     }
+
+
+def _public_unit_snapshot(unit: Battler, side: str, slot_index: int) -> Dict[str, Any]:
+    skills = unit.character.get("skill", {})
+    return {
+        "tag": unit.tag,
+        "side": side,
+        "slot": slot_index,
+        "name": unit.name,
+        "alive": unit.hp > 0,
+        "hp": unit.hp,
+        "maxHp": unit.max_hp,
+        "mp": unit.mp,
+        "maxMp": unit.max_mp,
+        "buffs": [buff.copy() for buff in unit.buffs],
+        "state": {
+            "HP": unit.hp,
+            "MP": unit.mp,
+            "ATK": unit.base_atk,
+            "DEF": unit.base_def,
+            "CC": unit.base_cc,
+            "SPEED": unit.base_spd,
+            "CA": unit.base_ca,
+            "PI": unit.base_pi,
+            "EV": unit.base_ev,
+            "AC": unit.base_ac,
+        },
+        "skills": {
+            "s1": skills.get("s1"),
+            "s2": skills.get("s2"),
+        },
+    }
+
+
+def build_public_battle_observation(
+    round_num: int,
+    actor: Battler,
+    allies: List[Battler],
+    enemies: List[Battler],
+    label_a: str,
+    label_b: str,
+) -> Dict[str, Any]:
+    return {
+        "round": round_num,
+        "labels": {"a": label_a, "b": label_b},
+        "actor": _public_unit_snapshot(actor, "A" if actor.tag.startswith("A") else "B", actor.slot_index or 0),
+        "allies": [
+            _public_unit_snapshot(unit, "A" if unit.tag.startswith("A") else "B", unit.slot_index or 0)
+            for unit in allies
+            if unit and unit.hp > 0
+        ],
+        "enemies": [
+            _public_unit_snapshot(unit, "A" if unit.tag.startswith("A") else "B", unit.slot_index or 0)
+            for unit in enemies
+            if unit and unit.hp > 0
+        ],
+    }
+
+
+@dataclass(frozen=True)
+class BattleAction:
+    kind: Literal["attack", "skill", "pass"]
+    target_tag: str | None = None
+    skill_slot: Literal["s1", "s2"] | None = None
+
+
+class BattleController(Protocol):
+    def choose_action(self, observation: Dict[str, Any]) -> BattleAction: ...
+
+
+class ProgramBattleController:
+    def choose_action(self, observation: Dict[str, Any]) -> BattleAction:
+        actor = observation.get("actor") or {}
+        skills = actor.get("skills") or {}
+        mp = _safe_int(actor.get("mp", 0), 0)
+
+        available_skills = []
+        for slot in ("s1", "s2"):
+            skill = skills.get(slot)
+            if not isinstance(skill, dict):
+                continue
+            skill_cost = _infer_skill_cost(skill)
+            if mp >= skill_cost:
+                available_skills.append((slot, skill, skill_cost))
+
+        if not available_skills:
+            return BattleAction(kind="attack")
+
+        if random.random() < 0.35:
+            return BattleAction(kind="attack")
+
+        chosen_slot, chosen_skill, _ = max(
+            available_skills,
+            key=lambda item: (
+                _safe_int(item[1].get("DMG", 0), 0),
+                _safe_int(item[1].get("BUFF_DMG", 0), 0)
+                + _safe_int(item[1].get("BUFF_CC", 0), 0)
+                + _safe_int(item[1].get("BUFF_DEF", 0), 0)
+                + _safe_int(item[1].get("BUFF_EV", 0), 0),
+                -_safe_int(item[2], 0),
+            ),
+        )
+
+        if random.random() > 0.75 and len(available_skills) > 1:
+            chosen_slot = random.choice([slot for slot, _, _ in available_skills])
+            chosen_skill = skills.get(chosen_slot) or chosen_skill
+
+        target_mode = str((chosen_skill or {}).get("TARGET") or "Enemy").strip().lower()
+        target_tag = None if target_mode in {"enemy", "ally", "self"} else None
+        return BattleAction(kind="skill", target_tag=target_tag, skill_slot=chosen_slot)
 
 
 def _board_snapshot(round_num: int, team_a: List[Battler], team_b: List[Battler], label_a: str, label_b: str) -> Dict[str, Any]:

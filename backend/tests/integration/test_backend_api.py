@@ -976,3 +976,28 @@ def test_4v4_board_snapshot_and_range_targeting(harness):
 
     assert melee_targets == []
     assert ranged_targets and ranged_targets[0].tag == "B2"
+
+
+@pytest.mark.integration
+def test_public_battle_observation_exposes_only_visible_state():
+    hero_a = _board_hero("Alpha", range_mode="ranged", target_num=1)
+    hero_b = _board_hero("Bravo", range_mode="melee", target_num=1)
+    attacker = battle_logic.Battler(hero_a, "A", 0)
+    defender = battle_logic.Battler(hero_b, "B", 0)
+
+    observation = battle_logic.build_public_battle_observation(
+        round_num=3,
+        actor=attacker,
+        allies=[attacker],
+        enemies=[defender],
+        label_a="Player A",
+        label_b="Player B",
+    )
+
+    assert observation["round"] == 3
+    assert observation["labels"] == {"a": "Player A", "b": "Player B"}
+    assert observation["actor"]["tag"].startswith("A")
+    assert observation["actor"]["hp"] == attacker.hp
+    assert observation["actor"]["mp"] == attacker.mp
+    assert observation["enemies"][0]["tag"].startswith("B")
+    assert "secret" not in observation
