@@ -12,7 +12,7 @@ import { forgeHero, fetchHeroes, fetchEconomy, fetchCurrentUser, getStoredSessio
 import { calculateRarity, normalizeCharacterData, toNumber, type CharacterData, type Rarity } from './lib/gameLogic';
 import { runTeamDuel } from './lib/battleLogic';
 import { LandingPage } from './components/LandingPage';
-import type { SavedHero, MaterialKey, MaterialInventory, MaterialDefinition, AuthUser } from './types';
+import type { AuthUser, EconomySnapshot, MaterialDefinition, MaterialInventory, MaterialKey, RelicDefinition, SavedHero } from './types';
 import type { BattleEvent, BattleResult } from './lib/battleTypes';
 import { SectionHeader } from './components/Effects';
 import { Shield } from 'lucide-react';
@@ -60,7 +60,7 @@ const App: React.FC = () => {
   const [cooldown, setCooldown] = useState(0);
   const [authError, setAuthError] = useState('');
   const [authMessage, setAuthMessage] = useState('');
-  const [economy, setEconomy] = useState<any>(null);
+  const [economy, setEconomy] = useState<EconomySnapshot | null>(null);
 
   const [image, setImage] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -93,10 +93,10 @@ const App: React.FC = () => {
 
   const reloadCollections = async (tokenArg?: string | null) => {
     const token = tokenArg ?? session?.token ?? getStoredToken();
-    if (!token) return;
+    if (!token) return [];
     try {
       const heroRecords = await fetchHeroes(token);
-      setSavedHeroes(heroRecords.map((record: any) => ({
+      const heroes = heroRecords.map((record: any) => ({
         id: record.id,
         createdAt: new Date(record.created_at).getTime() || Date.now(),
         character: normalizeCharacterData(record.hero_payload),
@@ -108,11 +108,14 @@ const App: React.FC = () => {
         pvpDeadAt: record.pvp_dead_at,
         decomposedAt: record.decomposed_at,
         activePvpEntryId: record.active_pvp_entry_id,
-      })));
+      }));
+      setSavedHeroes(heroes);
       try {
         setEconomy(await fetchEconomy(token));
       } catch (err) {}
+      return heroes;
     } catch {}
+    return [];
   };
 
   useEffect(() => {
@@ -219,12 +222,8 @@ const App: React.FC = () => {
       setTimeout(() => {
         setCharacter(normalizeCharacterData(heroData));
         setLastForgeInfusion(spendSnapshot);
-        reloadCollections(token).then(() => {
-          setSavedHeroes(prevHeroes => {
-            if (prevHeroes.length > 0) setSelectedVaultId(prevHeroes[0].id);
-            return prevHeroes;
-          });
-        });
+        setSelectedVaultId('');
+        void reloadCollections(token);
         setMaterials((prev) => {
           const next = { ...prev };
           MATERIAL_DEFINITIONS.forEach(({ key }) => {
@@ -284,6 +283,11 @@ const App: React.FC = () => {
         particleClass: material.particleClass,
       })),
     [selectedVaultHero]
+  );
+  const relicEntries = economy?.relics ?? [];
+  const relicCatalogByType = useMemo<Record<string, RelicDefinition>>(
+    () => Object.fromEntries((economy?.relic_catalog ?? []).map((relic) => [relic.relic_type, relic])),
+    [economy]
   );
   const collectionAverageBP = useMemo(() => {
     if (savedHeroes.length === 0) return 0;
@@ -466,7 +470,16 @@ const App: React.FC = () => {
         )}
         <AnimatePresence mode="wait">
           {(authError || authMessage) && (
-            <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} className="border px-4 py-3 text-sm border-amber-400/20 bg-amber-400/10 text-amber-100">
+            <motion.div
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              className={`border px-4 py-3 text-sm ${
+                authError
+                  ? 'border-amber-400/20 bg-amber-400/10 text-amber-100'
+                  : 'border-emerald-400/20 bg-emerald-400/10 text-emerald-100'
+              }`}
+            >
               {authError || authMessage}
             </motion.div>
           )}
@@ -742,6 +755,45 @@ const App: React.FC = () => {
                       <span className="text-xs font-light tracking-[0.12em] text-stone-300">{materials[material.key]}</span>
                     </div>
                   ))}
+                </div>
+              </div>
+              <div className="mt-6 border-t border-stone-800 pt-6">
+                <p className="mb-4 text-[10px] font-light uppercase tracking-[0.3em] text-stone-500">Relic Vault</p>
+                <div className="max-h-64 space-y-3 overflow-auto pr-1">
+                  {relicEntries.length > 0 ? (
+                    relicEntries.map((relic) => {
+                      const definition = relicCatalogByType[relic.relic_type];
+                      return (
+                        <div
+                          key={relic.relic_type}
+                          className="border border-stone-800 bg-black/30 px-3 py-2 transition-colors hover:border-stone-700"
+                        >
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="min-w-0">
+                              <div className="truncate text-[10px] uppercase tracking-[0.22em] text-stone-200">
+                                {definition?.display_name ?? relic.relic_type}
+                              </div>
+                              <div className="mt-1 text-[9px] uppercase tracking-[0.28em] text-stone-500">
+                                {definition?.family ?? 'Unknown'} / {definition?.tier ?? 'common'}
+                              </div>
+                            </div>
+                            <div className="shrink-0 border border-stone-700 px-2 py-1 text-[10px] tracking-[0.22em] text-stone-300">
+                              x{relic.amount}
+                            </div>
+                          </div>
+                          {definition?.lore_summary && (
+                            <p className="mt-2 line-clamp-2 text-[10px] leading-5 text-stone-500">
+                              {definition.lore_summary}
+                            </p>
+                          )}
+                        </div>
+                      );
+                    })
+                  ) : (
+                    <div className="border-y border-stone-800 bg-black/20 py-8 text-center text-[10px] uppercase tracking-widest text-stone-500">
+                      No relics bound
+                    </div>
+                  )}
                 </div>
               </div>
             </motion.aside>
@@ -1467,7 +1519,9 @@ const App: React.FC = () => {
                     heroes={savedHeroes}
                     economy={economy}
                     token={session?.token ?? getStoredToken()}
-                    onRefresh={() => reloadCollections()}
+                    onRefresh={async () => {
+                      await reloadCollections();
+                    }}
                   />
                 )}
                 {activeSection === 'ladder' && (

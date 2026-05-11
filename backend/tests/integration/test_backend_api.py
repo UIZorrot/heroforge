@@ -191,11 +191,27 @@ def test_auth_login_and_initial_economy(harness):
     assert economy["costs"]["pvp_stake"] == 30
     assert economy["costs"]["pvp_revive"] == 200
     assert economy["pvp"]["match_tolerance_pct"] == 5
+    assert economy["pvp"]["low_tier_relic_drop_pct"] == 3
     assert economy["transactions"] == []
 
     unauthorized = harness.client.get("/api/me/economy")
     harness.trace("economy-unauthorized", unauthorized)
     assert unauthorized.status_code == 401
+
+
+@pytest.mark.integration
+def test_initial_economy_includes_relic_catalog(harness):
+    headers = harness.login("integration-relic-catalog@example.com")
+    economy = harness.economy(headers)
+
+    assert isinstance(economy["relic_catalog"], list)
+    assert any(row["relic_type"] == "low_ember_shard" for row in economy["relic_catalog"])
+    assert any(row["relic_type"] == "named_echo_heart" for row in economy["relic_catalog"])
+
+    ember = next(row for row in economy["relic_catalog"] if row["relic_type"] == "low_ember_shard")
+    assert ember["display_name"] == "Ember Shard"
+    assert ember["tier"] == "common"
+    assert "soulslike item icon" in ember["icon_prompt"]
 
 
 @pytest.mark.integration
@@ -760,6 +776,93 @@ def test_pvp_matchmaking_within_bp_window_and_stake_settlement(harness):
     economy_b = harness.economy(headers_b)
     total_dust = economy_a["wallet"]["dust_balance"] + economy_b["wallet"]["dust_balance"]
     assert total_dust == 800
+
+
+@pytest.mark.integration
+def test_pvp_win_can_grant_low_tier_relic(harness, monkeypatch):
+    import battle_logic
+
+    headers_a = harness.login("integration-relic-a@example.com")
+    hero_a = _board_hero(
+        "RelicWinner",
+        hp=1500,
+        mp=120,
+        atk=220,
+        defense=80,
+        speed=110,
+        accuracy=100,
+        evasion=0,
+    )
+    with harness.db_module.get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO heroes (user_id, source_payload, hero_payload)
+                VALUES (%s, %s::jsonb, %s::jsonb)
+                RETURNING id
+                """,
+                (
+                    harness.last_user["id"],
+                    harness.db_module.serialize_json({"source": "integration"}),
+                    harness.db_module.serialize_json(hero_a),
+                ),
+            )
+            hero_a_id = str(cur.fetchone()["id"])
+        conn.commit()
+
+    headers_b = harness.login("integration-relic-b@example.com")
+    hero_b = _board_hero(
+        "RelicRunnerUp",
+        hp=500,
+        mp=80,
+        atk=20,
+        defense=5,
+        speed=10,
+        accuracy=100,
+        evasion=0,
+    )
+    with harness.db_module.get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO heroes (user_id, source_payload, hero_payload)
+                VALUES (%s, %s::jsonb, %s::jsonb)
+                RETURNING id
+                """,
+                (
+                    harness.last_user["id"],
+                    harness.db_module.serialize_json({"source": "integration"}),
+                    harness.db_module.serialize_json(hero_b),
+                ),
+            )
+            hero_b_id = str(cur.fetchone()["id"])
+        conn.commit()
+
+    monkeypatch.setattr(harness.app_module.secrets, "randbelow", lambda n: 0)
+    monkeypatch.setattr(battle_logic.random, "shuffle", lambda seq: None)
+    monkeypatch.setattr(battle_logic.random, "random", lambda: 1.0)
+
+    join_a = harness.pvp_join(headers_a, [hero_a_id], queue_key="ranked-relic", battle_mode="1v1")
+    assert join_a["status"] == "waiting"
+
+    join_b = harness.pvp_join(headers_b, [hero_b_id], queue_key="ranked-relic", battle_mode="1v1")
+    assert join_b["status"] == "matched"
+    assert join_b["winner_side"] == "A"
+    assert join_b["reward"]["relic_drop"] is not None
+    assert join_b["reward"]["relic_drop"]["relic_type"] in {
+        "low_ember_shard",
+        "low_frost_shard",
+        "low_radiant_shard",
+        "low_void_shard",
+        "low_storm_shard",
+        "low_beast_fang",
+    }
+    assert join_b["reward"]["relic_drop"]["display_name"]
+    assert join_b["reward"]["relic_drop"]["amount"] == 1
+
+    economy_a = harness.economy(headers_a)
+    assert any(relic["relic_type"] == join_b["reward"]["relic_drop"]["relic_type"] and relic["amount"] == 1 for relic in economy_a["relics"])
+    assert any(txn["reason"] == "pvp_relic_drop" for txn in economy_a["transactions"])
 
 
 @pytest.mark.integration

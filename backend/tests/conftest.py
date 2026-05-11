@@ -302,6 +302,7 @@ def _apply_test_env(database_url: str) -> None:
             "DUST_COST_PVP_REVIVE": "200",
             "PVP_STAKE_DUST": "30",
             "PVP_MATCH_TOLERANCE_PCT": "5",
+            "PVP_LOW_TIER_RELIC_DROP_PCT": "3",
             "PVP_QUEUE_TTL_MINUTES": "10",
         }
     )

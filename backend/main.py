@@ -24,6 +24,7 @@ from auth import create_login_code, get_user_from_token, revoke_session, verify_
 from config import get_settings
 from db import (
     adjust_dust_balance,
+    adjust_relic_balance,
     execute,
     fetch_all,
     fetch_one,
@@ -35,6 +36,7 @@ from db import (
     initialize_schema,
     serialize_json,
 )
+from relic_catalog import get_low_tier_relic_types, get_relic_catalog, get_relic_definition
 from utils import extract_json
 from game_logic import adjust_based_on_bp
 from battle_logic import run_auto_duel, run_team_duel
@@ -629,6 +631,7 @@ def economy_snapshot(user):
     return {
         "wallet": normalize_json_value(wallet) if wallet else None,
         "relics": normalize_rows(relics),
+        "relic_catalog": normalize_rows(get_relic_catalog()),
         "transactions": normalize_rows(transactions),
         "costs": {
             "forge": settings.dust_cost_forge,
@@ -643,6 +646,7 @@ def economy_snapshot(user):
         },
         "pvp": {
             "match_tolerance_pct": settings.pvp_match_tolerance_pct,
+            "low_tier_relic_drop_pct": settings.pvp_low_tier_relic_drop_pct,
             "queue_ttl_minutes": settings.pvp_queue_ttl_minutes,
         },
     }
@@ -1117,6 +1121,54 @@ def _apply_arena_card_deaths(match_id, user_id, side, defeated_units):
     return changes
 
 
+def _maybe_grant_pvp_relic_drop(winner_user_id, match_row, battle_mode):
+    if not winner_user_id:
+        return None
+
+    drop_pct = max(0, int(settings.pvp_low_tier_relic_drop_pct))
+    if drop_pct <= 0:
+        return None
+    if secrets.randbelow(100) >= drop_pct:
+        return None
+
+    drop_pool = get_low_tier_relic_types()
+    if not drop_pool:
+        return None
+
+    relic_type = secrets.choice(drop_pool)
+    relic_definition = get_relic_definition(relic_type) or {}
+    try:
+        relic_result = adjust_relic_balance(
+            winner_user_id,
+            relic_type,
+            1,
+            "pvp_relic_drop",
+            ref_type="pvp_match",
+            ref_id=str(match_row["id"]),
+            metadata={
+                "battle_mode": battle_mode,
+                "drop_pct": drop_pct,
+                "match_id": str(match_row["id"]),
+                "relic_type": relic_type,
+            },
+        )
+    except Exception:
+        logging.exception("Failed to grant PvP relic drop")
+        return None
+
+    transaction = relic_result.get("transaction") or {}
+    return {
+        "relic_type": relic_type,
+        "display_name": relic_definition.get("display_name", relic_type),
+        "tier": relic_definition.get("tier", "common"),
+        "family": relic_definition.get("family"),
+        "amount": 1,
+        "balance_after": relic_result["amount"],
+        "transaction_id": str(transaction.get("id")) if transaction.get("id") else None,
+        "reason": "pvp_relic_drop",
+    }
+
+
 def _resolve_pvp_match(match_row, entry_a, entry_b, battle_result):
     winner_label = str(battle_result.get("winnerLabel") or battle_result.get("winner") or "Tie")
     battle_mode = match_row["battle_mode"]
@@ -1187,6 +1239,7 @@ def _resolve_pvp_match(match_row, entry_a, entry_b, battle_result):
     else:
         winner_side = "A" if winner_label == "Player A" else ("B" if winner_label == "Player B" else "Tie")
         winner_user_id = str(match_row["user_a_id"]) if winner_side == "A" else str(match_row["user_b_id"]) if winner_side == "B" else None
+        relic_drop = _maybe_grant_pvp_relic_drop(winner_user_id, match_row, battle_mode)
         if winner_user_id:
             adjust_dust_balance(
                 winner_user_id,
@@ -1204,7 +1257,7 @@ def _resolve_pvp_match(match_row, entry_a, entry_b, battle_result):
             "tie_refund": False,
             "payout_dust": int(match_row["stake_dust"]) * 2 if winner_user_id else 0,
             "refund_dust_each": 0,
-            "relic_drop": None,
+            "relic_drop": relic_drop,
         }
 
     with get_connection() as conn:

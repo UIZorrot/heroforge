@@ -65,6 +65,14 @@ CREATE TABLE IF NOT EXISTS heroes (
     CHECK (card_status IN ('active', 'locked', 'decomposed'))
 );
 
+ALTER TABLE heroes ADD COLUMN IF NOT EXISTS pvp_life_state text NOT NULL DEFAULT 'active';
+ALTER TABLE heroes ADD COLUMN IF NOT EXISTS pve_life_state text NOT NULL DEFAULT 'active';
+ALTER TABLE heroes ADD COLUMN IF NOT EXISTS card_status text NOT NULL DEFAULT 'active';
+ALTER TABLE heroes ADD COLUMN IF NOT EXISTS locked_reason text;
+ALTER TABLE heroes ADD COLUMN IF NOT EXISTS pvp_dead_at timestamptz;
+ALTER TABLE heroes ADD COLUMN IF NOT EXISTS decomposed_at timestamptz;
+ALTER TABLE heroes ADD COLUMN IF NOT EXISTS active_pvp_entry_id uuid;
+
 CREATE INDEX IF NOT EXISTS idx_heroes_user_id_created_at ON heroes(user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_heroes_user_pvp_life_state ON heroes(user_id, pvp_life_state);
 CREATE INDEX IF NOT EXISTS idx_heroes_active_pvp_entry ON heroes(active_pvp_entry_id);
@@ -319,13 +327,6 @@ CREATE TABLE IF NOT EXISTS daily_task_progress (
 
 CREATE INDEX IF NOT EXISTS idx_daily_task_progress_user_date ON daily_task_progress(user_id, task_date DESC);
 
-ALTER TABLE heroes ADD COLUMN IF NOT EXISTS pvp_life_state text NOT NULL DEFAULT 'active';
-ALTER TABLE heroes ADD COLUMN IF NOT EXISTS pve_life_state text NOT NULL DEFAULT 'active';
-ALTER TABLE heroes ADD COLUMN IF NOT EXISTS card_status text NOT NULL DEFAULT 'active';
-ALTER TABLE heroes ADD COLUMN IF NOT EXISTS locked_reason text;
-ALTER TABLE heroes ADD COLUMN IF NOT EXISTS pvp_dead_at timestamptz;
-ALTER TABLE heroes ADD COLUMN IF NOT EXISTS decomposed_at timestamptz;
-ALTER TABLE heroes ADD COLUMN IF NOT EXISTS active_pvp_entry_id uuid;
 ALTER TABLE pvp_queue_entries ADD COLUMN IF NOT EXISTS formation_snapshot jsonb NOT NULL DEFAULT '{}'::jsonb;
 ALTER TABLE pvp_matches ADD COLUMN IF NOT EXISTS formation_a jsonb NOT NULL DEFAULT '{}'::jsonb;
 ALTER TABLE pvp_matches ADD COLUMN IF NOT EXISTS formation_b jsonb NOT NULL DEFAULT '{}'::jsonb;

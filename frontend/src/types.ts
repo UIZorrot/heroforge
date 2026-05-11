@@ -94,6 +94,19 @@ export interface EconomyTransaction {
   created_at: string;
 }
 
+export interface RelicDefinition {
+  relic_type: string;
+  display_name: string;
+  tier: 'common' | 'rare' | 'epic' | 'legendary' | 'limited';
+  family: string;
+  lore_summary: string;
+  effect_profile: string;
+  forge_bias: string;
+  battle_bias: string;
+  icon_prompt: string;
+  is_limited: boolean;
+}
+
 export interface EconomySnapshot {
   wallet: {
     user_id: string;
@@ -108,6 +121,7 @@ export interface EconomySnapshot {
     created_at: string;
     updated_at: string;
   }>;
+  relic_catalog: RelicDefinition[];
   transactions: EconomyTransaction[];
   costs: {
     forge: number;
@@ -122,6 +136,7 @@ export interface EconomySnapshot {
   };
   pvp: {
     match_tolerance_pct: number;
+    low_tier_relic_drop_pct: number;
     queue_ttl_minutes: number;
   };
 }

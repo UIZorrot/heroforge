@@ -155,6 +155,7 @@ export function PvpArena({ heroes, economy, token, onRefresh }: PvpArenaProps) {
 
   const totalBp = useMemo(() => selectedHeroes.reduce((sum, hero) => sum + heroTotalBp(hero), 0), [selectedHeroes]);
   const tolerancePct = economy?.pvp.match_tolerance_pct ?? 10;
+  const relicDropPct = economy?.pvp.low_tier_relic_drop_pct ?? 3;
   const stakeDust = economy?.costs.pvp_stake ?? economy?.costs.pvp_entry ?? 30;
   const reviveDust = economy?.costs.pvp_revive ?? 200;
   const walletDust = economy?.wallet?.dust_balance ?? economy?.starter.dust_balance ?? 0;
@@ -167,6 +168,10 @@ export function PvpArena({ heroes, economy, token, onRefresh }: PvpArenaProps) {
   const queueCountdown = formatCountdown(queueEntry?.expires_at, now);
   const activeTeamNames = selectedHeroes.map((hero) => hero.character.name);
   const deadHeroes = heroes.filter((hero) => hero.pvpLifeState === 'pvp_dead');
+  const matchRelicDrop =
+    matchRecord?.reward_payload && typeof matchRecord.reward_payload === 'object'
+      ? (matchRecord.reward_payload as { relic_drop?: { relic_type?: string; display_name?: string; amount?: number } }).relic_drop ?? null
+      : null;
 
   const clearQueueArtifacts = () => {
     setQueueEntry(null);
@@ -556,6 +561,7 @@ export function PvpArena({ heroes, economy, token, onRefresh }: PvpArenaProps) {
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <StatPill label="Tolerance" value={`${tolerancePct}%`} tone="emerald" />
+                  <StatPill label="Relic" value={`${relicDropPct}%`} tone="violet" />
                   <StatPill label="TTL" value={`${economy?.pvp.queue_ttl_minutes ?? 10}m`} tone="violet" />
                   <StatPill label="Queue" value={waiting ? queueCountdown : 'idle'} tone={waiting ? 'amber' : 'slate'} />
                 </div>
@@ -666,6 +672,13 @@ export function PvpArena({ heroes, economy, token, onRefresh }: PvpArenaProps) {
                 <StatPill label="Enemy BP" value={matchRecord.user_b_id ? matchRecord.bp_b : 0} tone="violet" />
                 <StatPill label="Gap" value={`${matchRecord.bp_gap_pct.toFixed(2)}%`} tone="emerald" />
                 <StatPill label="Stake" value={matchRecord.stake_dust} tone="amber" />
+                {matchRelicDrop && (
+                <StatPill
+                  label="Relic"
+                  value={`${matchRelicDrop.display_name ?? matchRelicDrop.relic_type ?? 'Arena relic'} x${matchRelicDrop.amount ?? 0}`}
+                  tone="violet"
+                />
+              )}
               </div>
               <div className="mt-3 leading-7 text-stone-300">
                 {battleResult.summary || 'Arena result resolved successfully.'}

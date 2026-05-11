@@ -36,6 +36,7 @@ class Settings:
     dust_cost_pvp_revive: int
     pvp_stake_dust: int
     pvp_match_tolerance_pct: int
+    pvp_low_tier_relic_drop_pct: int
     pvp_queue_ttl_minutes: int
 
 
@@ -81,8 +82,46 @@ def _build_supabase_database_url() -> str:
     return f"postgresql://{user}:{encoded_password}@{db_host}:5432/{db_name}?sslmode=require"
 
 
+def _normalize_database_url(raw_url: str) -> str:
+    raw_url = raw_url.strip()
+    if not raw_url:
+        return ""
+
+    parsed = urlparse(raw_url)
+    if parsed.scheme in ("postgres", "postgresql") and parsed.username and parsed.password is not None and parsed.hostname:
+        return raw_url
+
+    if not raw_url.startswith(("postgres://", "postgresql://")):
+        return raw_url
+
+    scheme, _, remainder = raw_url.partition("://")
+    if "@" not in remainder:
+        return raw_url
+
+    credentials, _, host_and_path = remainder.rpartition("@")
+    if ":" not in credentials:
+        return raw_url
+
+    user, password = credentials.split(":", 1)
+    host_port, _, path_and_query = host_and_path.partition("/")
+    if not user or not host_port or not path_and_query:
+        return raw_url
+
+    db_name, _, query = path_and_query.partition("?")
+    if not db_name:
+        return raw_url
+
+    encoded_password = quote_plus(password)
+    suffix = f"?{query}" if query else ""
+    return f"{scheme}://{user}:{encoded_password}@{host_port}/{db_name}{suffix}"
+
+
 def get_settings() -> Settings:
-    database_url = os.getenv("DATABASE_URL", "").strip() or _build_supabase_database_url()
+    database_url = os.getenv("DATABASE_URL", "").strip()
+    if database_url:
+        database_url = _normalize_database_url(database_url)
+    else:
+        database_url = _build_supabase_database_url()
     return Settings(
         gemini_api_key=os.getenv("GEMINI_API_KEY", "").strip(),
         gemini_model=os.getenv("GEMINI_MODEL", "gemini-1.5-flash").strip(),
@@ -101,5 +140,6 @@ def get_settings() -> Settings:
         dust_cost_pvp_revive=_get_int_env("DUST_COST_PVP_REVIVE", 200),
         pvp_stake_dust=_get_int_env("PVP_STAKE_DUST", _get_int_env("DUST_COST_PVP_ENTRY", 30)),
         pvp_match_tolerance_pct=_get_int_env("PVP_MATCH_TOLERANCE_PCT", 5),
+        pvp_low_tier_relic_drop_pct=_get_int_env("PVP_LOW_TIER_RELIC_DROP_PCT", 3),
         pvp_queue_ttl_minutes=_get_int_env("PVP_QUEUE_TTL_MINUTES", 10),
     )

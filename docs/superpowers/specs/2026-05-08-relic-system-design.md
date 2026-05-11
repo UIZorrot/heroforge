@@ -208,6 +208,21 @@ These are future-friendly placeholders, not core MVP requirements:
 - Frozen Cathedral Token
 - Red Comet Fragment
 
+### 5.4 Additional roster seeds
+
+These are extra candidates for later expansion if the content pool needs more variety.
+
+| Relic | Tier | Family | Identity | Primary effect direction | Icon prompt |
+| --- | --- | --- | --- | --- | --- |
+| Ash Fragment | Common | Fire | Black ember dust sealed in slag | Very basic fire bias, cheap drop, very common reward token | `soulslike item icon, ash fragment, blackened ember chip, cracked iron cage, soot dust, orange rim light, black void background, centered composition, square icon, no text` |
+| Tide Shard | Common | Water | Salted glass from an old sea shrine | Water bias, recovery and fluidity themes, light support use | `soulslike item icon, tide shard, translucent blue glass crystal, salt ring, water droplets, black void background, dramatic rim light, hand-painted fantasy detail, centered composition, square icon, no text` |
+| Iron Splinter | Common | Stone | A splinter torn from a fortress plate | Defense bias, bodyguard / armor direction, basic survival use | `soulslike item icon, iron splinter, dark steel shard, rivet ring, worn battle scratches, black void background, dramatic rim light, hand-painted fantasy detail, centered composition, square icon, no text` |
+| Moon Ash | Common | Void | Ash that fell under a moonless rite | Light void bias, stealth and omen flavor, early rare roll helper | `soulslike item icon, moon ash, silver-gray ash clump, crescent sigil, pale haze, black void background, dramatic rim light, hand-painted fantasy detail, centered composition, square icon, no text` |
+| Lantern of the Ninth Bell | Rare | Light | A pilgrimage lantern that only rings at dawn | Stronger holy / protection identity, shrine and vow effects | `soulslike item icon, lantern of the ninth bell, ornate golden lantern, nine tiny bell charms, holy flame, black void background, dramatic rim light, hand-painted fantasy detail, centered composition, square icon, no text` |
+| Hollow Choir | Epic | Void | A bone choir that sings without mouths | Void and curse identity, control and dread aesthetics | `soulslike item icon, hollow choir relic, clustered bone chimes, black hymn ribbons, violet echo haze, black void background, dramatic rim light, hand-painted fantasy detail, centered composition, square icon, no text` |
+| Warden's Tear | Epic | Frost | A frozen tear from a prison saint | Defense, endurance, and restraint identity | `soulslike item icon, warden's tear, clear frozen droplet in silver claw setting, ice mist, pale blue glow, black void background, dramatic rim light, hand-painted fantasy detail, centered composition, square icon, no text` |
+| Kingless Banner | Epic | Beast | A torn war banner that never bowed | Aggression and battlefield momentum identity | `soulslike item icon, kingless banner, torn red-black cloth banner, bone spear tip, weathered cloth folds, black void background, dramatic rim light, hand-painted fantasy detail, centered composition, square icon, no text` |
+
 ---
 
 ## 6. Functional Mapping
@@ -313,3 +328,39 @@ This spec does not yet define:
 - the limited relic sale system.
 
 Those belong in the implementation plan once the catalog direction is approved.
+
+---
+
+## 10. Relic Production Notes
+
+Use these rules whenever a new relic is added:
+
+1. Decide the category first.
+   - `common` for low-tier functional relics.
+   - `rare` / `epic` / `legendary` for named relics.
+   - `limited` only for time-bound or event-only relics.
+2. Always define both `relic_type` and `display_name`.
+   - `relic_type` is the stable code key.
+   - `display_name` is the player-facing title.
+3. Every relic must have a strong silhouette.
+   - If it cannot be recognized at small size, the icon prompt is not ready yet.
+4. Low-tier relics must stay simple.
+   - One family, one bias, one sentence of lore.
+   - They should be readable in one glance.
+5. Named relics must earn their name.
+   - Give them a real lore hook.
+   - Give them a specific object form.
+   - Avoid generic labels like "Ancient Relic" or "Mystic Charm".
+6. No relic should be a plain stat stick.
+   - Prefer forge bias, reward bias, conditional effects, or collection value.
+7. Every relic entry must include an icon prompt.
+   - The prompt should work for a Soulslike / dark fantasy item icon generator.
+   - Keep the object centered, isolated, and readable.
+8. Do not add relics directly into gameplay before they exist in the catalog.
+   - Add catalog entry first.
+   - Add drop or reward hook second.
+   - Add UI rendering last.
+9. Keep family language consistent.
+   - Fire, Frost, Light, Void, Storm, Beast, Memory, and future families should remain visually coherent.
+10. If a relic is not exciting as text, it will not become exciting after balancing.
+   - Fix the concept before balancing the numbers.
