@@ -1,0 +1,15 @@
+ERROR    root:main.py:53 Database schema initialization skipped or failed
+Traceback (most recent call last):
+  File "D:\_Project\HF\backend\main.py", line 51, in <module>
+    initialize_schema()
+  File "D:\_Project\HF\backend\db.py", line 381, in initialize_schema
+    with _connect() as conn:
+         ^^^^^^^^^^
+  File "D:\_Project\HF\backend\db.py", line 375, in _connect
+    conn = psycopg.connect(database_url, row_factory=dict_row)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\uizor\AppData\Roaming\Python\Python312\site-packages\psycopg\connection.py", line 122, in connect
+    raise last_ex.with_traceback(None)
+psycopg.OperationalError: connection failed: connection to server at "198.18.0.19", port 5432 failed: server closed the connection unexpectedly
+	This probably means the server terminated abnormally
+	before or while processing the request.
