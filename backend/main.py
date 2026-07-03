@@ -93,10 +93,10 @@ Demigods (Dracula, Superman, Alucard, Four Horsemen of the Apocalypse, Lich King
 Near Gods (Warhammer 40k Primarchs, Loki, Thor, Artemis, Kratos): 10000
 Gods (Satan, Warhammer 40k Emperor, The Hand of God from Berserk, Tyrant, Odin, Zeus): 20000
 
-Next, I will upload an image. Please 
+Next, I will upload an image. Please
 
-- analyze the character's origins and background 
-- determine the character's battle power BP level, very carefully and as detailed as possible. 
+- analyze the character's origins and background
+- determine the character's battle power BP level, very carefully and as detailed as possible.
 - based to the description of BP level standard, modified the final battle power BP for about [80% - 120%].
 
 finally, output the results in JSON format:
@@ -110,13 +110,13 @@ finally, output the results in JSON format:
 """
 
 P2_PROMPT = """
-you are a game design expert in a turn-based card game. 
+you are a game design expert in a turn-based card game.
 You need to evaluate the character's core attributes and design [skill] based on their [name], [descriptions], and battle power [BP].
 
 Rules:
 
 [State Weights]
-You must NOT output absolute attribute values. Instead, you must allocate a rating weight from 1 to 10 for each attribute based on the character's origins and traits. 
+You must NOT output absolute attribute values. Instead, you must allocate a rating weight from 1 to 10 for each attribute based on the character's origins and traits.
 1 means extremely weak/low priority, 10 means extremely strong/highest priority.
 "HP": <1-10>,
 "MP": <1-10>,
@@ -152,7 +152,7 @@ Buffs (positive effects):
 (haste): Increases X crit rate and accuracy
 (pray): Increases X attribute
 
-All statuses must specify how many turns they last, except for stun (which lasts 1 turn). 
+All statuses must specify how many turns they last, except for stun (which lasts 1 turn).
 Choose 2 out of 3 skills based on the character’s traits and design them.
 
 output the data in JSON format exactly like this:
@@ -192,7 +192,7 @@ output the data in JSON format exactly like this:
         "IS_STUN": "<True or False>",
         "MP_COST_RATE": <1, 2, or 3>,
         "BUFF_TIME": "<Duration of Buff/Debuff>",
-        "BUFF_NAME": "<stun, frozen, poison, corrupt, bless, heal, haste, pray>"
+        "BUFF_NAME": "<stun, frozen, poison, wound, curse, bless, heal, haste, pray, weakness, vulnerable>"
     },
     "s2": { ...same structure as s1... }
 }
@@ -248,7 +248,7 @@ The skill object must include:
 "RANGE": "<melee|ranged|self|ally|enemy>",
 "IS_STUN": <true or false>,
 "BUFF_TIME": <turn count, 0 if the effect does not exist>,
-"BUFF_NAME": "<weakness, wound, stun, curse, bless, heal>",
+"BUFF_NAME": "<stun, frozen, poison, wound, curse, bless, heal, haste, pray, weakness, vulnerable>",
 "DMG": <0 or 1>,
 "BUFF_HP": <0 or 1>,
 "BUFF_MP": <0 or 1>,
@@ -292,7 +292,7 @@ Output JSON exactly in this format:
       "RANGE": "<melee|ranged|self|ally|enemy>",
       "IS_STUN": <true or false>,
       "BUFF_TIME": <0 or a turn count>,
-      "BUFF_NAME": "<weakness, wound, stun, curse, bless, heal>",
+      "BUFF_NAME": "<stun, frozen, poison, wound, curse, bless, heal, haste, pray, weakness, vulnerable>",
       "DMG": <0 or 1>,
       "BUFF_HP": <0 or 1>,
       "BUFF_MP": <0 or 1>,
@@ -324,14 +324,14 @@ def build_material_directive(materials):
         'stormSigil': 'Storm Sigil',
         'voidDust': 'Void Dust',
     }
-    
+
     notes = []
     for key, amount in materials.items():
         if amount > 0:
             name = labels.get(key, key)
             effect = directives.get(key, 'nudge theme and attributes to reflect this special material.')
             notes.append(f"{name} x{amount}: {effect}")
-            
+
     if not notes:
         return "No special forging materials. Keep neutral style and balanced stat distribution."
     return " ".join(notes)
@@ -659,7 +659,13 @@ DAILY_TASKS = {
         "title": "Forge one card",
         "description": "Create one new card in the Forge.",
         "target": 1,
-        "reward_dust": 20,
+        "reward_dust": 100,
+    },
+    "use_relic_once": {
+        "title": "Use one relic",
+        "description": "Use a relic to enchant one card.",
+        "target": 1,
+        "reward_dust": 300,
     },
     "enter_arena_once": {
         "title": "Enter Arena",
@@ -908,6 +914,7 @@ def _normalize_arena_formation(value):
     if not isinstance(value, dict):
         raise ValueError("Arena formation is required")
 
+    overflow_ids = [item for key, item in value.items() if key not in ARENA_SLOT_KEYS and item]
     formation = {}
     for slot in ARENA_SLOT_KEYS:
         raw_hero_id = value.get(slot)
@@ -915,8 +922,8 @@ def _normalize_arena_formation(value):
         formation[slot] = hero_id or None
 
     hero_ids = [hero_id for hero_id in formation.values() if hero_id]
-    if not (1 <= len(hero_ids) <= 4):
-        raise ValueError("Place 1 to 4 active cards")
+    if overflow_ids or not (1 <= len(hero_ids) <= 6):
+        raise ValueError("Place 1 to 6 active cards")
     if len(set(hero_ids)) != len(hero_ids):
         raise ValueError("A card can only occupy one Arena slot")
 
@@ -929,11 +936,15 @@ def _normalize_pvp_battle_mode(value, hero_count: int | None = None):
         return mode
     if hero_count is not None and 1 < hero_count <= 4:
         return "4v4"
+    if hero_count is not None and 4 < hero_count <= 6:
+        return "arena_2x3"
     return "1v1"
 
 
 def _pvp_required_team_size(battle_mode: str) -> int:
-    return 4 if battle_mode in {"4v4", "arena_2x3"} else 1
+    if battle_mode == "arena_2x3":
+        return 6
+    return 4 if battle_mode == "4v4" else 1
 
 
 def _hero_bp(hero_payload):
@@ -1858,17 +1869,17 @@ def battle():
         hero_a = data.get("heroA")
         hero_b = data.get("heroB")
         control_mode = str(data.get("controlMode") or "program").strip().lower() or "program"
-        
+
         if not hero_a or not hero_b:
             return jsonify({"error": "Two heroes required for battle"}), 400
-            
+
         result = run_auto_duel(hero_a, hero_b, control_mode=control_mode)
         try:
             save_battle_history(current_user(), "1v1", data, result)
         except Exception:
             logging.exception("Failed to persist battle history")
         return jsonify(result)
-        
+
     except Exception as e:
         logging.exception(e)
         return jsonify({"error": str(e)}), 500
@@ -1884,17 +1895,17 @@ def battle_team():
         label_a = data.get("labelA", "Team A")
         label_b = data.get("labelB", "Team B")
         control_mode = str(data.get("controlMode") or "program").strip().lower() or "program"
-        
+
         if not team_a or not team_b:
             return jsonify({"error": "Two teams required for battle"}), 400
-            
+
         result = run_team_duel(team_a, team_b, size, label_a, label_b, control_mode=control_mode)
         try:
             save_battle_history(current_user(), size, data, result)
         except Exception:
             logging.exception("Failed to persist team battle history")
         return jsonify(result)
-        
+
     except Exception as e:
         logging.exception(e)
         return jsonify({"error": str(e)}), 500
@@ -1911,6 +1922,11 @@ def create_battle_session_route():
         label_b = str(data.get("labelB") or "Team B").strip()
         team_a = data.get("teamA") or []
         team_b = data.get("teamB") or []
+        try:
+            wait_seconds = int(data.get("waitSeconds") or 30)
+        except (TypeError, ValueError):
+            wait_seconds = 30
+        wait_seconds = max(1, min(60, wait_seconds))
 
         if control_mode != "rest":
             return jsonify({"error": "Battle sessions currently support rest control only"}), 400
@@ -1924,6 +1940,7 @@ def create_battle_session_route():
             label_b=label_b,
             team_a=team_a,
             team_b=team_b,
+            wait_seconds=wait_seconds,
         )
         return jsonify({"data": session.public_snapshot()}), 201
     except Exception as e:
@@ -2448,13 +2465,247 @@ def revive_card(card_id):
         return jsonify({"error": str(e)}), 500
 
 
+def _card_row_for_response(row):
+    return normalize_json_value(row) if row else None
+
+
+def _parse_relic_type(payload):
+    if not isinstance(payload, dict):
+        return None
+    relic_type = payload.get("relicType", payload.get("relic_type"))
+    if relic_type is None:
+        return None
+    relic_type = str(relic_type).strip()
+    return relic_type or None
+
+
+def _validate_known_relic(relic_type):
+    definition = get_relic_definition(relic_type)
+    if not definition:
+        raise ValueError("Unknown relic type")
+    return definition
+
+
+@app.route("/api/cards/<card_id>/equip-relic", methods=["POST"])
+@auth_required
+def equip_card_relic(card_id):
+    user = current_user()
+    payload = request.get_json(silent=True) or {}
+    relic_type = _parse_relic_type(payload)
+    try:
+        UUID(str(card_id))
+    except Exception:
+        return jsonify({"error": "Invalid card id"}), 400
+
+    try:
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT id
+                    FROM heroes
+                    WHERE id = %s AND user_id = %s
+                    FOR UPDATE
+                    """,
+                    (card_id, user["id"]),
+                )
+                if not cur.fetchone():
+                    return jsonify({"error": "Card not found"}), 404
+
+                if relic_type:
+                    _validate_known_relic(relic_type)
+                    cur.execute(
+                        """
+                        SELECT amount
+                        FROM user_relics
+                        WHERE user_id = %s AND relic_type = %s
+                        FOR UPDATE
+                        """,
+                        (user["id"], relic_type),
+                    )
+                    relic_row = cur.fetchone()
+                    if int(relic_row["amount"] if relic_row else 0) <= 0:
+                        return jsonify({"error": "Relic not owned"}), 400
+
+                cur.execute(
+                    """
+                    UPDATE heroes
+                    SET equipped_relic_type = %s
+                    WHERE id = %s AND user_id = %s
+                    RETURNING id, hero_payload, equipped_relic_type, enchantment,
+                              pvp_life_state, pve_life_state, card_status,
+                              locked_reason, pvp_dead_at, decomposed_at, active_pvp_entry_id, created_at
+                    """,
+                    (relic_type, card_id, user["id"]),
+                )
+                card = cur.fetchone()
+            conn.commit()
+        return jsonify({"ok": True, "card": _card_row_for_response(card), "economy": economy_snapshot(user)})
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception as exc:
+        logging.exception(exc)
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/api/cards/<card_id>/enchant", methods=["POST"])
+@auth_required
+def enchant_card(card_id):
+    user = current_user()
+    payload = request.get_json(silent=True) or {}
+    relic_type = _parse_relic_type(payload)
+    if not relic_type:
+        return jsonify({"error": "Relic type required"}), 400
+    try:
+        UUID(str(card_id))
+    except Exception:
+        return jsonify({"error": "Invalid card id"}), 400
+
+    try:
+        definition = _validate_known_relic(relic_type)
+        now_iso = datetime.now(timezone.utc).isoformat()
+        enchantment = {
+            "relicType": relic_type,
+            "relicName": definition.get("display_name", relic_type),
+            "effectProfile": definition.get("effect_profile"),
+            "appliedAt": now_iso,
+            "removedAt": None,
+        }
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT id, enchantment
+                    FROM heroes
+                    WHERE id = %s AND user_id = %s
+                    FOR UPDATE
+                    """,
+                    (card_id, user["id"]),
+                )
+                card = cur.fetchone()
+                if not card:
+                    return jsonify({"error": "Card not found"}), 404
+                if card.get("enchantment") is not None:
+                    return jsonify({"error": "Card has already been enchanted"}), 409
+
+                cur.execute(
+                    """
+                    SELECT amount
+                    FROM user_relics
+                    WHERE user_id = %s AND relic_type = %s
+                    FOR UPDATE
+                    """,
+                    (user["id"], relic_type),
+                )
+                relic_row = cur.fetchone()
+                current_amount = int(relic_row["amount"] if relic_row else 0)
+                if current_amount <= 0:
+                    return jsonify({"error": "Insufficient relics"}), 400
+                next_amount = current_amount - 1
+
+                cur.execute(
+                    """
+                    UPDATE user_relics
+                    SET amount = %s, updated_at = now()
+                    WHERE user_id = %s AND relic_type = %s
+                    """,
+                    (next_amount, user["id"], relic_type),
+                )
+                cur.execute(
+                    """
+                    INSERT INTO resource_transactions (
+                        user_id, resource_type, resource_key, delta, balance_after,
+                        reason, ref_type, ref_id, metadata
+                    )
+                    VALUES (%s, 'relic', %s, -1, %s, 'card_enchant', 'hero', %s, %s::jsonb)
+                    """,
+                    (
+                        user["id"],
+                        relic_type,
+                        next_amount,
+                        card_id,
+                        serialize_json({"enchantment": enchantment}),
+                    ),
+                )
+                cur.execute(
+                    """
+                    UPDATE heroes
+                    SET enchantment = %s::jsonb
+                    WHERE id = %s AND user_id = %s
+                    RETURNING id, hero_payload, equipped_relic_type, enchantment,
+                              pvp_life_state, pve_life_state, card_status,
+                              locked_reason, pvp_dead_at, decomposed_at, active_pvp_entry_id, created_at
+                    """,
+                    (serialize_json(enchantment), card_id, user["id"]),
+                )
+                updated = cur.fetchone()
+            conn.commit()
+        _safe_record_daily_task_progress(user["id"], "use_relic_once")
+        return jsonify({"ok": True, "card": _card_row_for_response(updated), "economy": economy_snapshot(user)})
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception as exc:
+        logging.exception(exc)
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/api/cards/<card_id>/wash-enchant", methods=["POST"])
+@auth_required
+def wash_card_enchant(card_id):
+    user = current_user()
+    try:
+        UUID(str(card_id))
+    except Exception:
+        return jsonify({"error": "Invalid card id"}), 400
+
+    try:
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT id, enchantment
+                    FROM heroes
+                    WHERE id = %s AND user_id = %s
+                    FOR UPDATE
+                    """,
+                    (card_id, user["id"]),
+                )
+                card = cur.fetchone()
+                if not card:
+                    return jsonify({"error": "Card not found"}), 404
+                enchantment = card.get("enchantment")
+                if not enchantment or enchantment.get("removedAt"):
+                    return jsonify({"error": "No active enchantment"}), 409
+
+                enchantment = dict(enchantment)
+                enchantment["removedAt"] = datetime.now(timezone.utc).isoformat()
+                cur.execute(
+                    """
+                    UPDATE heroes
+                    SET enchantment = %s::jsonb
+                    WHERE id = %s AND user_id = %s
+                    RETURNING id, hero_payload, equipped_relic_type, enchantment,
+                              pvp_life_state, pve_life_state, card_status,
+                              locked_reason, pvp_dead_at, decomposed_at, active_pvp_entry_id, created_at
+                    """,
+                    (serialize_json(enchantment), card_id, user["id"]),
+                )
+                updated = cur.fetchone()
+            conn.commit()
+        return jsonify({"ok": True, "card": _card_row_for_response(updated), "economy": economy_snapshot(user)})
+    except Exception as exc:
+        logging.exception(exc)
+        return jsonify({"error": str(exc)}), 500
+
+
 @app.route("/api/me/heroes", methods=["GET"])
 @auth_required
 def list_my_heroes():
     user = current_user()
     rows = fetch_all(
         """
-        SELECT id, hero_payload, pvp_life_state, pve_life_state, card_status,
+        SELECT id, source_payload, hero_payload, equipped_relic_type, enchantment,
+               pvp_life_state, pve_life_state, card_status,
                locked_reason, pvp_dead_at, decomposed_at, active_pvp_entry_id, created_at
         FROM heroes
         WHERE user_id = %s

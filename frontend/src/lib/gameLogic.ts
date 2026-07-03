@@ -13,6 +13,8 @@ export interface CharacterState {
   EV: string;
   AC: string;
   TYPE: string;
+  type_catalog: string;
+  type_effect: string;
 }
 
 export interface Skill {
@@ -21,6 +23,9 @@ export interface Skill {
   TYPE: string;
   TARGET: string;
   TARGET_NUM: string;
+  type_catalog?: string;
+  type_effect?: string;
+  buff_type_effect?: string;
   RANGE?: string;
   IS_PASSIVE?: boolean | string;
   IS_STUN?: boolean | string;
@@ -46,7 +51,7 @@ export interface CharacterData {
   BP: string;
   template?: string;
   state: CharacterState;
-  skill: {
+  skill: Record<string, Skill> & {
     s1: Skill;
     s2: Skill;
   };
@@ -84,13 +89,46 @@ function normalizeBooleanString(value: unknown): string {
   return 'False';
 }
 
+function normalizeToken(value: unknown, fallback = ''): string {
+  const token = toStringValue(value, fallback).trim().toLowerCase().replace(/\s+/g, '_').replace(/-/g, '_');
+  return token || fallback;
+}
+
+function inferTypeCatalog(type: string): 'proj' | 'instant' {
+  const token = normalizeToken(type, 'flesh');
+  if (token === 'weapon' || token === 'flesh' || token === 'slash' || token === 'claw') return 'instant';
+  return 'proj';
+}
+
+function inferTypeEffect(type: string, catalog: string): string {
+  const token = normalizeToken(type, 'flesh');
+  if (catalog === 'instant') {
+    if (token === 'weapon') return 'slash';
+    if (token === 'flesh') return 'claw';
+  }
+  if (catalog === 'proj' && token === 'weapon') return 'arrow';
+  return token;
+}
+
+function normalizeTypeCatalog(value: unknown, fallbackType: string): string {
+  const token = normalizeToken(value, '');
+  if (token === 'proj' || token === 'projectile' || token === 'ranged') return 'proj';
+  if (token === 'instant' || token === 'melee') return 'instant';
+  return inferTypeCatalog(fallbackType);
+}
+
 function normalizeSkill(raw: Record<string, unknown> | undefined): Skill {
+  const legacyType = toStringValue(raw?.TYPE, 'attack');
+  const typeCatalog = normalizeTypeCatalog(raw?.type_catalog ?? raw?.typeCatalog, legacyType);
   return {
     name: toStringValue(raw?.name, 'Untitled Skill'),
     description: toStringValue(raw?.description, ''),
-    TYPE: toStringValue(raw?.TYPE, 'attack'),
+    TYPE: legacyType,
     TARGET: toStringValue(raw?.TARGET, 'Enemy'),
     TARGET_NUM: toStringValue(raw?.TARGET_NUM, '1'),
+    type_catalog: typeCatalog,
+    type_effect: normalizeToken(raw?.type_effect ?? raw?.typeEffect, inferTypeEffect(legacyType, typeCatalog)),
+    buff_type_effect: normalizeToken(raw?.buff_type_effect ?? raw?.buffTypeEffect, ''),
     RANGE: toStringValue(raw?.RANGE, 'enemy'),
     IS_PASSIVE: normalizeBooleanString(raw?.IS_PASSIVE),
     IS_STUN: normalizeBooleanString(raw?.IS_STUN),
@@ -111,6 +149,8 @@ function normalizeSkill(raw: Record<string, unknown> | undefined): Skill {
 }
 
 function normalizeState(raw: Record<string, unknown> | undefined): CharacterState {
+  const legacyType = toStringValue(raw?.TYPE, 'flesh');
+  const typeCatalog = normalizeTypeCatalog(raw?.type_catalog ?? raw?.typeCatalog, legacyType);
   return {
     HP: toStringValue(raw?.HP, '0'),
     MP: toStringValue(raw?.MP, '0'),
@@ -122,7 +162,9 @@ function normalizeState(raw: Record<string, unknown> | undefined): CharacterStat
     PI: toStringValue(raw?.PI, '0'),
     EV: toStringValue(raw?.EV, '0'),
     AC: toStringValue(raw?.AC, '0'),
-    TYPE: toStringValue(raw?.TYPE, 'flesh'),
+    TYPE: legacyType,
+    type_catalog: typeCatalog,
+    type_effect: normalizeToken(raw?.type_effect ?? raw?.typeEffect, inferTypeEffect(legacyType, typeCatalog)),
   };
 }
 
@@ -131,6 +173,11 @@ export function normalizeCharacterData(source: unknown): CharacterData {
   const payload = (record.hero_payload && typeof record.hero_payload === 'object' ? record.hero_payload : record) as Record<string, unknown>;
   const state = normalizeState((payload.state || payload.state_weights) as Record<string, unknown> | undefined);
   const skill = (payload.skill && typeof payload.skill === 'object' ? payload.skill : {}) as Record<string, Record<string, unknown>>;
+  const normalizedSkills = Object.fromEntries(
+    Object.entries(skill).map(([key, value]) => [key, normalizeSkill(value)])
+  ) as Record<string, Skill> & { s1: Skill; s2: Skill };
+  normalizedSkills.s1 = normalizedSkills.s1 ?? normalizeSkill(skill.s1);
+  normalizedSkills.s2 = normalizedSkills.s2 ?? normalizeSkill(skill.s2);
 
   return {
     name: toStringValue(payload.name, 'Unknown Hero'),
@@ -139,10 +186,7 @@ export function normalizeCharacterData(source: unknown): CharacterData {
     BP: toStringValue(payload.BP, '1000'),
     template: toStringValue(payload.template, ''),
     state,
-    skill: {
-      s1: normalizeSkill(skill.s1),
-      s2: normalizeSkill(skill.s2),
-    },
+    skill: normalizedSkills,
     activeBuffs: Array.isArray(payload.activeBuffs)
       ? payload.activeBuffs.map((buff) => ({
         name: toStringValue((buff as Record<string, unknown>).name, ''),

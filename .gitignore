@@ -6,3 +6,10 @@ images
 backend/.env
 backend/.env.local
 backend/test-results
+backend/.venv/
+backend/**/__pycache__/
+frontend/output/
+output/
+test-results/
+frontend/*-check.png
+frontend/*tile*.png

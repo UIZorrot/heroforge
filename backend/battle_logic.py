@@ -4,6 +4,20 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Literal, Protocol
 
 
+CANONICAL_BUFF_NAMES = (
+    "stun",
+    "frozen",
+    "poison",
+    "wound",
+    "curse",
+    "bless",
+    "heal",
+    "haste",
+    "pray",
+    "weakness",
+    "vulnerable",
+)
+
 BUFF_ALIASES = {
     "weakness": "weakness",
     "wound": "wound",
@@ -12,16 +26,91 @@ BUFF_ALIASES = {
     "bless": "bless",
     "heal": "heal",
     "frozen": "frozen",
-    "poison": "wound",
+    "poison": "poison",
     "corrupt": "curse",
     "haste": "haste",
     "pray": "pray",
-    "vulnerable": "weakness",
+    "vulnerable": "vulnerable",
 }
+SUPPORT_SKILL_ROLES = {"buff", "support", "heal", "defense", "utility"}
+
+PROJECTILE_TYPE_EFFECTS = {"flesh", "magic", "thunder", "arrow", "gun", "fire", "poison", "frost", "dark", "light", "nature", "water"}
+INSTANT_TYPE_EFFECTS = {"slash", "magic", "thunder", "strike", "explode", "fire", "poison", "frost", "dark", "light", "nature", "water", "claw", "pierce", "blunt", "bullet_hit"}
+BUFF_TYPE_EFFECTS = set(CANONICAL_BUFF_NAMES)
 
 
 def _character_from_hero(hero: Dict[str, Any]) -> Dict[str, Any]:
     return hero.get("character", hero)
+
+
+def _visual_token(value: Any, fallback: str = "") -> str:
+    text = str(value if value is not None else fallback).strip().lower().replace(" ", "_").replace("-", "_")
+    return text or fallback
+
+
+def _legacy_type_catalog(effect_type: Any) -> str:
+    token = _visual_token(effect_type, "flesh")
+    if token in {"weapon", "flesh", "slash", "claw"}:
+        return "instant"
+    return "proj"
+
+
+def _legacy_type_effect(effect_type: Any, type_catalog: str | None = None) -> str:
+    token = _visual_token(effect_type, "flesh")
+    catalog = type_catalog or _legacy_type_catalog(token)
+    if catalog == "instant":
+        if token == "weapon":
+            return "slash"
+        if token == "flesh":
+            return "claw"
+    if catalog == "proj" and token == "weapon":
+        return "arrow"
+    return token
+
+
+def _visual_type_contract(source: Dict[str, Any] | None, fallback_type: Any = None) -> Dict[str, str | None]:
+    source = source if isinstance(source, dict) else {}
+    legacy_type = source.get("TYPE", fallback_type)
+    raw_catalog = source.get("type_catalog", source.get("typeCatalog"))
+    catalog = _visual_token(raw_catalog, "") if raw_catalog is not None else _legacy_type_catalog(legacy_type)
+    if catalog == "projectile":
+        catalog = "proj"
+    if catalog == "melee":
+        catalog = "instant"
+    if catalog not in {"proj", "instant"}:
+        catalog = _legacy_type_catalog(legacy_type)
+    effect = _visual_token(source.get("type_effect", source.get("typeEffect")), "") or _legacy_type_effect(legacy_type, catalog)
+    buff_effect = _visual_token(source.get("buff_type_effect", source.get("buffTypeEffect")), "")
+    return {
+        "type_catalog": catalog,
+        "type_effect": effect,
+        "buff_type_effect": buff_effect or None,
+    }
+
+
+def _event_visual_contract(actor: "Battler", skill: Dict[str, Any] | None = None) -> Dict[str, str | None]:
+    state = actor.character.get("state", {})
+    fallback_type = state.get("TYPE") if isinstance(state, dict) else None
+    return _visual_type_contract(skill if isinstance(skill, dict) else state, fallback_type)
+
+
+def _state_snapshot(unit: "Battler") -> Dict[str, Any]:
+    visual = _visual_type_contract(unit.character.get("state", {}), unit.character.get("state", {}).get("TYPE"))
+    return {
+        "HP": unit.hp,
+        "MP": unit.mp,
+        "ATK": unit.base_atk,
+        "DEF": unit.base_def,
+        "CC": unit.base_cc,
+        "SPEED": unit.base_spd,
+        "CA": unit.base_ca,
+        "PI": unit.base_pi,
+        "EV": unit.base_ev,
+        "AC": unit.base_ac,
+        "TYPE": unit.character.get("state", {}).get("TYPE"),
+        "type_catalog": visual["type_catalog"],
+        "type_effect": visual["type_effect"],
+    }
 
 
 class Battler:
@@ -58,7 +147,7 @@ class Battler:
 
     @property
     def def_val(self):
-        return max(0, self.base_def - self.sum_buff("curse") - self.sum_buff("corrupt") + self.sum_buff("pray"))
+        return max(0, self.base_def - self.sum_buff("curse") - self.sum_buff("vulnerable") + self.sum_buff("pray"))
 
     @property
     def spd(self):
@@ -100,8 +189,12 @@ class Battler:
             label = "stun"
         elif normalized == "wound":
             label = f"wound(-{value})"
+        elif normalized == "poison":
+            label = f"poison(-{value})"
         elif normalized == "curse":
             label = f"curse(-{value})"
+        elif normalized == "vulnerable":
+            label = f"vulnerable(-{value})"
         elif normalized == "weakness":
             label = f"weakness(-{value})"
         elif normalized == "frozen":
@@ -118,13 +211,19 @@ class Battler:
         logs.append(f"{self.tag} gains [{label}] for {duration} turn(s)")
 
     def tick_buffs(self, round_num: int, push_event_fn):
-        dot_damage = self.sum_buff("wound") + self.sum_buff("poison")
+        wound_damage = self.sum_buff("wound")
+        poison_damage = self.sum_buff("poison")
         regen_value = self.sum_buff("heal")
 
-        if dot_damage > 0:
-            dmg = int(dot_damage)
+        if wound_damage > 0:
+            dmg = int(wound_damage)
             self.hp = max(0, self.hp - dmg)
             push_event_fn(round_num, self.tag, "dot_damage", dmg, False, False, False, "wound", 0)
+
+        if poison_damage > 0:
+            dmg = int(poison_damage)
+            self.hp = max(0, self.hp - dmg)
+            push_event_fn(round_num, self.tag, "dot_damage", dmg, False, False, False, "poison", 0)
 
         if regen_value > 0 and self.hp > 0:
             heal_amt = int(regen_value)
@@ -156,6 +255,39 @@ def _target_num(skill: Dict[str, Any] | None) -> int:
     return max(1, _safe_int(skill.get("TARGET_NUM", 1), 1))
 
 
+def _skill_target_mode(skill: Dict[str, Any] | None) -> str:
+    if not isinstance(skill, dict):
+        return "enemy"
+    return str(skill.get("TARGET") or "Enemy").strip().lower() or "enemy"
+
+
+def _skill_role(skill: Dict[str, Any] | None) -> str:
+    if not isinstance(skill, dict):
+        return "attack"
+    return str(skill.get("ROLE") or "attack").strip().lower() or "attack"
+
+
+def _skill_damage(skill: Dict[str, Any] | None) -> int:
+    return _safe_int(skill.get("DMG", 0), 0) if isinstance(skill, dict) else 0
+
+
+def _is_support_skill(skill: Dict[str, Any] | None) -> bool:
+    return bool(
+        isinstance(skill, dict)
+        and _skill_damage(skill) <= 0
+        and _skill_target_mode(skill) in {"self", "ally"}
+        and _skill_role(skill) in SUPPORT_SKILL_ROLES
+    )
+
+
+def _buff_value_from_skill(skill: Dict[str, Any]) -> int:
+    for field in ["BUFF_HP", "BUFF_MP", "BUFF_DMG", "BUFF_CC", "BUFF_DEF", "BUFF_EV", "BUFF_AC"]:
+        value = _safe_int(skill.get(field, 0), 0)
+        if value != 0:
+            return value
+    return 0
+
+
 def _unit_snapshot(unit: Battler, side: str, slot_index: int) -> Dict[str, Any]:
     return {
         "tag": unit.tag,
@@ -168,23 +300,25 @@ def _unit_snapshot(unit: Battler, side: str, slot_index: int) -> Dict[str, Any]:
         "mp": unit.mp,
         "maxMp": unit.max_mp,
         "buffs": [buff.copy() for buff in unit.buffs],
-        "state": {
-            "HP": unit.hp,
-            "MP": unit.mp,
-            "ATK": unit.base_atk,
-            "DEF": unit.base_def,
-            "CC": unit.base_cc,
-            "SPEED": unit.base_spd,
-            "CA": unit.base_ca,
-            "PI": unit.base_pi,
-            "EV": unit.base_ev,
-            "AC": unit.base_ac,
-        },
+        "state": _state_snapshot(unit),
     }
+
+
+def _public_skill_snapshot(skill: Dict[str, Any] | None, fallback_type: Any = None) -> Dict[str, Any] | None:
+    if not isinstance(skill, dict):
+        return None
+    visual = _visual_type_contract(skill, fallback_type)
+    next_skill = skill.copy()
+    next_skill["type_catalog"] = visual["type_catalog"]
+    next_skill["type_effect"] = visual["type_effect"]
+    if visual["buff_type_effect"]:
+        next_skill["buff_type_effect"] = visual["buff_type_effect"]
+    return next_skill
 
 
 def _public_unit_snapshot(unit: Battler, side: str, slot_index: int) -> Dict[str, Any]:
     skills = unit.character.get("skill", {})
+    fallback_type = unit.character.get("state", {}).get("TYPE")
     return {
         "tag": unit.tag,
         "side": side,
@@ -196,21 +330,11 @@ def _public_unit_snapshot(unit: Battler, side: str, slot_index: int) -> Dict[str
         "mp": unit.mp,
         "maxMp": unit.max_mp,
         "buffs": [buff.copy() for buff in unit.buffs],
-        "state": {
-            "HP": unit.hp,
-            "MP": unit.mp,
-            "ATK": unit.base_atk,
-            "DEF": unit.base_def,
-            "CC": unit.base_cc,
-            "SPEED": unit.base_spd,
-            "CA": unit.base_ca,
-            "PI": unit.base_pi,
-            "EV": unit.base_ev,
-            "AC": unit.base_ac,
-        },
+        "state": _state_snapshot(unit),
         "skills": {
-            "s1": skills.get("s1"),
-            "s2": skills.get("s2"),
+            key: _public_skill_snapshot(skill, fallback_type)
+            for key, skill in skills.items()
+            if isinstance(skill, dict)
         },
     }
 
@@ -252,25 +376,60 @@ class BattleController(Protocol):
 
 
 class ProgramBattleController:
-    def _pick_target_tag(self, observation: Dict[str, Any], target_mode: str) -> str | None:
+    def _pick_target_tag(self, observation: Dict[str, Any], skill: Dict[str, Any] | None) -> str | None:
         actor = observation.get("actor") or {}
         allies = [unit for unit in observation.get("allies") or [] if isinstance(unit, dict) and unit.get("alive", True)]
         enemies = [unit for unit in observation.get("enemies") or [] if isinstance(unit, dict) and unit.get("alive", True)]
+        actor_tag = actor.get("tag")
+        actor_slot = actor.get("slot")
+        target_mode = str((skill or {}).get("TARGET") or "Enemy").strip().lower()
+        range_mode = _skill_range(skill)
 
         if target_mode == "self":
-            return actor.get("tag")
+            return actor_tag
         if target_mode == "ally":
-            if actor in allies:
-                return actor.get("tag")
-            return allies[0].get("tag") if allies else actor.get("tag")
+            for unit in allies:
+                if unit.get("tag") != actor_tag:
+                    return unit.get("tag")
+            return None
         if target_mode == "enemy":
-            return enemies[0].get("tag") if enemies else None
+            if not enemies:
+                return None
+
+            living = [unit for unit in enemies if unit.get("alive", True)]
+            if not living:
+                return None
+
+            if actor_slot is None:
+                return living[0].get("tag")
+
+            same_lane = [unit for unit in living if unit.get("slot") == actor_slot]
+            if range_mode == "melee":
+                return same_lane[0].get("tag") if same_lane else None
+
+            if range_mode == "ranged":
+                def priority(unit: Dict[str, Any]):
+                    dist = abs(_safe_int(unit.get("slot", 0), 0) - _safe_int(actor_slot, 0))
+                    hp = _safe_int(unit.get("hp", 0), 0)
+                    return (0 if dist <= 1 else 1, dist, hp)
+
+                ordered = same_lane + sorted([unit for unit in living if unit.get("slot") != actor_slot], key=priority)
+                return ordered[0].get("tag") if ordered else None
+
+            def priority(unit: Dict[str, Any]):
+                dist = abs(_safe_int(unit.get("slot", 0), 0) - _safe_int(actor_slot, 0))
+                hp = _safe_int(unit.get("hp", 0), 0)
+                return (dist, hp)
+
+            return sorted(living, key=priority)[0].get("tag")
         return None
 
     def choose_action(self, observation: Dict[str, Any]) -> BattleAction:
         actor = observation.get("actor") or {}
         skills = actor.get("skills") or {}
         mp = _safe_int(actor.get("mp", 0), 0)
+        actor_hp = _safe_int(actor.get("hp", 0), 0)
+        actor_max_hp = max(1, _safe_int(actor.get("maxHp", 0), 0))
 
         available_skills = []
         for slot in ("s1", "s2"):
@@ -279,16 +438,26 @@ class ProgramBattleController:
                 continue
             skill_cost = _infer_skill_cost(skill)
             if mp >= skill_cost:
-                available_skills.append((slot, skill, skill_cost))
+                target_tag = self._pick_target_tag(observation, skill)
+                if target_tag is None and _skill_target_mode(skill) != "self":
+                    continue
+                available_skills.append((slot, skill, skill_cost, target_tag))
 
         if not available_skills:
-            return BattleAction(kind="attack")
+            return BattleAction(kind="attack", target_tag=self._pick_target_tag(observation, {"TARGET": "Enemy", "RANGE": "enemy"}))
 
-        if random.random() < 0.35:
-            return BattleAction(kind="attack", target_tag=self._pick_target_tag(observation, "enemy"))
+        support_skills = [item for item in available_skills if _is_support_skill(item[1])]
+        skill_bias = 0.85
+        if support_skills and actor_hp < actor_max_hp:
+            skill_bias = 0.95
+        elif support_skills:
+            skill_bias = 0.9
+
+        if random.random() > skill_bias:
+            return BattleAction(kind="attack", target_tag=self._pick_target_tag(observation, {"TARGET": "Enemy", "RANGE": "enemy"}))
 
         chosen_slot, chosen_skill, _ = max(
-            available_skills,
+            [(slot, skill, cost) for slot, skill, cost, _ in available_skills],
             key=lambda item: (
                 _safe_int(item[1].get("DMG", 0), 0),
                 _safe_int(item[1].get("BUFF_DMG", 0), 0)
@@ -300,11 +469,12 @@ class ProgramBattleController:
         )
 
         if random.random() > 0.75 and len(available_skills) > 1:
-            chosen_slot = random.choice([slot for slot, _, _ in available_skills])
+            chosen_slot = random.choice([slot for slot, _, _, _ in available_skills])
             chosen_skill = skills.get(chosen_slot) or chosen_skill
 
-        target_mode = str((chosen_skill or {}).get("TARGET") or "Enemy").strip().lower()
-        target_tag = self._pick_target_tag(observation, target_mode)
+        target_tag = next((target for slot, skill, _, target in available_skills if slot == chosen_slot), None)
+        if target_tag is None:
+            target_tag = self._pick_target_tag(observation, chosen_skill)
         return BattleAction(kind="skill", target_tag=target_tag, skill_slot=chosen_slot)
 
 
@@ -469,6 +639,9 @@ def _run_board_duel(
         buff_name=None,
         skill_role=None,
         range_mode=None,
+        type_catalog=None,
+        type_effect=None,
+        buff_type_effect=None,
     ):
         if defender_tag is None:
             attacker_side = str(attacker_tag)[0] if str(attacker_tag) else "A"
@@ -496,6 +669,12 @@ def _run_board_duel(
             "actionType": action_type,
             "skillName": skill_name,
             "attackType": attack_type,
+            "typeCatalog": type_catalog,
+            "typeEffect": type_effect,
+            "buffTypeEffect": buff_type_effect,
+            "type_catalog": type_catalog,
+            "type_effect": type_effect,
+            "buff_type_effect": buff_type_effect,
             "buffName": buff_name,
             "skillRole": skill_role,
             "rangeMode": range_mode,
@@ -532,13 +711,14 @@ def _run_board_duel(
                 defender_tag=actor.tag,
                 attacker_slot=actor.slot_index,
                 attack_type=actor.character.get("state", {}).get("TYPE"),
+                **_event_visual_contract(actor),
             )
             return
 
         own_team = team_a_units if actor.tag.startswith("A") else team_b_units
         observation, action = _choose_battle_action(battle_controller, actor, own_team, enemy_team, round_num, label_a, label_b)
         chosen_skill = None
-        if action.kind == "skill" and action.skill_slot in {"s1", "s2"}:
+        if action.kind == "skill" and action.skill_slot:
             skills = actor.character.get("skill", {})
             if isinstance(skills, dict):
                 chosen_skill = skills.get(action.skill_slot)
@@ -580,41 +760,47 @@ def _run_board_duel(
             )
             return
 
-        skill_damage = _safe_int(chosen_skill.get("DMG", 0), 0) if chosen_skill else 0
+        skill_damage = _skill_damage(chosen_skill)
         attack_type = str((chosen_skill or {}).get("TYPE") or actor.character.get("state", {}).get("TYPE") or "").strip()
         buff_name = str((chosen_skill or {}).get("BUFF_NAME") or "").strip().lower()
-        skill_role = str((chosen_skill or {}).get("ROLE") or "").strip().lower()
+        skill_role = _skill_role(chosen_skill)
         range_mode = _skill_range(chosen_skill) if chosen_skill else None
-        hit_chance = max(0.2, min(1.5, 1 + (actor.ac - target.ev) / 100.0))
+        visual = _event_visual_contract(actor, chosen_skill)
 
-        if random.random() > hit_chance:
-            push_event(
-                round_num,
-                actor.tag,
-                "skill" if chosen_skill else "attack",
-                0,
-                False,
-                True,
-                False,
-                chosen_skill.get("name") if chosen_skill else None,
-                skill_cost,
-                defender_tag=target.tag,
-                attacker_slot=actor.slot_index,
-                defender_slot=target.slot_index,
-                attack_type=attack_type,
-                buff_name=buff_name or None,
-                skill_role=skill_role or None,
-                range_mode=range_mode,
-            )
-            return
+        is_crit = False
+        final_damage = 0
+        if not _is_support_skill(chosen_skill):
+            hit_chance = max(0.2, min(1.5, 1 + (actor.ac - target.ev) / 100.0))
 
-        is_crit = random.random() < actor.cc / 100.0
-        crit_multiplier = 1 + actor.ca / 100.0 if is_crit else 1.0
-        mitigation = max(0.0, (target.def_val - actor.pi * 0.5) / 100.0)
+            if random.random() > hit_chance:
+                push_event(
+                    round_num,
+                    actor.tag,
+                    "skill" if chosen_skill else "attack",
+                    0,
+                    False,
+                    True,
+                    False,
+                    chosen_skill.get("name") if chosen_skill else None,
+                    skill_cost,
+                    defender_tag=target.tag,
+                    attacker_slot=actor.slot_index,
+                    defender_slot=target.slot_index,
+                    attack_type=attack_type,
+                    buff_name=buff_name or None,
+                    skill_role=skill_role or None,
+                    range_mode=range_mode,
+                    **visual,
+                )
+                return
 
-        raw_damage = (actor.atk + skill_damage) * crit_multiplier
-        final_damage = max(1, int(raw_damage * (1.0 - mitigation)))
-        target.hp = max(0, target.hp - final_damage)
+            is_crit = random.random() < actor.cc / 100.0
+            crit_multiplier = 1 + actor.ca / 100.0 if is_crit else 1.0
+            mitigation = max(0.0, (target.def_val - actor.pi * 0.5) / 100.0)
+
+            raw_damage = (actor.atk + skill_damage) * crit_multiplier
+            final_damage = max(1, int(raw_damage * (1.0 - mitigation)))
+            target.hp = max(0, target.hp - final_damage)
 
         applied_stun = False
         if chosen_skill:
@@ -625,12 +811,7 @@ def _run_board_duel(
                 target.add_buff("stun", max(1, duration or 1), 0, logs)
                 applied_stun = True
 
-            buff_value = 0
-            for field in ["BUFF_HP", "BUFF_MP", "BUFF_DMG", "BUFF_CC", "BUFF_DEF", "BUFF_EV", "BUFF_AC"]:
-                value = _safe_int(chosen_skill.get(field, 0), 0)
-                if value != 0:
-                    buff_value = value
-                    break
+            buff_value = _buff_value_from_skill(chosen_skill)
 
             if buff_name and duration > 0 and buff_value != 0:
                 target.add_buff(buff_name, duration, buff_value, logs)
@@ -652,6 +833,7 @@ def _run_board_duel(
             buff_name=buff_name or None,
             skill_role=skill_role or None,
             range_mode=range_mode,
+            **visual,
         )
 
     for round_num in range(1, max_rounds + 1):
@@ -738,10 +920,14 @@ def _pick_skill(atk: Battler, round_num: int) -> Dict[str, Any] | None:
     if not isinstance(skills, dict):
         return None
 
-    s1 = skills.get("s1")
-    s2 = skills.get("s2")
+    ordered_skills = [skill for _, skill in sorted(skills.items()) if isinstance(skill, dict)]
+    if not ordered_skills:
+        return None
+
+    s1 = skills.get("s1") if isinstance(skills.get("s1"), dict) else ordered_skills[0]
+    s2 = skills.get("s2") if isinstance(skills.get("s2"), dict) else (ordered_skills[1] if len(ordered_skills) > 1 else None)
     planned = s1 if round_num % 4 != 0 else s2
-    return planned or s1 or s2
+    return planned or s1 or ordered_skills[0]
 
 
 def _skill_slot_for_choice(atk: Battler, skill: Dict[str, Any] | None) -> str | None:
@@ -750,8 +936,8 @@ def _skill_slot_for_choice(atk: Battler, skill: Dict[str, Any] | None) -> str | 
     skills = atk.character.get("skill", {})
     if not isinstance(skills, dict):
         return None
-    for slot in ("s1", "s2"):
-        if skills.get(slot) == skill:
+    for slot, candidate in skills.items():
+        if candidate == skill:
             return slot
     return None
 
@@ -788,8 +974,12 @@ def run_auto_duel(
         buff_name=None,
         skill_role=None,
         range_mode=None,
+        defender_tag=None,
+        type_catalog=None,
+        type_effect=None,
+        buff_type_effect=None,
     ):
-        defender_tag = "B" if attacker_tag == "A" else "A"
+        defender_tag = defender_tag or ("B" if attacker_tag == "A" else "A")
 
         if action_type == "dot_damage":
             log = f"[Round {round_num}] {attacker_tag} suffers {damage} damage over time"
@@ -811,6 +1001,12 @@ def run_auto_duel(
             "actionType": action_type,
             "skillName": skill_name,
             "attackType": attack_type,
+            "typeCatalog": type_catalog,
+            "typeEffect": type_effect,
+            "buffTypeEffect": buff_type_effect,
+            "type_catalog": type_catalog,
+            "type_effect": type_effect,
+            "buff_type_effect": buff_type_effect,
             "buffName": buff_name,
             "skillRole": skill_role,
             "rangeMode": range_mode,
@@ -836,12 +1032,12 @@ def run_auto_duel(
 
     def perform_attack(atk: Battler, defen: Battler, round_num: int):
         if atk.is_stunned:
-            push_event(round_num, atk.tag, "stunned", 0, False, False, False)
+            push_event(round_num, atk.tag, "stunned", 0, False, False, False, **_event_visual_contract(atk))
             return
 
         observation, action = _choose_battle_action(battle_controller, atk, [atk], [defen], round_num, label_a, label_b)
         chosen_skill = None
-        if action.kind == "skill" and action.skill_slot in {"s1", "s2"}:
+        if action.kind == "skill" and action.skill_slot:
             skills = atk.character.get("skill", {})
             if isinstance(skills, dict):
                 chosen_skill = skills.get(action.skill_slot)
@@ -858,59 +1054,57 @@ def run_auto_duel(
 
         atk.mp = max(0, atk.mp - skill_cost)
 
-        skill_damage = int(chosen_skill.get("DMG", 0)) if chosen_skill else 0
+        skill_damage = _skill_damage(chosen_skill)
         attack_type = str((chosen_skill or {}).get("TYPE") or atk.character.get("state", {}).get("TYPE") or "").strip()
         buff_name = str((chosen_skill or {}).get("BUFF_NAME") or "").strip().lower()
-        skill_role = str((chosen_skill or {}).get("ROLE") or "").strip().lower()
+        skill_role = _skill_role(chosen_skill)
         range_mode = _skill_range(chosen_skill) if chosen_skill else None
-        target = atk if action.target_tag == atk.tag else defen
-        hit_chance = max(0.2, min(1.5, 1 + (atk.ac - target.ev) / 100.0))
+        target = _target_for_skill(atk, defen, chosen_skill) if chosen_skill else defen
+        visual = _event_visual_contract(atk, chosen_skill)
 
-        if random.random() > hit_chance:
-            push_event(
-                round_num,
-                atk.tag,
-                "skill" if chosen_skill else "attack",
-                0,
-                False,
-                True,
-                False,
-                chosen_skill.get("name") if chosen_skill else None,
-                skill_cost,
-                attack_type=attack_type,
-                buff_name=buff_name or None,
-                skill_role=skill_role or None,
-                range_mode=range_mode,
-            )
-            return
+        is_crit = False
+        final_damage = 0
+        if not _is_support_skill(chosen_skill):
+            hit_chance = max(0.2, min(1.5, 1 + (atk.ac - target.ev) / 100.0))
 
-        is_crit = random.random() < atk.cc / 100.0
-        crit_multiplier = 1 + atk.ca / 100.0 if is_crit else 1.0
-        mitigation = max(0.0, (target.def_val - atk.pi * 0.5) / 100.0)
+            if random.random() > hit_chance:
+                push_event(
+                    round_num,
+                    atk.tag,
+                    "skill" if chosen_skill else "attack",
+                    0,
+                    False,
+                    True,
+                    False,
+                    chosen_skill.get("name") if chosen_skill else None,
+                    skill_cost,
+                    attack_type=attack_type,
+                    buff_name=buff_name or None,
+                    skill_role=skill_role or None,
+                    range_mode=range_mode,
+                    defender_tag=target.tag,
+                    **visual,
+                )
+                return
 
-        raw_damage = (atk.atk + skill_damage) * crit_multiplier
-        final_damage = max(1, int(raw_damage * (1.0 - mitigation)))
-        target.hp = max(0, target.hp - final_damage)
+            is_crit = random.random() < atk.cc / 100.0
+            crit_multiplier = 1 + atk.ca / 100.0 if is_crit else 1.0
+            mitigation = max(0.0, (target.def_val - atk.pi * 0.5) / 100.0)
+
+            raw_damage = (atk.atk + skill_damage) * crit_multiplier
+            final_damage = max(1, int(raw_damage * (1.0 - mitigation)))
+            target.hp = max(0, target.hp - final_damage)
 
         applied_stun = False
         if chosen_skill:
-            target = _target_for_skill(atk, target, chosen_skill)
             buff_name = str(chosen_skill.get("BUFF_NAME", "")).strip().lower()
-            duration = max(0, int(chosen_skill.get("BUFF_TIME", 0)))
+            duration = max(0, _safe_int(chosen_skill.get("BUFF_TIME", 0), 0))
 
             if buff_name == "stun" or str(chosen_skill.get("IS_STUN", "")).lower() == "true":
                 target.add_buff("stun", max(1, duration or 1), 0, logs)
                 applied_stun = True
 
-            buff_value = 0
-            for field in ["BUFF_HP", "BUFF_MP", "BUFF_DMG", "BUFF_CC", "BUFF_DEF", "BUFF_EV", "BUFF_AC"]:
-                try:
-                    value = int(chosen_skill.get(field, 0))
-                except (TypeError, ValueError):
-                    value = 0
-                if value != 0:
-                    buff_value = value
-                    break
+            buff_value = _buff_value_from_skill(chosen_skill)
 
             if buff_name and duration > 0 and buff_value != 0:
                 target.add_buff(buff_name, duration, buff_value, logs)
@@ -929,6 +1123,8 @@ def run_auto_duel(
             buff_name=buff_name or None,
             skill_role=skill_role or None,
             range_mode=range_mode,
+            defender_tag=target.tag,
+            **visual,
         )
 
     for round_num in range(1, max_rounds + 1):
@@ -998,7 +1194,7 @@ def run_team_duel(
             "details": result,
         }
 
-    lanes = 4 if size in {"4v4", "arena_2x3"} else 3
+    lanes = 6 if size == "arena_2x3" else 4 if size == "4v4" else 3
     result = _run_board_duel(team_a, team_b, label_a, label_b, lanes, controller=controller, control_mode=control_mode)
     return {
         "winner": result["winner"],

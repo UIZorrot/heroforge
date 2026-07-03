@@ -14,8 +14,16 @@ export interface BattleEvent {
   skillName?: string;
   attackType?: string | null;
   buffName?: string | null;
+  typeCatalog?: string | null;
+  typeEffect?: string | null;
+  buffTypeEffect?: string | null;
+  type_catalog?: string | null;
+  type_effect?: string | null;
+  buff_type_effect?: string | null;
   skillRole?: string | null;
   rangeMode?: string | null;
+  vfxAngleOffsetDeg?: number | null;
+  vfx_angle_offset_deg?: number | null;
   damage: number;
   heal: number;
   isCrit: boolean;
@@ -41,6 +49,7 @@ export interface BattleBoardUnit {
   side: 'A' | 'B';
   slot: number;
   name: string;
+  image?: string | null;
   alive: boolean;
   hp: number;
   maxHp: number;
@@ -49,6 +58,8 @@ export interface BattleBoardUnit {
   buffs: BuffState[];
   state?: Record<string, string | number> & {
     TYPE?: string;
+    type_catalog?: string;
+    type_effect?: string;
   };
 }
 

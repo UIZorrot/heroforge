@@ -1,6 +1,7 @@
 import { cn } from '../lib/utils';
 import type { CharacterData, CardType, Rarity } from '../lib/gameLogic';
 import { calculateRarity, normalizeCardType, toNumber } from '../lib/gameLogic';
+import { CARD_FALLBACK_SRC } from '../lib/cards';
 import { StatPill } from './Effects';
 
 interface HeroCardProps {
@@ -55,9 +56,11 @@ export function HeroCard({
   const typeKey = normalizeCardType(character.state.TYPE);
   const activeInfusions = infusions.filter((item) => item.count > 0);
 
-  const imageNode = image ? (
+  const imageSrc = image || CARD_FALLBACK_SRC;
+
+  const imageNode = imageSrc ? (
     <img
-      src={image}
+      src={imageSrc}
       alt={character.name}
       className="h-full w-full object-cover object-top transition duration-700 group-hover:scale-[1.03]"
     />

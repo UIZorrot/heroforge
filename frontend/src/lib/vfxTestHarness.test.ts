@@ -1,0 +1,64 @@
+import { describe, expect, it } from 'vitest';
+import {
+  canonicalBattleBuffNames,
+  canonicalBattleInstantTypeEffects,
+  canonicalBattleProjectileTypeEffects,
+} from './battleVfxCatalog';
+import { createVfxTestBoard, createVfxTestEvent, createVfxTestResult, vfxTestOptions } from './vfxTestHarness';
+
+describe('vfxTestHarness', () => {
+  it('lists every canonical battle vfx option', () => {
+    expect(vfxTestOptions.projectile.map((option) => option.value)).toEqual(canonicalBattleProjectileTypeEffects);
+    expect(vfxTestOptions.instant.map((option) => option.value)).toEqual(canonicalBattleInstantTypeEffects);
+    expect(vfxTestOptions.buff.map((option) => option.value)).toEqual(canonicalBattleBuffNames);
+  });
+
+  it('creates a projectile event that uses the projectile visual contract', () => {
+    const event = createVfxTestEvent('projectile', 'frost', 7, { crit: true, angleOffsetDeg: -12 });
+
+    expect(event.actionType).toBe('skill');
+    expect(event.attacker).toBe('A1');
+    expect(event.defender).toBe('B1');
+    expect(event.typeCatalog).toBe('proj');
+    expect(event.typeEffect).toBe('frost');
+    expect(event.rangeMode).toBe('ranged');
+    expect(event.isCrit).toBe(true);
+    expect(event.vfxAngleOffsetDeg).toBe(-12);
+    expect(event.timestamp).toBe(7);
+  });
+
+  it('creates an instant event that uses the instant visual contract', () => {
+    const event = createVfxTestEvent('instant', 'claw', 3);
+
+    expect(event.actionType).toBe('skill');
+    expect(event.attacker).toBe('A1');
+    expect(event.defender).toBe('B1');
+    expect(event.typeCatalog).toBe('instant');
+    expect(event.typeEffect).toBe('claw');
+    expect(event.rangeMode).toBe('melee');
+    expect(event.damage).toBeGreaterThan(0);
+  });
+
+  it('creates a buff event that targets the caster card border', () => {
+    const event = createVfxTestEvent('buff', 'vulnerable', 11);
+    const board = createVfxTestBoard('buff', 'vulnerable');
+
+    expect(event.actionType).toBe('skill');
+    expect(event.attacker).toBe('A1');
+    expect(event.defender).toBe('A1');
+    expect(event.skillRole).toBe('buff');
+    expect(event.buffName).toBe('vulnerable');
+    expect(event.buffTypeEffect).toBe('vulnerable');
+    expect(board.bottom[0]?.buffs).toEqual([{ name: 'vulnerable', duration: 3, value: 1 }]);
+  });
+
+  it('wraps the board and event in a replayable battle result', () => {
+    const board = createVfxTestBoard('projectile', 'fire');
+    const event = createVfxTestEvent('projectile', 'fire', 2);
+    const result = createVfxTestResult(board, event);
+
+    expect(result.events).toEqual([event]);
+    expect(result.logs).toEqual([event.log]);
+    expect(result.boardHistory).toEqual([board]);
+  });
+});

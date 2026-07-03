@@ -6,6 +6,9 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+if ($null -ne (Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue)) {
+    $PSNativeCommandUseErrorActionPreference = $false
+}
 
 function Write-Step {
     param([string]$Message)
@@ -23,6 +26,22 @@ function Assert-Command {
     }
 }
 
+function Sync-BackendDependencies {
+    param([string]$BackendDir)
+
+    Write-Step "Syncing backend Python dependencies with uv"
+    Push-Location $BackendDir
+    try {
+        cmd.exe /c "uv sync 2>&1"
+        if ($LASTEXITCODE -ne 0) {
+            throw "uv sync failed with exit code $LASTEXITCODE"
+        }
+    }
+    finally {
+        Pop-Location
+    }
+}
+
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $BackendDir = Join-Path $Root "backend"
 $FrontendDir = Join-Path $Root "frontend"
@@ -35,49 +54,45 @@ if (-not (Test-Path $FrontendDir)) {
     throw "Frontend directory not found: $FrontendDir"
 }
 
-Assert-Command "python" "Install Python 3.12+ or add it to PATH."
+Assert-Command "uv" "Install uv and add it to PATH."
 Assert-Command "npm" "Install Node.js 20+ or add npm to PATH."
 
 if ($Install) {
-    Write-Step "Installing backend Python dependencies"
-    Push-Location $BackendDir
-    try {
-        python -m pip install -r requirements.txt
-    }
-    finally {
-        Pop-Location
-    }
-
     Write-Step "Installing frontend npm dependencies"
     Push-Location $FrontendDir
     try {
-        npm install
+        cmd.exe /c "npm install 2>&1"
+        if ($LASTEXITCODE -ne 0) {
+            throw "npm install failed with exit code $LASTEXITCODE"
+        }
     }
     finally {
         Pop-Location
     }
 }
 
-$PythonExe = "python"
-$VenvPython = Join-Path $BackendDir ".venv\Scripts\python.exe"
-if (Test-Path $VenvPython) {
-    $PythonExe = $VenvPython
-}
+Sync-BackendDependencies -BackendDir $BackendDir
 
 $BackendCommand = @"
 `$Host.UI.RawUI.WindowTitle = 'Hero Forge Backend :$BackendPort'
+if (`$null -ne (Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue)) {
+    `$PSNativeCommandUseErrorActionPreference = `$false
+}
 Set-Location '$BackendDir'
 `$env:PORT = '$BackendPort'
 Write-Host 'Backend starting on http://127.0.0.1:$BackendPort' -ForegroundColor Green
-& '$PythonExe' main.py
+cmd.exe /c "uv run python main.py 2>&1"
 "@
 
 $FrontendCommand = @"
 `$Host.UI.RawUI.WindowTitle = 'Hero Forge Frontend :$FrontendPort'
+if (`$null -ne (Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue)) {
+    `$PSNativeCommandUseErrorActionPreference = `$false
+}
 Set-Location '$FrontendDir'
 `$env:VITE_BACKEND_URL = 'http://127.0.0.1:$BackendPort'
 Write-Host 'Frontend starting on http://127.0.0.1:$FrontendPort' -ForegroundColor Green
-npm run dev -- --host 127.0.0.1 --port $FrontendPort
+cmd.exe /c "npm run dev -- --host 127.0.0.1 --port $FrontendPort 2>&1"
 "@
 
 Write-Step "Starting backend process"

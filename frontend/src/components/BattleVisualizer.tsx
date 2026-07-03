@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { AnimatePresence, motion } from 'framer-motion';
+import { motion } from 'framer-motion';
 import {
   Crosshair,
   Droplets,
@@ -11,17 +11,17 @@ import {
   Swords,
   Sun,
   Sword,
-  Waves,
   Wind,
   Zap,
   Snowflake,
 } from 'lucide-react';
-import type { BattleBoardState, BattleBoardUnit, BattleEvent, BattleResult } from '../lib/battleTypes';
+import type { BattleEvent, BattleResult } from '../lib/battleTypes';
 import type { CharacterData } from '../lib/gameLogic';
 import { toNumber } from '../lib/gameLogic';
 import { cn } from '../lib/utils';
 import { EmptyState, SectionHeader, StatPill } from './Effects';
 import { HeroCard } from './HeroCard';
+import { ArenaBattleScene } from './ArenaBattleScene';
 
 interface BattleVisualizerProps {
   heroA: CharacterData | null;
@@ -199,81 +199,6 @@ function healthTone(ratio: number) {
   return 'from-emerald-700 to-emerald-400';
 }
 
-function boardUnitTone(unit: BattleBoardUnit | null) {
-  if (!unit) return 'border-stone-800 bg-black/35';
-  if (!unit.alive || unit.hp <= 0) return 'border-stone-900 bg-black/30 opacity-55';
-  const ratio = hpPercent(unit.hp, unit.maxHp);
-  if (ratio <= 0.25) return 'border-red-500/35 bg-red-950/20';
-  if (ratio <= 0.6) return 'border-amber-500/35 bg-amber-950/20';
-  return 'border-emerald-500/30 bg-emerald-950/15';
-}
-
-function BoardUnitCard({ unit, side, laneIndex }: { unit: BattleBoardUnit | null; side: 'top' | 'bottom'; laneIndex: number }) {
-  if (!unit) {
-    return (
-      <div className="flex min-h-[148px] flex-col justify-between border border-stone-800 bg-black/30 p-3 text-stone-600">
-        <div className="flex items-center justify-between text-[10px] uppercase tracking-[0.28em]">
-          <span>Lane {laneIndex + 1}</span>
-          <span>{side === 'top' ? 'B' : 'A'}</span>
-        </div>
-        <div className="text-center text-[10px] uppercase tracking-[0.28em] text-stone-700">Empty</div>
-      </div>
-    );
-  }
-
-  const ratio = hpPercent(unit.hp, unit.maxHp);
-  const typeVisual = getTypeVisual(unit.state?.TYPE);
-  const buffNames = (unit.buffs || []).map((buff) => buff.name).filter(Boolean);
-
-  return (
-    <div className={cn('relative overflow-hidden flex min-h-[148px] flex-col gap-2 border p-3 transition', boardUnitTone(unit), typeVisual.ring)}>
-      <motion.div
-        className={cn('pointer-events-none absolute inset-0 bg-gradient-to-br opacity-60', typeVisual.glow)}
-        initial={{ opacity: 0.12, scale: 0.96 }}
-        animate={{ opacity: [0.14, 0.3, 0.14], scale: [0.96, 1, 0.98] }}
-        transition={{ duration: 3.6, repeat: Infinity, ease: 'easeInOut' }}
-      />
-      <div className="relative flex items-center justify-between text-[10px] uppercase tracking-[0.28em] text-stone-400">
-        <span>{unit.tag}</span>
-        <span>Lane {laneIndex + 1}</span>
-      </div>
-      <div className="relative flex items-center justify-between gap-2">
-        <div className="text-sm font-light tracking-[0.08em] text-stone-100">{unit.name}</div>
-        <span className={cn('inline-flex items-center gap-1 border px-2 py-0.5 text-[9px] uppercase tracking-[0.24em]', typeVisual.chip)}>
-          <typeVisual.icon size={10} />
-          {typeVisual.label}
-        </span>
-      </div>
-      <div className="relative h-2 border border-stone-800 bg-black">
-        <div className={cn('h-full bg-gradient-to-r transition-all', healthTone(ratio))} style={{ width: `${ratio * 100}%` }} />
-      </div>
-      <div className="relative flex items-center justify-between text-[10px] uppercase tracking-[0.22em] text-stone-500">
-        <span>HP {unit.hp}/{unit.maxHp}</span>
-        <span>MP {unit.mp}/{unit.maxMp}</span>
-      </div>
-      <div className="relative flex flex-wrap gap-1">
-        {unit.buffs?.length ? (
-          unit.buffs.slice(0, 3).map((buff, index) => {
-            const buffVisual = getBuffVisual(buff.name);
-            return (
-              <span
-                key={`${unit.tag}-${buff.name}-${index}`}
-                className={cn('inline-flex items-center gap-1 border px-2 py-0.5 text-[9px] uppercase tracking-[0.22em]', buffVisual.chip)}
-              >
-                <buffVisual.icon size={10} />
-                {buff.name} {buff.duration}
-              </span>
-            );
-          })
-        ) : (
-          <span className="text-[10px] uppercase tracking-[0.22em] text-stone-600">No buffs</span>
-        )}
-      </div>
-      {buffNames.includes('stun') && <div className="pointer-events-none absolute inset-0 bg-amber-400/10 ring-1 ring-inset ring-amber-300/20" />}
-    </div>
-  );
-}
-
 function BattleEventCard({ event }: { event: BattleResult['events'][number] }) {
   const actionVisual = getActionVisual(event.actionType);
   const attackVisual = getTypeVisual(event.attackType);
@@ -341,7 +266,7 @@ function BattleEventCard({ event }: { event: BattleResult['events'][number] }) {
               <div className="text-[9px] uppercase tracking-[0.22em] text-stone-500">
                 {event.attacker}
                 {' '}
-                <span className="text-stone-600">→</span>
+                <span className="text-stone-600">to</span>
                 {' '}
                 {event.defender}
               </div>
@@ -350,45 +275,6 @@ function BattleEventCard({ event }: { event: BattleResult['events'][number] }) {
         </div>
       </div>
     </motion.div>
-  );
-}
-
-function BoardView({ board }: { board: BattleBoardState }) {
-  return (
-    <div className="space-y-4 border border-stone-800 bg-black/45 p-4">
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <div className="text-[10px] uppercase tracking-[0.28em] text-stone-500">{board.topLabel}</div>
-          <div className="text-sm text-stone-300">Top side</div>
-        </div>
-        <div className="text-center">
-          <div className="text-[10px] uppercase tracking-[0.34em] text-sky-200">{board.riverLabel}</div>
-          <div className="mt-1 text-4xl font-light tracking-[0.28em] text-stone-100">VS</div>
-        </div>
-        <div className="text-right">
-          <div className="text-[10px] uppercase tracking-[0.28em] text-stone-500">{board.bottomLabel}</div>
-          <div className="text-sm text-stone-300">Bottom side</div>
-        </div>
-      </div>
-
-      <div className="grid gap-3 md:grid-cols-4">
-        {board.top.map((unit, index) => (
-          <BoardUnitCard key={`top-${index}-${unit?.tag ?? 'empty'}`} unit={unit} side="top" laneIndex={index} />
-        ))}
-      </div>
-
-      <div className="flex items-center gap-4 py-2">
-        <div className="h-[1px] flex-1 bg-gradient-to-r from-transparent via-sky-500/70 to-transparent" />
-        <div className="px-3 text-[10px] uppercase tracking-[0.38em] text-sky-200">River</div>
-        <div className="h-[1px] flex-1 bg-gradient-to-r from-transparent via-sky-500/70 to-transparent" />
-      </div>
-
-      <div className="grid gap-3 md:grid-cols-4">
-        {board.bottom.map((unit, index) => (
-          <BoardUnitCard key={`bottom-${index}-${unit?.tag ?? 'empty'}`} unit={unit} side="bottom" laneIndex={index} />
-        ))}
-      </div>
-    </div>
   );
 }
 
@@ -410,116 +296,9 @@ export function BattleVisualizer({ heroA, heroB, result, onClose }: BattleVisual
     return Math.max(...result.events.map((event) => event.round));
   }, [board, result]);
 
-  if (board) {
+  if (board && result) {
     return (
-      <div className="space-y-6">
-        <div className="flex items-start justify-between gap-4">
-          <SectionHeader
-            eyebrow="Battle Lab"
-            title="Board Visualization"
-            description="A 4v4 facing board with a river split and range-aware lane targeting."
-          />
-          {onClose && (
-            <button
-              type="button"
-              onClick={onClose}
-              className="border border-stone-800 bg-black/50 px-3 py-2 text-xs uppercase tracking-[0.24em] text-stone-400 transition hover:border-[#c59a5a]/40 hover:text-[#f0d8ad]"
-            >
-              Close
-            </button>
-          )}
-        </div>
-
-        <BoardView board={board} />
-
-        <div className="grid gap-4 lg:grid-cols-[1fr_auto_1fr]">
-          <div className="space-y-3">
-            <div className="border border-stone-800 bg-black/40 p-4">
-              <div className="flex items-center justify-between text-xs uppercase tracking-[0.24em] text-stone-500">
-                <span>{board.bottomLabel}</span>
-                <span>Bottom side</span>
-              </div>
-              <div className="mt-3 flex flex-wrap gap-2">
-                <StatPill label="Units" value={board.bottom.filter(Boolean).length} tone="gold" />
-                <StatPill label="HP" value={result?.finalHpA ?? 0} tone="emerald" />
-                <StatPill label="Alive" value={result?.aliveA ?? 0} tone="violet" />
-              </div>
-            </div>
-          </div>
-
-          <div className="flex min-w-[240px] flex-col justify-center gap-4">
-            <div className="text-center">
-              <div className="text-5xl font-light tracking-[0.35em] text-stone-700">VS</div>
-              <div className="mt-3 flex items-center justify-center gap-2 text-[10px] uppercase tracking-[0.28em] text-stone-500">
-                <Sword size={14} />
-                <span>{result ? winner : 'Awaiting battle'}</span>
-                <Shield size={14} />
-              </div>
-            </div>
-
-            <div className="space-y-2 border border-stone-800 bg-black/40 p-4 text-center">
-              <div className="text-[10px] uppercase tracking-[0.24em] text-stone-500">Outcome</div>
-              <div className="text-xl font-light tracking-[0.12em] text-stone-100">
-                {result ? (result.winner === 'Tie' ? 'Draw' : winner) : 'No result yet'}
-              </div>
-              {result?.summary && <div className="text-xs text-stone-400">{result.summary}</div>}
-              {lastLog && <div className="text-xs text-[#f0d8ad]">{lastLog}</div>}
-              <div className="flex flex-wrap justify-center gap-2 pt-2">
-                <StatPill label="Events" value={eventCount} tone="violet" />
-                <StatPill label="Rounds" value={roundCount} tone="emerald" />
-                <StatPill label="Logs" value={result?.logs?.length ?? 0} tone="amber" />
-              </div>
-            </div>
-
-            <div className="border border-stone-800 bg-black/40 p-4 text-xs text-stone-400">
-              <div className="flex items-center gap-2 uppercase tracking-[0.24em] text-stone-500">
-                <Waves size={14} />
-                <span>Signal</span>
-              </div>
-              <p className="mt-2 leading-6">
-                The backend simulates a 4v4 lane battle, then returns the event log, board snapshot, and final outcome.
-              </p>
-            </div>
-          </div>
-
-          <div className="space-y-3">
-            <div className="border border-stone-800 bg-black/40 p-4">
-              <div className="flex items-center justify-between text-xs uppercase tracking-[0.24em] text-stone-500">
-                <span>{board.topLabel}</span>
-                <span>Top side</span>
-              </div>
-              <div className="mt-3 flex flex-wrap gap-2">
-                <StatPill label="Units" value={board.top.filter(Boolean).length} tone="gold" />
-                <StatPill label="HP" value={result?.finalHpB ?? 0} tone="emerald" />
-                <StatPill label="Alive" value={result?.aliveB ?? 0} tone="violet" />
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {result?.events?.length ? (
-          <div className="border border-stone-800 bg-black/45">
-            <div className="flex items-center justify-between border-b border-stone-800 px-4 py-3">
-              <div className="text-xs uppercase tracking-[0.24em] text-stone-500">Battle Feed</div>
-              <div className="text-xs uppercase tracking-[0.24em] text-stone-500">{result.events.length} events</div>
-            </div>
-            <div className="max-h-[320px] overflow-auto p-4">
-              <AnimatePresence initial={false}>
-                <div className="space-y-2">
-                  {result.events.map((event, index) => (
-                    <BattleEventCard key={`${event.round}-${event.attacker}-${event.defender}-${index}`} event={event} />
-                  ))}
-                </div>
-              </AnimatePresence>
-            </div>
-          </div>
-        ) : (
-          <EmptyState
-            title="No battle feed yet"
-            description="Once a duel is run, the event feed will appear here with round-by-round logs."
-          />
-        )}
-      </div>
+      <ArenaBattleScene board={board} events={result?.events ?? []} logs={result?.logs ?? []} result={result} />
     );
   }
 
@@ -534,12 +313,12 @@ export function BattleVisualizer({ heroA, heroB, result, onClose }: BattleVisual
 
   return (
     <div className="space-y-6">
-      <div className="flex items-start justify-between gap-4">
-        <SectionHeader
-          eyebrow="Battle Lab"
-          title="Duel Visualization"
-          description="Inspect the selected heroes, outcome summary, and the battle event feed."
-        />
+        <div className="flex items-start justify-between gap-4">
+          <SectionHeader
+            eyebrow="Arena"
+            title="Duel Resolution"
+            description="Inspect the selected combatants, outcome summary, and resolved battle feed."
+          />
         {onClose && (
           <button
             type="button"
@@ -551,7 +330,7 @@ export function BattleVisualizer({ heroA, heroB, result, onClose }: BattleVisual
         )}
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-[1fr_auto_1fr]">
+      <div className="grid gap-4 lg:grid-cols-[1fr_minmax(220px,0.8fr)_1fr]">
         <div className="space-y-3">
           <HeroCard character={heroA} className="h-full min-h-[420px]" compact />
           <div className="border border-stone-800 bg-black/40 p-4">
@@ -571,8 +350,7 @@ export function BattleVisualizer({ heroA, heroB, result, onClose }: BattleVisual
 
         <div className="flex min-w-[240px] flex-col justify-center gap-4">
           <div className="text-center">
-            <div className="text-5xl font-light tracking-[0.35em] text-stone-700">VS</div>
-            <div className="mt-3 flex items-center justify-center gap-2 text-[10px] uppercase tracking-[0.28em] text-stone-500">
+            <div className="flex items-center justify-center gap-2 text-[10px] uppercase tracking-[0.28em] text-stone-500">
               <Sword size={14} />
               <span>{result ? winner : 'Awaiting battle'}</span>
               <Shield size={14} />
@@ -595,11 +373,11 @@ export function BattleVisualizer({ heroA, heroB, result, onClose }: BattleVisual
 
           <div className="border border-stone-800 bg-black/40 p-4 text-xs text-stone-400">
             <div className="flex items-center gap-2 uppercase tracking-[0.24em] text-stone-500">
-              <Waves size={14} />
-              <span>Signal</span>
+              <Swords size={14} />
+              <span>Combat Data</span>
             </div>
             <p className="mt-2 leading-6">
-              The backend simulates combat with the generated stats, then returns the event log and final outcome.
+              Resolved from generated stats, skills, buffs, and backend battle events.
             </p>
           </div>
         </div>

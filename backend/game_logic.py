@@ -17,6 +17,50 @@ STAT_COSTS = {
 }
 
 
+def _visual_token(value: Any, fallback: str = "") -> str:
+    token = str(value if value is not None else fallback).strip().lower().replace(" ", "_").replace("-", "_")
+    return token or fallback
+
+
+def _legacy_type_catalog(effect_type: Any) -> str:
+    token = _visual_token(effect_type, "flesh")
+    if token in {"weapon", "flesh", "slash", "claw"}:
+        return "instant"
+    return "proj"
+
+
+def _legacy_type_effect(effect_type: Any, type_catalog: str | None = None) -> str:
+    token = _visual_token(effect_type, "flesh")
+    catalog = type_catalog or _legacy_type_catalog(token)
+    if catalog == "instant":
+        if token == "weapon":
+            return "slash"
+        if token == "flesh":
+            return "claw"
+    if catalog == "proj" and token == "weapon":
+        return "arrow"
+    return token
+
+
+def _visual_type_contract(source: Dict[str, Any] | None, fallback_type: Any = None) -> Dict[str, str | None]:
+    source = source if isinstance(source, dict) else {}
+    legacy_type = source.get("TYPE", fallback_type)
+    catalog = _visual_token(source.get("type_catalog", source.get("typeCatalog")), "")
+    if catalog == "projectile":
+        catalog = "proj"
+    if catalog == "melee":
+        catalog = "instant"
+    if catalog not in {"proj", "instant"}:
+        catalog = _legacy_type_catalog(legacy_type)
+
+    buff_effect = _visual_token(source.get("buff_type_effect", source.get("buffTypeEffect")), "")
+    return {
+        "type_catalog": catalog,
+        "type_effect": _visual_token(source.get("type_effect", source.get("typeEffect")), "") or _legacy_type_effect(legacy_type, catalog),
+        "buff_type_effect": buff_effect or None,
+    }
+
+
 TEMPLATE_PROFILES = {
     "knight": {
         "hpmp_range": (0.50, 0.58),
@@ -399,6 +443,9 @@ def _build_state(original_bp: int, weights: Dict[str, Any], template: str) -> Di
 
     generated_state = {key: str(value) for key, value in generated.items()}
     generated_state["TYPE"] = str(weights.get("TYPE") or weights.get("template") or weights.get("TEMPLATE") or "flesh")
+    visual = _visual_type_contract(weights, generated_state["TYPE"])
+    generated_state["type_catalog"] = str(visual["type_catalog"])
+    generated_state["type_effect"] = str(visual["type_effect"])
     return generated_state
 
 
@@ -515,6 +562,12 @@ def _build_skill(skill: Dict[str, Any], state: Dict[str, str], template: str) ->
         generated["BUFF_TIME"] = str(max(1, buff_time))
     else:
         generated["IS_STUN"] = "True" if _truthy(skill.get("IS_STUN")) else "False"
+
+    visual = _visual_type_contract(skill, state.get("TYPE"))
+    generated["type_catalog"] = str(visual["type_catalog"])
+    generated["type_effect"] = str(visual["type_effect"])
+    if visual["buff_type_effect"]:
+        generated["buff_type_effect"] = str(visual["buff_type_effect"])
 
     return generated
 

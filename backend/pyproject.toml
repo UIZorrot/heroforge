@@ -1,0 +1,16 @@
+[project]
+name = "hero-forge-backend"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "flask",
+    "flask-cors",
+    "flask-caching",
+    "requests",
+    "pillow",
+    "python-dotenv",
+    "google-genai",
+    "psycopg[binary]",
+    "resend",
+    "pytest",
+]

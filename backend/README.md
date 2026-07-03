@@ -60,8 +60,8 @@ DB_SCHEMA=app
 
 ```bash
 cd backend
-pip install -r requirements.txt
-python main.py
+uv sync
+uv run python main.py
 ```
 
 ## Integration Tests
@@ -72,7 +72,7 @@ Run them with:
 
 ```bash
 cd backend
-pytest
+uv run pytest
 ```
 
 Artifacts are written to:
@@ -102,6 +102,9 @@ The test suite covers:
 - `POST /api/battle/team`
 - `POST /api/economy/repair`
 - `POST /api/economy/pvp-entry`
+- `POST /api/cards/<card_id>/equip-relic`
+- `POST /api/cards/<card_id>/enchant`
+- `POST /api/cards/<card_id>/wash-enchant`
 - `POST /api/pvp/join`
 - `GET /api/pvp/entries/<entry_id>`
 - `POST /api/pvp/cancel`

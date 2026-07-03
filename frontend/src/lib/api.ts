@@ -5,6 +5,8 @@ import type {
   DailySnapshot,
   EconomySnapshot,
   ArenaFormation,
+  BattleSessionAction,
+  BattleSessionSnapshot,
   CharacterData,
   HeroHistoryRecord,
   LadderSnapshot,
@@ -231,7 +233,7 @@ export async function battleHeroes(heroA: unknown, heroB: unknown, token?: strin
 export async function battleTeams(
   teamA: unknown[],
   teamB: unknown[],
-  size: '1v1' | '3v3' | '4v4',
+  size: '1v1' | '3v3' | '4v4' | 'arena_2x3',
   labelA: string,
   labelB: string,
   token?: string | null
@@ -244,6 +246,51 @@ export async function battleTeams(
     },
     token
   );
+}
+
+export async function createBattleSession(
+  teamA: unknown[],
+  teamB: unknown[],
+  battleMode: '1v1' | '4v4' | 'arena_2x3',
+  labelA: string,
+  labelB: string,
+  token?: string | null,
+  waitSeconds?: number
+): Promise<BattleSessionSnapshot> {
+  const payload = await requestJson<{ data: BattleSessionSnapshot }>(
+    '/api/battle/sessions',
+    {
+      method: 'POST',
+      body: JSON.stringify({ teamA, teamB, battleMode, labelA, labelB, controlMode: 'rest', waitSeconds }),
+    },
+    token
+  );
+  return payload.data;
+}
+
+export async function fetchBattleSession(sessionId: string, token?: string | null): Promise<BattleSessionSnapshot> {
+  const payload = await requestJson<{ data: BattleSessionSnapshot }>(
+    `/api/battle/sessions/${encodeURIComponent(sessionId)}`,
+    { method: 'GET' },
+    token
+  );
+  return payload.data;
+}
+
+export async function submitBattleSessionAction(
+  sessionId: string,
+  action: BattleSessionAction,
+  token?: string | null
+): Promise<BattleSessionSnapshot> {
+  const payload = await requestJson<{ data: BattleSessionSnapshot }>(
+    `/api/battle/sessions/${encodeURIComponent(sessionId)}/actions`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ action }),
+    },
+    token
+  );
+  return payload.data;
 }
 
 export async function joinPvpQueue(
@@ -299,6 +346,36 @@ export async function cancelPvpEntry(entryId: string, token?: string | null): Pr
 export async function reviveCard(cardId: string, token?: string | null): Promise<{ ok: true; card: HeroHistoryRecord; economy: EconomySnapshot }> {
   return await requestJson<{ ok: true; card: HeroHistoryRecord; economy: EconomySnapshot }>(
     `/api/cards/${cardId}/revive`,
+    { method: 'POST' },
+    token
+  );
+}
+
+export async function equipCardRelic(cardId: string, relicType: string | null, token?: string | null): Promise<{ ok: true; card: HeroHistoryRecord; economy: EconomySnapshot }> {
+  return await requestJson<{ ok: true; card: HeroHistoryRecord; economy: EconomySnapshot }>(
+    `/api/cards/${cardId}/equip-relic`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ relicType }),
+    },
+    token
+  );
+}
+
+export async function enchantCard(cardId: string, relicType: string, token?: string | null): Promise<{ ok: true; card: HeroHistoryRecord; economy: EconomySnapshot }> {
+  return await requestJson<{ ok: true; card: HeroHistoryRecord; economy: EconomySnapshot }>(
+    `/api/cards/${cardId}/enchant`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ relicType }),
+    },
+    token
+  );
+}
+
+export async function washCardEnchant(cardId: string, token?: string | null): Promise<{ ok: true; card: HeroHistoryRecord; economy: EconomySnapshot }> {
+  return await requestJson<{ ok: true; card: HeroHistoryRecord; economy: EconomySnapshot }>(
+    `/api/cards/${cardId}/wash-enchant`,
     { method: 'POST' },
     token
   );

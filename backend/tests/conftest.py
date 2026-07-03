@@ -216,6 +216,43 @@ class BackendHarness:
         assert response.status_code == 200, response.get_data(as_text=True)
         return response.get_json()
 
+    def grant_relic(self, user_id: str, relic_type: str, amount: int = 1):
+        return self.db_module.adjust_relic_balance(
+            user_id,
+            relic_type,
+            amount,
+            "test_grant",
+            metadata={"source": "integration_test"},
+        )
+
+    def equip_relic(self, headers: Dict[str, str], hero_id: str, relic_type: str | None):
+        response = self.client.post(
+            f"/api/cards/{hero_id}/equip-relic",
+            headers=headers,
+            json={"relicType": relic_type},
+        )
+        self.trace("equip-relic", response)
+        assert response.status_code == 200, response.get_data(as_text=True)
+        return response.get_json()
+
+    def enchant_card(self, headers: Dict[str, str], hero_id: str, relic_type: str):
+        response = self.client.post(
+            f"/api/cards/{hero_id}/enchant",
+            headers=headers,
+            json={"relicType": relic_type},
+        )
+        self.trace("enchant-card", response)
+        return response
+
+    def wash_enchant(self, headers: Dict[str, str], hero_id: str):
+        response = self.client.post(
+            f"/api/cards/{hero_id}/wash-enchant",
+            headers=headers,
+            json={},
+        )
+        self.trace("wash-enchant", response)
+        return response
+
     def pvp_entry(self, headers: Dict[str, str], queue_key: str = "default"):
         response = self.client.post(
             "/api/economy/pvp-entry",

@@ -4,7 +4,7 @@ import type { CharacterData } from './lib/gameLogic';
 export type { BattleEvent, BattleResult } from './lib/battleTypes';
 export type { CharacterData } from './lib/gameLogic';
 
-export type SectionKey = 'home' | 'forge' | 'vault' | 'duel' | 'arena' | 'profile';
+export type SectionKey = 'home' | 'forge' | 'vault' | 'arena' | 'chronicle' | 'market';
 
 export type MaterialKey = 'glowGem' | 'chaosMind' | 'emberCore' | 'frostShard' | 'stormSigil' | 'voidDust';
 export type MaterialInventory = Record<MaterialKey, number>;
@@ -50,6 +50,14 @@ export interface SavedHero {
   image?: string;
   character: CharacterData;
   infusedMaterials?: Partial<MaterialInventory>;
+  equippedRelicId?: string | null;
+  enchantment?: {
+    relicId: string;
+    relicName: string;
+    effectProfile?: string;
+    appliedAt: string;
+    removedAt?: string | null;
+  } | null;
   pvpLifeState?: CardPvpLifeState;
   pveLifeState?: CardPveLifeState;
   cardStatus?: CardStatus;
@@ -64,6 +72,19 @@ export interface HeroHistoryRecord {
   created_at: string;
   hero_payload: CharacterData;
   source_payload?: unknown;
+  equipped_relic_type?: string | null;
+  enchantment?: {
+    relicType?: string;
+    relicName?: string;
+    effectProfile?: string;
+    appliedAt?: string;
+    removedAt?: string | null;
+    relicId?: string;
+    relicNameLegacy?: string;
+    effect_profile?: string;
+    applied_at?: string;
+    removed_at?: string | null;
+  } | null;
   pvp_life_state: CardPvpLifeState;
   pve_life_state: CardPveLifeState;
   card_status: CardStatus;
@@ -219,6 +240,59 @@ export interface ClientBattleSummary {
 
 export type PvpQueueStatus = 'waiting' | 'matched' | 'cancelled' | 'expired';
 export type PvpBattleMode = '1v1' | '4v4' | 'arena_2x3';
+
+export interface BattleSessionUnit {
+  tag: string;
+  side: 'A' | 'B';
+  slot: number;
+  name: string;
+  alive: boolean;
+  hp: number;
+  maxHp: number;
+  mp: number;
+  maxMp: number;
+  buffs: BattleEvent['buffsA'];
+  state?: Record<string, string | number> & {
+    TYPE?: string;
+  };
+  skills?: Record<string, Record<string, unknown> | undefined>;
+}
+
+export interface BattleSessionObservation {
+  round: number;
+  labels: {
+    a: string;
+    b: string;
+  };
+  actor: BattleSessionUnit;
+  allies: BattleSessionUnit[];
+  enemies: BattleSessionUnit[];
+}
+
+export interface BattleSessionSnapshot {
+  sessionId: string;
+  battleMode: PvpBattleMode;
+  controlMode: 'rest';
+  labelA: string;
+  labelB: string;
+  status: 'awaiting_action' | 'resolved';
+  round: number;
+  waitingUntil?: number | null;
+  waitSeconds: number;
+  activeActorTag?: string | null;
+  expectedActionSource?: string | null;
+  lastActionSource?: string | null;
+  lastAction?: Record<string, unknown> | null;
+  observation?: BattleSessionObservation | BattleResult['board'] | null;
+  result?: BattleResult | null;
+}
+
+export interface BattleSessionAction {
+  actorTag: string;
+  kind: 'attack' | 'skill';
+  targetTag?: string | null;
+  skillSlot?: 's1' | 's2' | null;
+}
 
 export interface PvpTeamSnapshot {
   hero_ids: string[];

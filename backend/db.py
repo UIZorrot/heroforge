@@ -59,6 +59,8 @@ CREATE TABLE IF NOT EXISTS heroes (
     pvp_dead_at timestamptz,
     decomposed_at timestamptz,
     active_pvp_entry_id uuid,
+    equipped_relic_type text,
+    enchantment jsonb,
     created_at timestamptz NOT NULL DEFAULT now(),
     CHECK (pvp_life_state IN ('active', 'pvp_dead')),
     CHECK (pve_life_state IN ('active', 'pve_injured')),
@@ -72,6 +74,8 @@ ALTER TABLE heroes ADD COLUMN IF NOT EXISTS locked_reason text;
 ALTER TABLE heroes ADD COLUMN IF NOT EXISTS pvp_dead_at timestamptz;
 ALTER TABLE heroes ADD COLUMN IF NOT EXISTS decomposed_at timestamptz;
 ALTER TABLE heroes ADD COLUMN IF NOT EXISTS active_pvp_entry_id uuid;
+ALTER TABLE heroes ADD COLUMN IF NOT EXISTS equipped_relic_type text;
+ALTER TABLE heroes ADD COLUMN IF NOT EXISTS enchantment jsonb;
 
 CREATE INDEX IF NOT EXISTS idx_heroes_user_id_created_at ON heroes(user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_heroes_user_pvp_life_state ON heroes(user_id, pvp_life_state);

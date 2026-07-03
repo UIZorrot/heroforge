@@ -24,7 +24,7 @@ HP + MP must account for 30%-60% of BP
 
 [Effect Types]
  (flesh), (magic), (thunder), (weapon), (gun), (fire), (poison), (frost), (dark), (light), (nature), (water)
-This determines the special effects in the game, but has no actual effect. 
+This determines the special effects in the game, but has no actual effect.
 It should be based on the character's traits. Skills and attacks will have its own unique effect type.
 
 [SKILL]
@@ -50,7 +50,7 @@ Buffs (positive effects):
 (haste): Increases X crit rate and accuracy
 (pray): Increases X attribute
 
-All statuses must specify how many turns they last, except for stun (which lasts 1 turn). 
+All statuses must specify how many turns they last, except for stun (which lasts 1 turn).
 Choose 2 out of 3 skills based on the character’s traits and design them.
 
 [BP Levels reference]:
@@ -66,7 +66,7 @@ Demon Lords (Dracula, Diablo, Four Horsemen of the Apocalypse): 5000
 Semi-Gods (Adeptus Astartes, Loki, Thor, Artemis): 10000
 Gods (Satan, Emperor in 40k, Odin, Zeus): 20000
 
-Next, I will upload an image. Please analyze the character’s origin and background to determine their battle power level. 
+Next, I will upload an image. Please analyze the character’s origin and background to determine their battle power level.
 The character’s battle power is based on the level BP, but not exactly the same.
 Give me how to caculate the BP by the fomular.
 BP = HP + MP + 4ATK + 8DEF + 4CC + 10SPEED + 4CA + 8PI + 6EV + 4AC
@@ -107,7 +107,7 @@ Afterward, output the data in JSON format:
             "IS_STUN": "<Will it stun? Boolean value, True for stun>",
             "MP_COST": "<MP Cost>",
             "BUFF_TIME": "<Duration of Buff/Debuff>",
-            "BUFF_NAME": "<Buff Name, used for identification, can only be from stun, frozen, poison, corrupt, bless, heal, haste, pray>"
+            "BUFF_NAME": "<Buff Name, used for identification, can only be from stun, frozen, poison, wound, curse, bless, heal, haste, pray, weakness, vulnerable>"
         },
         "s2": {
             "name": "<Skill Name>",

@@ -10,6 +10,7 @@ import pytest
 from PIL import Image
 
 import battle_logic
+from relic_catalog import get_low_tier_relic_types
 
 
 def _sample_image_base64(color: tuple[int, int, int] = (180, 120, 60)) -> str:
@@ -200,6 +201,33 @@ def test_auth_login_and_initial_economy(harness):
 
 
 @pytest.mark.integration
+def test_new_user_receives_eight_starter_cards_with_example_images(harness):
+    headers = harness.login("integration-starter-cards@example.com")
+
+    heroes = harness.heroes(headers)
+
+    assert len(heroes) == 8
+    starter_names = {hero["hero_payload"]["name"] for hero in heroes}
+    assert starter_names == {
+        "Aurelia",
+        "Myrr",
+        "Kharos",
+        "Vera",
+        "Sylwen",
+        "Odran",
+        "Brakka",
+        "Garran",
+    }
+    image_urls = [hero["source_payload"]["image_url"] for hero in heroes]
+    assert len(set(image_urls)) == 8
+    assert all(image_url.startswith("/test/") and image_url.endswith(".png") for image_url in image_urls)
+    assert all(hero["source_payload"]["source"] == "starter_deck_v1" for hero in heroes)
+
+    heroes_again = harness.heroes(headers)
+    assert len(heroes_again) == 8
+
+
+@pytest.mark.integration
 def test_initial_economy_includes_relic_catalog(harness):
     headers = harness.login("integration-relic-catalog@example.com")
     economy = harness.economy(headers)
@@ -212,6 +240,51 @@ def test_initial_economy_includes_relic_catalog(harness):
     assert ember["display_name"] == "Ember Shard"
     assert ember["tier"] == "common"
     assert "soulslike item icon" in ember["icon_prompt"]
+
+
+@pytest.mark.integration
+def test_card_relic_enchant_lifecycle_is_persistent_and_one_time(harness):
+    headers = harness.login("integration-card-relic@example.com")
+    user_id = harness.last_user["id"]
+    harness.set_forge_sequence([
+        _hero_pair("Relic Bearer", "warrior", 1600, "fire", "Torch Cut", "Ash Guard"),
+    ])
+    harness.forge(headers, _sample_image_base64())
+    hero = harness.heroes(headers)[0]
+    hero_id = hero["id"]
+
+    harness.grant_relic(user_id, "low_ember_shard", 2)
+    harness.grant_relic(user_id, "low_frost_shard", 1)
+
+    equipped = harness.equip_relic(headers, hero_id, "low_frost_shard")
+    assert equipped["card"]["equipped_relic_type"] == "low_frost_shard"
+    assert harness.heroes(headers)[0]["equipped_relic_type"] == "low_frost_shard"
+
+    enchanted_response = harness.enchant_card(headers, hero_id, "low_ember_shard")
+    assert enchanted_response.status_code == 200, enchanted_response.get_data(as_text=True)
+    enchanted = enchanted_response.get_json()
+    assert enchanted["card"]["enchantment"]["relicType"] == "low_ember_shard"
+    assert enchanted["card"]["enchantment"]["removedAt"] is None
+    economy_after_enchant = enchanted["economy"]
+    ember_after_enchant = next(row for row in economy_after_enchant["relics"] if row["relic_type"] == "low_ember_shard")
+    assert ember_after_enchant["amount"] == 1
+    assert economy_after_enchant["transactions"][0]["reason"] == "card_enchant"
+
+    washed_response = harness.wash_enchant(headers, hero_id)
+    assert washed_response.status_code == 200, washed_response.get_data(as_text=True)
+    washed = washed_response.get_json()
+    assert washed["card"]["enchantment"]["removedAt"]
+    ember_after_wash = next(row for row in washed["economy"]["relics"] if row["relic_type"] == "low_ember_shard")
+    assert ember_after_wash["amount"] == 1
+
+    second_response = harness.enchant_card(headers, hero_id, "low_ember_shard")
+    assert second_response.status_code == 409
+    assert "already been enchanted" in second_response.get_json()["error"]
+
+    persisted = harness.heroes(headers)[0]
+    assert persisted["equipped_relic_type"] == "low_frost_shard"
+    assert persisted["enchantment"]["relicType"] == "low_ember_shard"
+    assert persisted["enchantment"]["removedAt"]
 
 
 @pytest.mark.integration
@@ -346,7 +419,7 @@ def test_daily_forge_task_progress_and_claim(harness):
     claimed_payload = claimed.get_json()["data"]
     claimed_tasks = {task["key"]: task for task in claimed_payload["tasks"]}
     assert claimed_tasks["forge_one_card"]["claimed"] is True
-    assert claimed_payload["economy"]["wallet"]["dust_balance"] == 420
+    assert claimed_payload["economy"]["wallet"]["dust_balance"] == 500
 
 
 @pytest.mark.integration
@@ -470,28 +543,32 @@ def test_arena_join_rejects_empty_formation(harness):
     harness.trace("arena-empty-formation", response)
 
     assert response.status_code == 400
-    assert "Place 1 to 4 active cards" in response.get_json()["error"]
+    assert "Place 1 to 6 active cards" in response.get_json()["error"]
 
 
 @pytest.mark.integration
-def test_arena_join_rejects_more_than_four_cards(harness):
-    headers = harness.login("integration-five-arena@example.com")
+def test_arena_join_rejects_more_than_six_cards(harness):
+    headers = harness.login("integration-seven-arena@example.com")
     hero_ids = []
-    for index in range(5):
+    for index in range(7):
         hero_payload = _hero_pair(f"Arena {index}", "warrior", 1000, "weapon", "Slash", "Guard")["p2"]
-        row = harness.db_module.fetch_one(
-            """
-            INSERT INTO heroes (user_id, source_payload, hero_payload)
-            VALUES (%s, %s::jsonb, %s::jsonb)
-            RETURNING id
-            """,
-            (
-                harness.last_user["id"],
-                harness.db_module.serialize_json({"source": "integration"}),
-                harness.db_module.serialize_json(hero_payload),
-            ),
-        )
-        hero_ids.append(str(row["id"]))
+        with harness.db_module.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO heroes (user_id, source_payload, hero_payload)
+                    VALUES (%s, %s::jsonb, %s::jsonb)
+                    RETURNING id
+                    """,
+                    (
+                        harness.last_user["id"],
+                        harness.db_module.serialize_json({"source": "integration"}),
+                        harness.db_module.serialize_json(hero_payload),
+                    ),
+                )
+                row = cur.fetchone()
+            conn.commit()
+            hero_ids.append(str(row["id"]))
 
     response = harness.client.post(
         "/api/pvp/join",
@@ -505,14 +582,64 @@ def test_arena_join_rejects_more_than_four_cards(harness):
                 "front_2": hero_ids[2],
                 "back_0": hero_ids[3],
                 "back_1": hero_ids[4],
-                "back_2": None,
+                "back_2": hero_ids[5],
+                "overflow": hero_ids[6],
             },
         },
     )
-    harness.trace("arena-five-formation", response)
+    harness.trace("arena-seven-formation", response)
 
     assert response.status_code == 400
-    assert "Place 1 to 4 active cards" in response.get_json()["error"]
+    assert "Place 1 to 6 active cards" in response.get_json()["error"]
+
+
+@pytest.mark.integration
+def test_arena_join_accepts_six_card_formation(harness):
+    headers = harness.login("integration-six-arena@example.com")
+    hero_ids = []
+    for index in range(6):
+        hero_payload = _hero_pair(f"Arena Six {index}", "warrior", 1000, "weapon", "Slash", "Guard")["p2"]
+        with harness.db_module.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO heroes (user_id, source_payload, hero_payload)
+                    VALUES (%s, %s::jsonb, %s::jsonb)
+                    RETURNING id
+                    """,
+                    (
+                        harness.last_user["id"],
+                        harness.db_module.serialize_json({"source": "integration"}),
+                        harness.db_module.serialize_json(hero_payload),
+                    ),
+                )
+                row = cur.fetchone()
+            conn.commit()
+            hero_ids.append(str(row["id"]))
+
+    response = harness.client.post(
+        "/api/pvp/join",
+        headers=headers,
+        json={
+            "mode": "arena_2x3",
+            "queueKey": "ranked-six",
+            "formation": {
+                "front_0": hero_ids[0],
+                "front_1": hero_ids[1],
+                "front_2": hero_ids[2],
+                "back_0": hero_ids[3],
+                "back_1": hero_ids[4],
+                "back_2": hero_ids[5],
+            },
+        },
+    )
+    harness.trace("arena-six-formation", response)
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["entry"]["battle_mode"] == "arena_2x3"
+    assert len(payload["entry"]["team_snapshot"]["team"]) == 6
+    assert payload["entry"]["formation_snapshot"]["board"]["back_2"] == hero_ids[5]
 
 
 @pytest.mark.integration
@@ -849,14 +976,7 @@ def test_pvp_win_can_grant_low_tier_relic(harness, monkeypatch):
     assert join_b["status"] == "matched"
     assert join_b["winner_side"] == "A"
     assert join_b["reward"]["relic_drop"] is not None
-    assert join_b["reward"]["relic_drop"]["relic_type"] in {
-        "low_ember_shard",
-        "low_frost_shard",
-        "low_radiant_shard",
-        "low_void_shard",
-        "low_storm_shard",
-        "low_beast_fang",
-    }
+    assert join_b["reward"]["relic_drop"]["relic_type"] in get_low_tier_relic_types()
     assert join_b["reward"]["relic_drop"]["display_name"]
     assert join_b["reward"]["relic_drop"]["amount"] == 1
 
@@ -1022,7 +1142,7 @@ def test_program_controller_targets_self_skill_at_actor(monkeypatch):
         label_b="Player B",
     )
 
-    monkeypatch.setattr(battle_logic.random, "random", lambda: 0.99)
+    monkeypatch.setattr(battle_logic.random, "random", lambda: 0.1)
     action = controller.choose_action(observation)
 
     assert action.kind == "skill"
@@ -1070,6 +1190,22 @@ def test_battle_route_echoes_requested_control_mode(monkeypatch):
 
 
 @pytest.mark.integration
+def test_battle_team_arena_2x3_returns_six_slot_board(harness):
+    headers = harness.login("integration-train-2x3@example.com")
+    team_a = [_board_hero(f"Forger {index + 1}", speed=35 + index) for index in range(6)]
+    team_b = [_board_hero(f"Rival {index + 1}", speed=30 + index) for index in range(6)]
+
+    payload = harness.battle_team(headers, team_a, team_b, size="arena_2x3")
+
+    assert payload["winnerLabel"] in {"Top", "Bottom", "Tie"}
+    assert payload["controlMode"] == "program"
+    assert len(payload["board"]["bottom"]) == 6
+    assert len(payload["board"]["top"]) == 6
+    assert payload["board"]["bottom"][5]["name"] == "Forger 6"
+    assert payload["board"]["top"][5]["name"] == "Rival 6"
+
+
+@pytest.mark.integration
 def test_create_battle_session_returns_public_snapshot_only():
     import battle_sessions
 
@@ -1094,8 +1230,34 @@ def test_create_battle_session_returns_public_snapshot_only():
     assert snapshot["controlMode"] == "rest"
     assert snapshot["status"] == "awaiting_action"
     assert snapshot["waitingUntil"] > 0
-    assert snapshot["observation"]["actor"]["tag"].startswith("A")
+    assert snapshot["observation"]["actor"]["tag"].startswith(("A", "B"))
     assert "internal_turn_queue" not in snapshot
+
+
+@pytest.mark.integration
+def test_create_arena_2x3_battle_session_exposes_six_slots():
+    import battle_sessions
+
+    team_a = [_board_hero(f"Forger {index + 1}", speed=40 + index) for index in range(6)]
+    team_b = [_board_hero(f"Rival {index + 1}", speed=30 + index) for index in range(6)]
+
+    session = battle_sessions.create_battle_session(
+        battle_mode="arena_2x3",
+        control_mode="rest",
+        label_a="Forger",
+        label_b="Rival",
+        team_a=team_a,
+        team_b=team_b,
+        wait_seconds=30,
+    )
+
+    snapshot = session.public_snapshot()
+
+    assert snapshot["battleMode"] == "arena_2x3"
+    assert snapshot["status"] == "awaiting_action"
+    assert len(session.team_a_units) == 6
+    assert len(session.team_b_units) == 6
+    assert snapshot["observation"]["actor"]["tag"] in {f"A{index}" for index in range(1, 7)} | {f"B{index}" for index in range(1, 7)}
 
 
 @pytest.mark.integration
@@ -1167,3 +1329,360 @@ def test_battle_session_timeout_falls_back_to_program():
 
     assert snapshot["lastActionSource"] == "program"
     assert snapshot["activeActorTag"] != initial_actor_tag
+
+
+@pytest.mark.integration
+def test_battle_session_rejects_locked_target_outside_legal_range():
+    import battle_sessions
+
+    attacker = _board_hero("Spearman", range_mode="melee", target_num=1, speed=90, accuracy=100, evasion=0)
+    front_target = _board_hero("Front Guard", range_mode="melee", target_num=1, speed=10, accuracy=100, evasion=0)
+    back_target = _board_hero("Back Guard", range_mode="melee", target_num=1, speed=9, accuracy=100, evasion=0)
+
+    session = battle_sessions.create_battle_session(
+        battle_mode="4v4",
+        control_mode="rest",
+        label_a="Forger",
+        label_b="Rival",
+        team_a=[attacker],
+        team_b=[front_target, back_target],
+        wait_seconds=30,
+    )
+
+    assert session.active_actor_tag == "A1"
+
+    with pytest.raises(battle_sessions.BattleSessionError, match="targetTag is not legal"):
+        session.submit_action({"actorTag": "A1", "kind": "attack", "targetTag": "B2"})
+
+    snapshot = session.public_snapshot()
+    assert snapshot["status"] == "awaiting_action"
+    assert snapshot["activeActorTag"] == "A1"
+    assert session.team_b_units[1].hp == session.team_b_units[1].max_hp
+
+
+@pytest.mark.integration
+def test_battle_session_program_flow_resolves_with_board_history(monkeypatch):
+    import battle_sessions
+
+    monkeypatch.setattr(battle_sessions.random, "shuffle", lambda seq: None)
+    monkeypatch.setattr(battle_sessions.random, "random", lambda: 0.1)
+
+    hero_a = _board_hero("Executioner", range_mode="melee", target_num=1, hp=160, atk=120, defense=0, speed=80, accuracy=100, evasion=0)
+    hero_b = _board_hero("Sentinel", range_mode="melee", target_num=1, hp=80, atk=20, defense=0, speed=10, accuracy=100, evasion=0)
+
+    session = battle_sessions.create_battle_session(
+        battle_mode="1v1",
+        control_mode="rest",
+        label_a="Forger",
+        label_b="Rival",
+        team_a=[hero_a],
+        team_b=[hero_b],
+        wait_seconds=1,
+    )
+
+    guard = 0
+    while session.status != "resolved" and guard < 20:
+        assert session.auto_advance_due(now_ms=(session.waiting_until_ms or 0) + 1)
+        guard += 1
+
+    snapshot = session.public_snapshot()
+    assert snapshot["status"] == "resolved"
+    assert snapshot["result"]["winnerLabel"] == "Forger"
+    assert snapshot["result"]["finalHpB"] == 0
+    assert snapshot["result"]["board"]["top"][0]["alive"] is False
+    assert snapshot["result"]["boardHistory"]
+    assert snapshot["result"]["events"][0]["damage"] >= 1
+
+
+@pytest.mark.integration
+def test_battle_session_program_fallback_does_not_lock_illegal_target(monkeypatch):
+    import battle_sessions
+
+    monkeypatch.setattr(battle_sessions.random, "shuffle", lambda seq: None)
+
+    attacker = _board_hero("Spearman", range_mode="melee", target_num=1, speed=90, accuracy=100, evasion=0)
+    dead_front = _board_hero("Fallen Guard", range_mode="melee", target_num=1, hp=40, speed=10, accuracy=100, evasion=0)
+    far_back = _board_hero("Back Guard", range_mode="melee", target_num=1, hp=100, speed=9, accuracy=100, evasion=0)
+
+    class IllegalTargetController:
+        def choose_action(self, observation):
+            return battle_logic.BattleAction(kind="skill", skill_slot="s1", target_tag="B2")
+
+    monkeypatch.setattr(battle_sessions.battle_logic, "ProgramBattleController", IllegalTargetController)
+
+    session = battle_sessions.create_battle_session(
+        battle_mode="4v4",
+        control_mode="rest",
+        label_a="Forger",
+        label_b="Rival",
+        team_a=[attacker],
+        team_b=[dead_front, far_back],
+        wait_seconds=1,
+    )
+    assert session.active_actor_tag == "A1"
+    session.team_b_units[0].hp = 0
+    session._refresh_observation()
+
+    assert session.auto_advance_due(now_ms=(session.waiting_until_ms or 0) + 1) is True
+    snapshot = session.public_snapshot()
+
+    assert snapshot["lastActionSource"] == "program"
+    assert snapshot["lastAction"]["targetTag"] is None
+    assert session.team_b_units[1].hp == session.team_b_units[1].max_hp
+
+
+@pytest.mark.integration
+def test_battle_session_program_fallback_preserves_valid_skill_target(monkeypatch):
+    import battle_sessions
+
+    monkeypatch.setattr(battle_sessions.random, "shuffle", lambda seq: None)
+    monkeypatch.setattr(battle_sessions.random, "random", lambda: 0.1)
+
+    hero_a = _board_hero("Chaplain", range_mode="melee", target_num=1, hp=500, atk=90, speed=80, accuracy=100, evasion=0)
+    hero_b = _board_hero("Target", range_mode="melee", target_num=1, hp=500, atk=20, speed=10, accuracy=100, evasion=0)
+    hero_a["skill"]["s1"]["MP_COST"] = 9999
+    hero_a["skill"]["s2"]["TARGET"] = "Self"
+    hero_a["skill"]["s2"]["ROLE"] = "buff"
+    hero_a["skill"]["s2"]["DMG"] = 0
+    hero_a["skill"]["s2"]["BUFF_NAME"] = "bless"
+    hero_a["skill"]["s2"]["BUFF_DMG"] = 12
+    hero_a["skill"]["s2"]["BUFF_TIME"] = 2
+    hero_a["skill"]["s2"]["MP_COST"] = 0
+
+    session = battle_sessions.create_battle_session(
+        battle_mode="1v1",
+        control_mode="rest",
+        label_a="Forger",
+        label_b="Rival",
+        team_a=[hero_a],
+        team_b=[hero_b],
+        wait_seconds=1,
+    )
+
+    assert session.auto_advance_due(now_ms=(session.waiting_until_ms or 0) + 1) is True
+    snapshot = session.public_snapshot()
+
+    assert snapshot["lastActionSource"] == "program"
+    assert snapshot["lastAction"]["kind"] == "skill"
+    assert snapshot["lastAction"]["skillSlot"] == "s2"
+    assert snapshot["lastAction"]["targetTag"] == "A1"
+    assert any(buff["name"] == "bless" and buff["value"] == 12 for buff in session.team_a_units[0].buffs)
+
+
+@pytest.mark.integration
+def test_battle_session_self_buff_skill_does_not_damage_the_actor(monkeypatch):
+    import battle_sessions
+
+    monkeypatch.setattr(battle_sessions.random, "shuffle", lambda seq: None)
+    monkeypatch.setattr(battle_sessions.random, "random", lambda: 0.0)
+
+    hero_a = _board_hero("Chaplain", range_mode="melee", target_num=1, hp=500, atk=90, speed=80, accuracy=100, evasion=0)
+    hero_b = _board_hero("Target", range_mode="melee", target_num=1, hp=500, atk=20, speed=10, accuracy=100, evasion=0)
+    hero_a["skill"]["s2"]["TARGET"] = "Self"
+    hero_a["skill"]["s2"]["ROLE"] = "buff"
+    hero_a["skill"]["s2"]["DMG"] = 0
+    hero_a["skill"]["s2"]["BUFF_NAME"] = "bless"
+    hero_a["skill"]["s2"]["BUFF_DMG"] = 12
+    hero_a["skill"]["s2"]["BUFF_TIME"] = 2
+    hero_a["skill"]["s2"]["MP_COST"] = 0
+
+    session = battle_sessions.create_battle_session(
+        battle_mode="1v1",
+        control_mode="rest",
+        label_a="Forger",
+        label_b="Rival",
+        team_a=[hero_a],
+        team_b=[hero_b],
+        wait_seconds=30,
+    )
+
+    snapshot = session.submit_action({"actorTag": "A1", "kind": "skill", "skillSlot": "s2"})
+
+    assert session.team_a_units[0].hp == session.team_a_units[0].max_hp
+    assert session.team_b_units[0].hp == session.team_b_units[0].max_hp
+    assert any(buff["name"] == "bless" and buff["value"] == 12 for buff in session.team_a_units[0].buffs)
+    assert snapshot["lastAction"]["kind"] == "skill"
+    assert session.events[-1]["damage"] == 0
+    assert session.events[-1]["defender"] == "A1"
+
+
+@pytest.mark.integration
+def test_canonical_buffs_have_visual_names_and_gameplay_effects():
+    import battle_logic
+
+    unit = battle_logic.Battler(_board_hero("Buffed", hp=120, atk=80, defense=40, speed=30, accuracy=25, evasion=20), "A")
+    unit.base_cc = 18
+    logs = []
+
+    assert battle_logic.CANONICAL_BUFF_NAMES == (
+        "stun",
+        "frozen",
+        "poison",
+        "wound",
+        "curse",
+        "bless",
+        "heal",
+        "haste",
+        "pray",
+        "weakness",
+        "vulnerable",
+    )
+
+    unit.add_buff("weakness", 2, 7, logs)
+    assert unit.atk == 73
+
+    unit.add_buff("bless", 2, 5, logs)
+    assert unit.atk == 78
+
+    unit.add_buff("curse", 2, 6, logs)
+    assert unit.def_val == 34
+
+    unit.add_buff("vulnerable", 2, 5, logs)
+    assert unit.def_val == 29
+
+    unit.add_buff("pray", 2, 4, logs)
+    assert unit.atk == 82
+    assert unit.def_val == 33
+    assert unit.spd == 34
+
+    unit.add_buff("haste", 2, 8, logs)
+    assert unit.spd == 42
+    assert unit.ac == 33
+    assert unit.cc == 22
+
+    unit.add_buff("frozen", 2, 3, logs)
+    assert unit.is_stunned is False
+    assert unit.spd == 27
+    assert unit.ac == 30
+    assert unit.ev == 0
+
+    unit.add_buff("stun", 1, 0, logs)
+    assert unit.is_stunned is True
+
+    wounded = battle_logic.Battler(_board_hero("Wounded", hp=120, atk=20), "A")
+    wounded_events = []
+    wounded.add_buff("wound", 2, 9, [])
+    wounded.add_buff("poison", 2, 4, [])
+    assert {buff["name"] for buff in wounded.buffs} == {"wound", "poison"}
+    wounded.tick_buffs(1, lambda *args, **kwargs: wounded_events.append((args, kwargs)))
+    assert wounded.hp == wounded.max_hp - 13
+    assert wounded_events[0][0][2] == "dot_damage"
+
+    healed = battle_logic.Battler(_board_hero("Healed", hp=120, atk=20), "A")
+    healed.hp = 80
+    healed_events = []
+    healed.add_buff("heal", 2, 11, [])
+    healed.tick_buffs(1, lambda *args, **kwargs: healed_events.append((args, kwargs)))
+    assert healed.hp == 91
+    assert healed_events[0][0][2] == "heal"
+
+
+@pytest.mark.integration
+def test_battle_session_reads_skill_slot_from_card_payload(monkeypatch):
+    import battle_sessions
+
+    monkeypatch.setattr(battle_sessions.random, "shuffle", lambda seq: None)
+    monkeypatch.setattr(battle_sessions.random, "random", lambda: 0.0)
+
+    hero_a = _board_hero("Invoker", range_mode="melee", target_num=1, hp=500, mp=30, atk=50, speed=80, accuracy=100, evasion=0)
+    hero_b = _board_hero("Target", range_mode="melee", target_num=1, hp=500, atk=20, speed=10, accuracy=100, evasion=0)
+    hero_a["skill"]["s1"]["name"] = "Named Card Skill"
+    hero_a["skill"]["s1"]["DMG"] = 33
+    hero_a["skill"]["s1"]["MP_COST"] = 7
+
+    session = battle_sessions.create_battle_session(
+        battle_mode="1v1",
+        control_mode="rest",
+        label_a="Forger",
+        label_b="Rival",
+        team_a=[{"id": "card-1", "character": hero_a}],
+        team_b=[{"id": "card-2", "character": hero_b}],
+        wait_seconds=30,
+    )
+
+    assert session.observation["actor"]["skills"]["s1"]["name"] == "Named Card Skill"
+    session.submit_action({"actorTag": "A1", "kind": "skill", "skillSlot": "s1"})
+
+    event = session.events[-1]
+    assert event["skillName"] == "Named Card Skill"
+    assert event["mpCostApplied"] == 7
+    assert session.team_a_units[0].mp == 23
+
+
+@pytest.mark.integration
+def test_battle_session_exposes_visual_type_contract_on_units_skills_and_events(monkeypatch):
+    import battle_sessions
+
+    monkeypatch.setattr(battle_sessions.random, "shuffle", lambda seq: None)
+    monkeypatch.setattr(battle_sessions.random, "random", lambda: 0.0)
+
+    hero_a = _board_hero("Ripper", range_mode="melee", target_num=1, hp=500, mp=30, atk=50, speed=80, accuracy=100, evasion=0)
+    hero_b = _board_hero("Target", range_mode="melee", target_num=1, hp=500, atk=20, speed=10, accuracy=100, evasion=0)
+    hero_a["state"]["type_catalog"] = "instant"
+    hero_a["state"]["type_effect"] = "slash"
+    hero_a["skill"]["s1"]["type_catalog"] = "instant"
+    hero_a["skill"]["s1"]["type_effect"] = "claw"
+    hero_a["skill"]["s1"]["buff_type_effect"] = "flesh"
+    hero_a["skill"]["s1"]["DMG"] = 31
+    hero_a["skill"]["s1"]["MP_COST"] = 0
+
+    session = battle_sessions.create_battle_session(
+        battle_mode="1v1",
+        control_mode="rest",
+        label_a="Forger",
+        label_b="Rival",
+        team_a=[{"id": "card-1", "character": hero_a}],
+        team_b=[{"id": "card-2", "character": hero_b}],
+        wait_seconds=30,
+    )
+
+    actor = session.observation["actor"]
+    assert actor["state"]["type_catalog"] == "instant"
+    assert actor["state"]["type_effect"] == "slash"
+    assert actor["skills"]["s1"]["type_catalog"] == "instant"
+    assert actor["skills"]["s1"]["type_effect"] == "claw"
+    assert actor["skills"]["s1"]["buff_type_effect"] == "flesh"
+
+    session.submit_action({"actorTag": "A1", "kind": "skill", "skillSlot": "s1"})
+    event = session.events[-1]
+
+    assert event["attackType"] == "weapon"
+    assert event["typeCatalog"] == "instant"
+    assert event["typeEffect"] == "claw"
+    assert event["buffTypeEffect"] == "flesh"
+    assert event["type_catalog"] == "instant"
+    assert event["type_effect"] == "claw"
+    assert event["buff_type_effect"] == "flesh"
+
+
+@pytest.mark.integration
+def test_legacy_auto_duel_self_buff_skill_does_not_damage_the_actor(monkeypatch):
+    import battle_logic
+
+    class SelfBuffController:
+        def choose_action(self, observation):
+            actor_tag = observation["actor"]["tag"]
+            if actor_tag == "A":
+                return battle_logic.BattleAction(kind="skill", skill_slot="s2", target_tag="A")
+            return battle_logic.BattleAction(kind="attack", target_tag="A")
+
+    monkeypatch.setattr(battle_logic.random, "random", lambda: 0.0)
+
+    hero_a = _board_hero("Chaplain", range_mode="melee", target_num=1, hp=500, atk=90, speed=80, accuracy=100, evasion=0)
+    hero_b = _board_hero("Target", range_mode="melee", target_num=1, hp=500, atk=20, speed=10, accuracy=100, evasion=0)
+    hero_a["skill"]["s2"]["TARGET"] = "Self"
+    hero_a["skill"]["s2"]["ROLE"] = "buff"
+    hero_a["skill"]["s2"]["DMG"] = 0
+    hero_a["skill"]["s2"]["BUFF_NAME"] = "bless"
+    hero_a["skill"]["s2"]["BUFF_DMG"] = 12
+    hero_a["skill"]["s2"]["BUFF_TIME"] = 2
+    hero_a["skill"]["s2"]["MP_COST"] = 0
+
+    result = battle_logic.run_auto_duel(hero_a, hero_b, label_a="Forger", label_b="Rival", controller=SelfBuffController())
+    first_event = result["events"][0]
+
+    assert first_event["actionType"] == "skill"
+    assert first_event["defender"] == "A"
+    assert first_event["damage"] == 0
+    assert first_event["hpA"] == result["maxHpA"]
+    assert any(buff["name"] == "bless" and buff["value"] == 12 for buff in first_event["buffsA"])

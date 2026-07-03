@@ -6,6 +6,7 @@ from typing import Any, Dict, Optional
 from db import execute, fetch_one, get_connection, upsert_user, ensure_user_wallet
 from email_service import send_login_code
 from config import get_settings
+from starter_cards import seed_starter_cards
 
 
 LOGIN_CODE_TTL_MINUTES = 10
@@ -105,6 +106,7 @@ def verify_login_code(email: str, code: str, ip_address: Optional[str] = None, u
 
     user = upsert_user(email)
     ensure_user_wallet(user["id"])
+    seed_starter_cards(user["id"])
     token = secrets.token_urlsafe(32)
     token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
     expires_at = _now_utc() + timedelta(days=LOGIN_SESSION_TTL_DAYS)
