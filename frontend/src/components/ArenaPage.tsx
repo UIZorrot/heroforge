@@ -18,6 +18,7 @@ import { calculateRarity, normalizeCardType, toNumber, type Rarity } from '../li
 import { CARD_FALLBACK_SRC } from '../lib/cards';
 import { mockHeroes } from '../lib/mockContent';
 import { cn } from '../lib/utils';
+import { STORAGE_NAMESPACE } from '../lib/runtimeMode';
 import type { BattleBoardUnit } from '../lib/battleTypes';
 import type { ArenaFormation, ArenaSlotKey, BattleResult, BattleSessionAction, BattleSessionObservation, BattleSessionSnapshot, EconomySnapshot, PvpBattleMode, PvpMatchRecord, PvpQueueEntry, SavedHero } from '../types';
 
@@ -40,7 +41,7 @@ type ArenaPageProps = {
   onRefresh: () => Promise<void>;
 };
 
-const STORAGE_KEY = 'hf.pvp.arena.v1';
+const STORAGE_KEY = `${STORAGE_NAMESPACE}.pvp.arena.v1`;
 const DEFAULT_QUEUE_KEY = 'ranked';
 const MAX_TEAM_SIZE = 4;
 const ARENA_CARD_PAGE_SIZE = 10;
@@ -477,7 +478,7 @@ function createPreviewBattleResult(heroes: SavedHero[]): BattleResult {
     finalHpB: teamHp(top),
     aliveA: teamAlive(bottom),
     aliveB: teamAlive(top),
-    summary: 'Preview battle generated locally by computer control.',
+    summary: 'Arena preview resolved locally by computer control.',
   };
 }
 
@@ -497,7 +498,7 @@ function createTrainPreviewBattleResult(teamA: SavedHero[], teamB: SavedHero[]):
     finalHpB: teamHp(top),
     aliveA: teamAlive(bottom),
     aliveB: teamAlive(top),
-    summary: 'Training preview generated locally for demo mode.',
+    summary: 'Training preview resolved locally by computer control.',
   };
 }
 

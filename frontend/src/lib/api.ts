@@ -11,17 +11,19 @@ import type {
   HeroHistoryRecord,
   LadderSnapshot,
   LoginCodeResponse,
+  MarketBoardSnapshot,
   PvpEntryStatusResponse,
   PvpJoinResponse,
   SessionSnapshot,
   VerifyLoginResponse,
 } from '../types';
 import { normalizeCharacterData } from './gameLogic';
+import { APP_MODE, STORAGE_NAMESPACE } from './runtimeMode';
 
 const BACKEND_URL = (import.meta.env.VITE_BACKEND_URL || 'http://localhost:5544').replace(/\/$/, '');
-const TOKEN_KEY = 'hf.session.token';
-const EMAIL_KEY = 'hf.session.email';
-const EXPIRES_KEY = 'hf.session.expires_at';
+const TOKEN_KEY = `${STORAGE_NAMESPACE}.session.token`;
+const EMAIL_KEY = `${STORAGE_NAMESPACE}.session.email`;
+const EXPIRES_KEY = `${STORAGE_NAMESPACE}.session.expires_at`;
 
 type JsonValue = Record<string, unknown> | Array<unknown> | string | number | boolean | null;
 
@@ -72,6 +74,9 @@ function authHeaders(token?: string | null) {
 }
 
 async function requestJson<T>(path: string, init: RequestInit = {}, token?: string | null): Promise<T> {
+  if (APP_MODE === 'mock') {
+    throw new Error('Backend requests are disabled in mock mode. Set VITE_APP_MODE=live to use the live service.');
+  }
   const response = await fetch(`${BACKEND_URL}${path}`, {
     ...init,
     headers: {
@@ -165,6 +170,11 @@ export async function fetchEconomy(token?: string | null): Promise<EconomySnapsh
   return payload.data;
 }
 
+export async function fetchMarketBoard(token?: string | null): Promise<MarketBoardSnapshot> {
+  const payload = await requestJson<{ data: MarketBoardSnapshot }>('/api/market/board', { method: 'GET' }, token);
+  return payload.data;
+}
+
 export async function fetchDaily(token?: string | null): Promise<DailySnapshot> {
   const payload = await requestJson<{ data: DailySnapshot }>('/api/daily/me', { method: 'GET' }, token);
   return payload.data;
@@ -206,13 +216,13 @@ export async function fileToBase64(file: File): Promise<string> {
   });
 }
 
-export async function forgeHero(imageFile: File, materials: Record<string, number> = {}, token?: string | null): Promise<CharacterData> {
+export async function forgeHero(imageFile: File, token?: string | null): Promise<CharacterData> {
   const image = await fileToBase64(imageFile);
   const payload = await requestJson<CharacterData>(
     '/api/forge',
     {
       method: 'POST',
-      body: JSON.stringify({ image, materials }),
+      body: JSON.stringify({ image }),
     },
     token
   );
@@ -377,6 +387,36 @@ export async function washCardEnchant(cardId: string, token?: string | null): Pr
   return await requestJson<{ ok: true; card: HeroHistoryRecord; economy: EconomySnapshot }>(
     `/api/cards/${cardId}/wash-enchant`,
     { method: 'POST' },
+    token
+  );
+}
+
+export async function buyMarketRelic(
+  relicType: string,
+  quantity: number,
+  token?: string | null
+): Promise<{ ok: true; trade: { side: 'buy'; relicType: string; quantity: number; unitPrice: number; totalPrice: number }; economy: EconomySnapshot }> {
+  return await requestJson<{ ok: true; trade: { side: 'buy'; relicType: string; quantity: number; unitPrice: number; totalPrice: number }; economy: EconomySnapshot }>(
+    '/api/market/relics/buy',
+    {
+      method: 'POST',
+      body: JSON.stringify({ relicType, quantity }),
+    },
+    token
+  );
+}
+
+export async function sellMarketRelic(
+  relicType: string,
+  quantity: number,
+  token?: string | null
+): Promise<{ ok: true; trade: { side: 'sell'; relicType: string; quantity: number; unitPrice: number; totalPrice: number }; economy: EconomySnapshot }> {
+  return await requestJson<{ ok: true; trade: { side: 'sell'; relicType: string; quantity: number; unitPrice: number; totalPrice: number }; economy: EconomySnapshot }>(
+    '/api/market/relics/sell',
+    {
+      method: 'POST',
+      body: JSON.stringify({ relicType, quantity }),
+    },
     token
   );
 }

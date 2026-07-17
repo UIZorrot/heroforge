@@ -23,7 +23,7 @@ The player is not just collecting cards. They are running a command console for 
 5. The player tests the hero in Train, either 1v1 or 4v4.
 6. The player enters Arena for formal PvP matchmaking.
 7. Dust is spent on creation, repair, and PvP/PvE participation.
-8. Relics act as typed inventory resources for build progression and future systems.
+8. Relics are the only item type. They can be equipped for battle and consumed separately to enchant an existing card.
 
 ## Game modes
 
@@ -35,6 +35,7 @@ The hero creation mode.
 - AI-assisted hero concepting
 - rule-based final stat generation
 - persistent hero storage
+- no relic selection during generation; relic enchantment happens afterward in Relic Chamber
 
 ### Train
 
@@ -108,4 +109,3 @@ The page should immediately communicate:
 - training is separate from ranked PvP
 - dust and relics matter
 - the experience is premium and dramatic
-

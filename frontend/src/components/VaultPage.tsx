@@ -77,9 +77,9 @@ function artClass(hero: DisplayHero) {
   return 'from-[#2b241b] via-[#111111] to-[#060606]';
 }
 
-function relicsFromEconomy(economy: EconomySnapshot | null): RelicCard[] {
-  const sourceRelics = !economy || economy.relics.length === 0 ? mockRelicInventory : economy.relics;
-  const sourceCatalog = !economy || economy.relic_catalog.length === 0 ? mockRelicCatalog : economy.relic_catalog;
+function relicsFromEconomy(economy: EconomySnapshot | null, demoMode: boolean): RelicCard[] {
+  const sourceRelics = demoMode && (!economy || economy.relics.length === 0) ? mockRelicInventory : economy?.relics ?? [];
+  const sourceCatalog = demoMode && (!economy || economy.relic_catalog.length === 0) ? mockRelicCatalog : economy?.relic_catalog ?? [];
   const catalog = Object.fromEntries(sourceCatalog.map((item) => [item.relic_type, item]));
   return sourceRelics.map((entry) => {
     const definition = catalog[entry.relic_type];
@@ -423,7 +423,7 @@ function RelicDetailPanel({ relic }: { relic: RelicCard | null }) {
 
       <div className="mt-6 space-y-4">
         <DetailStat label="Family" value={relic.family} />
-        <DetailStat label="Forge Bias" value={relic.definition?.forge_bias ?? 'Unknown'} />
+        <DetailStat label="Enchant Bias" value={relic.definition?.forge_bias ?? 'Unknown'} />
         <DetailStat label="Battle Bias" value={relic.definition?.battle_bias ?? 'Unknown'} />
         <DetailStat label="Effect" value={relic.definition?.effect_profile ?? 'No effect profile recorded.'} />
         <DetailStat label="Lore" value={relic.definition?.lore_summary ?? 'No lore recorded.'} />
@@ -458,7 +458,7 @@ export function VaultPage({
   const relicsRef = useRef<HTMLElement | null>(null);
 
   const displayHeroes = (heroes.length > 0 ? heroes : demoMode ? demoHeroes : []) as DisplayHero[];
-  const relicCards = useMemo(() => relicsFromEconomy(economy), [economy]);
+  const relicCards = useMemo(() => relicsFromEconomy(economy, Boolean(demoMode)), [demoMode, economy]);
 
   const filteredHeroes = useMemo(() => (
     displayHeroes

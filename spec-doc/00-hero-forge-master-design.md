@@ -87,7 +87,7 @@ The next stage should make this loop more explicit in UX. New players should und
 
 Hero Forge should organize around five major modes:
 
-- Forge: create heroes from images and optional materials.
+- Forge: create heroes from images, then optionally enchant the finished card with a relic.
 - Vault: manage, inspect, compare, and select heroes.
 - Chronicle PvE: maze/tower battles against monsters.
 - Arena PvP: formation-based player combat.
@@ -363,7 +363,7 @@ Avoid presenting both `Duel` and `Arena`. The distinction is unclear to users an
 
 Each mode screen should start with the playable surface, not marketing copy.
 
-- Forge screen: upload, material choice, current Dust, generated result.
+- Forge screen: upload, current Dust, generated result, and a separate relic enchantment chamber.
 - Vault screen: roster, filters, comparison, action dispatch.
 - Chronicle screen: party selection, BP tier, floor path, encounter result.
 - Arena screen: formation board, team BP, matchmaking eligibility, queue state.

@@ -7,6 +7,7 @@ import { HeroCard } from './HeroCard';
 import { cancelPvpEntry, fetchPvpEntryStatus, getStoredToken, joinArenaQueue, reviveCard } from '../lib/api';
 import { cn } from '../lib/utils';
 import { toNumber } from '../lib/gameLogic';
+import { STORAGE_NAMESPACE } from '../lib/runtimeMode';
 import type { ArenaFormation, ArenaSlotKey, BattleResult, EconomySnapshot, PvpMatchRecord, PvpQueueEntry, SavedHero } from '../types';
 
 type StoredArenaState = {
@@ -15,7 +16,7 @@ type StoredArenaState = {
   resumeEntryId: string | null;
 };
 
-const STORAGE_KEY = 'hf.pvp.arena.v1';
+const STORAGE_KEY = `${STORAGE_NAMESPACE}.pvp.arena.v1`;
 const DEFAULT_QUEUE_KEY = 'ranked';
 const MAX_TEAM_SIZE = 4;
 const ARENA_ROWS: Array<{ label: string; slots: ArenaSlotKey[] }> = [

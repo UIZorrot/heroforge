@@ -50,6 +50,7 @@ The main question for progress is not "how many tasks exist", but "which couplin
 - Revive costs 200 Dust and restores Arena eligibility
 - Battle results carry board history and range-aware targeting
 - Hero list responses include lifecycle fields
+- Forge no longer accepts materials or relic input; cards are generated first and relic enchantment is a separate operation
 
 ### Still Open
 
@@ -128,4 +129,3 @@ These modules matter, but they can move with less risk to the rest of the produc
 - Frontend build: passing
 - Arena loop: implemented and playable
 - Remaining work: mostly product surface, expansion content, and presentation
-

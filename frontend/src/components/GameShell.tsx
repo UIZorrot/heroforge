@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { ChevronDown, Gem, Home, Landmark, Settings, Shield, Sparkles, Swords, User, WalletCards, Zap } from 'lucide-react';
 import { AppLogo } from './AppLogo';
 import type { AuthUser } from '../types';
+import { IS_MOCK_MODE } from '../lib/runtimeMode';
 
 export type GameSectionKey = 'home' | 'forge' | 'vault' | 'arena' | 'vfx' | 'chronicle' | 'market';
 export type ArenaSideKey = 'queue' | 'train' | 'battle';
@@ -43,7 +44,8 @@ const navItems: NavItem[] = [
   { key: 'forge', label: 'Forge' },
   { key: 'vault', label: 'Vault' },
   { key: 'arena', label: 'Arena' },
-  { key: 'vfx', label: 'VFX' },
+  ...(IS_MOCK_MODE ? [{ key: 'vfx' as const, label: 'VFX' }] : []),
+
   { key: 'chronicle', label: 'Chronicle' },
   { key: 'market', label: 'Market' },
 ];

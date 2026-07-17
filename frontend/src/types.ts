@@ -6,23 +6,11 @@ export type { CharacterData } from './lib/gameLogic';
 
 export type SectionKey = 'home' | 'forge' | 'vault' | 'arena' | 'chronicle' | 'market';
 
-export type MaterialKey = 'glowGem' | 'chaosMind' | 'emberCore' | 'frostShard' | 'stormSigil' | 'voidDust';
-export type MaterialInventory = Record<MaterialKey, number>;
 export type CardPvpLifeState = 'active' | 'pvp_dead';
 export type CardPveLifeState = 'active' | 'pve_injured';
 export type CardStatus = 'active' | 'locked' | 'decomposed';
 export type ArenaSlotKey = 'front_0' | 'front_1' | 'front_2' | 'back_0' | 'back_1' | 'back_2';
 export type ArenaFormation = Record<ArenaSlotKey, string | null>;
-
-export interface MaterialDefinition {
-  key: MaterialKey;
-  label: string;
-  effect: string;
-  rewardTag: string;
-  overlayClass: string;
-  particleClass: string;
-  badgeClass: string;
-}
 
 export interface AuthUser {
   id: string;
@@ -49,7 +37,6 @@ export interface SavedHero {
   createdAt: number;
   image?: string;
   character: CharacterData;
-  infusedMaterials?: Partial<MaterialInventory>;
   equippedRelicId?: string | null;
   enchantment?: {
     relicId: string;
@@ -160,6 +147,57 @@ export interface EconomySnapshot {
     low_tier_relic_drop_pct: number;
     queue_ttl_minutes: number;
   };
+}
+
+export interface MarketRelicListing {
+  relic_type: string;
+  display_name: string;
+  family: string;
+  tier: 'common' | 'rare' | 'epic' | 'legendary' | 'limited';
+  rarity: 'common' | 'rare' | 'epic' | 'mythic';
+  category: 'weapon' | 'armor' | 'accessory' | 'artifact';
+  icon_path?: string | null;
+  lore_summary: string;
+  effect_profile: string;
+  forge_bias?: string;
+  battle_bias?: string;
+  is_limited: boolean;
+  ask_price: number;
+  bid_price: number;
+  spread: number;
+  market_depth: number;
+  owned_amount: number;
+  trend: 'hot' | 'firm' | 'soft';
+  settlement: string;
+}
+
+export interface MarketBrokerOffer {
+  id: string;
+  name: string;
+  image_url?: string | null;
+  rarity: 'common' | 'rare' | 'epic' | 'mythic';
+  ask_price: number;
+  bp: number;
+  type_label: string;
+  title: string;
+  primary_skill: string;
+  secondary_skill: string;
+}
+
+export interface MarketOrderTapeEntry {
+  id: string;
+  label: string;
+  action: string;
+  note: string;
+}
+
+export interface MarketBoardSnapshot {
+  generated_at: string;
+  relic_listings: MarketRelicListing[];
+  featured_relics: MarketRelicListing[];
+  broker_offers: MarketBrokerOffer[];
+  order_tape: MarketOrderTapeEntry[];
+  notes: string[];
 }
 
 export interface DailyTask {

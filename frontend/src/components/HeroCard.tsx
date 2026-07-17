@@ -13,12 +13,6 @@ interface HeroCardProps {
   statusLabel?: string;
   disabled?: boolean;
   compact?: boolean;
-  infusions?: Array<{
-    label: string;
-    count: number;
-    overlayClass: string;
-    particleClass: string;
-  }>;
 }
 
 const rarityConfig: Record<Rarity, { label: string; accent: string; border: string }> = {
@@ -49,12 +43,10 @@ export function HeroCard({
   statusLabel,
   disabled,
   compact = false,
-  infusions = [],
 }: HeroCardProps) {
   const rarityKey = calculateRarity(statValue(character.BP));
   const rarity = rarityConfig[rarityKey];
   const typeKey = normalizeCardType(character.state.TYPE);
-  const activeInfusions = infusions.filter((item) => item.count > 0);
 
   const imageSrc = image || CARD_FALLBACK_SRC;
 
@@ -132,20 +124,6 @@ export function HeroCard({
           </div>
         )}
 
-        <div className="flex flex-wrap gap-1.5">
-          {activeInfusions.length > 0 ? (
-            activeInfusions.map((infusion) => (
-              <span
-                key={infusion.label}
-                className="border border-[#c59a5a]/25 bg-[#c59a5a]/8 px-2 py-1 text-[9px] uppercase tracking-[0.22em] text-[#e7cfa0]"
-              >
-                {infusion.label} x{infusion.count}
-              </span>
-            ))
-          ) : (
-            <span className="text-[10px] uppercase tracking-[0.24em] text-stone-600">No infusions</span>
-          )}
-        </div>
       </div>
 
       <div className="pointer-events-none absolute inset-0 border border-transparent group-hover:border-[#c59a5a]/30" />

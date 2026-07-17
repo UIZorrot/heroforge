@@ -1,6 +1,7 @@
 import base64
 import json
 import logging
+import os
 import secrets
 import warnings
 from functools import wraps
@@ -37,6 +38,7 @@ from db import (
     serialize_json,
 )
 from relic_catalog import get_low_tier_relic_types, get_relic_catalog, get_relic_definition
+from market_logic import build_market_board_snapshot, relic_market_quote
 from utils import extract_json
 from game_logic import adjust_based_on_bp
 from battle_logic import run_auto_duel, run_team_duel
@@ -306,36 +308,6 @@ Output JSON exactly in this format:
   }
 }
 """
-
-def build_material_directive(materials):
-    directives = {
-        'glowGem': 'bias style and skills toward light, precision, speed, and control stability.',
-        'chaosMind': 'bias style and skills toward dark, burst, volatility, and aggressive effects.',
-        'emberCore': 'bias style and skills toward fire, damage-over-time pressure, and offensive momentum.',
-        'frostShard': 'bias style and skills toward frost, survivability, slowing control, and defensive consistency.',
-        'stormSigil': 'bias style and skills toward thunder, chain impact, acceleration, and burst tempo.',
-        'voidDust': 'bias style and skills toward void, disruption, armor-pierce, and evasive unpredictability.',
-    }
-    labels = {
-        'glowGem': 'Luminous Gem',
-        'chaosMind': 'Chaos Mind',
-        'emberCore': 'Ember Core',
-        'frostShard': 'Frost Shard',
-        'stormSigil': 'Storm Sigil',
-        'voidDust': 'Void Dust',
-    }
-
-    notes = []
-    for key, amount in materials.items():
-        if amount > 0:
-            name = labels.get(key, key)
-            effect = directives.get(key, 'nudge theme and attributes to reflect this special material.')
-            notes.append(f"{name} x{amount}: {effect}")
-
-    if not notes:
-        return "No special forging materials. Keep neutral style and balanced stat distribution."
-    return " ".join(notes)
-
 
 def _image_part_from_base64(image_base64: str):
     image_bytes = base64.b64decode(image_base64)
@@ -1784,8 +1756,6 @@ def forge():
     try:
         data = request.json or {}
         image_base64 = data.get("image")
-        materials = data.get("materials", {})
-
         if not image_base64:
             return jsonify({"error": "No image provided"}), 400
 
@@ -1798,7 +1768,7 @@ def forge():
                 -settings.dust_cost_forge,
                 "forge_entry",
                 ref_type="hero_generation",
-                metadata={"materials": materials},
+                metadata={},
             )
             charged = True
         except ValueError as exc:
@@ -1812,11 +1782,8 @@ def forge():
             raise ValueError("Failed to analyze image")
 
         # Step 2: Generate Stats (P2)
-        directive = build_material_directive(materials)
         p2_input = {
             "source": p1_data,
-            "materials": materials,
-            "directive": directive,
         }
 
         p2_response = model_text.generate_content(f"{P2_PROMPT_V2}\n\nInput Data:\n{json.dumps(p2_input)}")
@@ -2486,6 +2453,292 @@ def _validate_known_relic(relic_type):
     return definition
 
 
+def _parse_market_quantity(payload):
+    if not isinstance(payload, dict):
+        return 1
+    raw = payload.get("quantity", 1)
+    try:
+        quantity = int(raw)
+    except Exception as exc:
+        raise ValueError("Quantity must be an integer") from exc
+    if quantity < 1 or quantity > 99:
+        raise ValueError("Quantity must be between 1 and 99")
+    return quantity
+
+
+def _market_quote_for_relic(relic_type):
+    _validate_known_relic(relic_type)
+    return relic_market_quote(relic_type, get_relic_catalog())
+
+
+def market_board_snapshot(user):
+    relics = get_user_relics(user["id"])
+    owned_amounts = {str(row["relic_type"]): int(row["amount"]) for row in relics}
+    transactions = get_recent_resource_transactions(user["id"], 20)
+    hero_rows = fetch_all(
+        """
+        SELECT id, source_payload, hero_payload, created_at
+        FROM heroes
+        WHERE user_id = %s
+        ORDER BY created_at DESC
+        LIMIT 20
+        """,
+        (user["id"],),
+    )
+    return build_market_board_snapshot(
+        catalog=get_relic_catalog(),
+        owned_amounts=owned_amounts,
+        transactions=normalize_rows(transactions),
+        hero_rows=normalize_rows(hero_rows),
+    )
+
+
+@app.route("/api/market/board", methods=["GET"])
+@auth_required
+def get_market_board():
+    user = current_user()
+    try:
+        return jsonify({"data": market_board_snapshot(user)})
+    except Exception as exc:
+        logging.exception(exc)
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/api/market/relics/buy", methods=["POST"])
+@auth_required
+def market_buy_relic():
+    user = current_user()
+    payload = request.get_json(silent=True) or {}
+    relic_type = _parse_relic_type(payload)
+    if not relic_type:
+        return jsonify({"error": "Relic type required"}), 400
+
+    try:
+        quantity = _parse_market_quantity(payload)
+        quote = _market_quote_for_relic(relic_type)
+        unit_price = int(quote["ask_price"])
+        total_price = unit_price * quantity
+        ensure_user_wallet(user["id"])
+
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT dust_balance
+                    FROM user_wallets
+                    WHERE user_id = %s
+                    FOR UPDATE
+                    """,
+                    (user["id"],),
+                )
+                wallet = cur.fetchone()
+                current_balance = int(wallet["dust_balance"] if wallet else 0)
+                next_balance = current_balance - total_price
+                if next_balance < 0:
+                    return jsonify({"error": "Insufficient dust"}), 400
+
+                cur.execute(
+                    """
+                    UPDATE user_wallets
+                    SET dust_balance = %s, updated_at = now()
+                    WHERE user_id = %s
+                    """,
+                    (next_balance, user["id"]),
+                )
+                trade_metadata = {
+                    "side": "buy",
+                    "relic_type": relic_type,
+                    "quantity": quantity,
+                    "unit_price": unit_price,
+                    "total_price": total_price,
+                }
+                cur.execute(
+                    """
+                    INSERT INTO resource_transactions (
+                        user_id, resource_type, delta, balance_after, reason, ref_type, ref_id, metadata
+                    )
+                    VALUES (%s, 'dust', %s, %s, 'market_buy_relic', 'market_relic', NULL, %s::jsonb)
+                    """,
+                    (
+                        user["id"],
+                        -total_price,
+                        next_balance,
+                        serialize_json(trade_metadata),
+                    ),
+                )
+
+                cur.execute(
+                    """
+                    INSERT INTO user_relics (user_id, relic_type, amount)
+                    VALUES (%s, %s, %s)
+                    ON CONFLICT (user_id, relic_type) DO UPDATE
+                    SET amount = user_relics.amount + EXCLUDED.amount,
+                        updated_at = now()
+                    RETURNING amount
+                    """,
+                    (user["id"], relic_type, quantity),
+                )
+                relic_row = cur.fetchone()
+                next_amount = int(relic_row["amount"] if relic_row else quantity)
+
+                cur.execute(
+                    """
+                    INSERT INTO resource_transactions (
+                        user_id, resource_type, resource_key, delta, balance_after, reason, ref_type, ref_id, metadata
+                    )
+                    VALUES (%s, 'relic', %s, %s, %s, 'market_buy_relic', 'market_relic', NULL, %s::jsonb)
+                    """,
+                    (
+                        user["id"],
+                        relic_type,
+                        quantity,
+                        next_amount,
+                        serialize_json(trade_metadata),
+                    ),
+                )
+            conn.commit()
+
+        return jsonify(
+            {
+                "ok": True,
+                "trade": {
+                    "side": "buy",
+                    "relicType": relic_type,
+                    "quantity": quantity,
+                    "unitPrice": unit_price,
+                    "totalPrice": total_price,
+                },
+                "economy": economy_snapshot(user),
+            }
+        )
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception as exc:
+        logging.exception(exc)
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/api/market/relics/sell", methods=["POST"])
+@auth_required
+def market_sell_relic():
+    user = current_user()
+    payload = request.get_json(silent=True) or {}
+    relic_type = _parse_relic_type(payload)
+    if not relic_type:
+        return jsonify({"error": "Relic type required"}), 400
+
+    try:
+        quantity = _parse_market_quantity(payload)
+        quote = _market_quote_for_relic(relic_type)
+        unit_price = int(quote["bid_price"])
+        total_price = unit_price * quantity
+        ensure_user_wallet(user["id"])
+
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT amount
+                    FROM user_relics
+                    WHERE user_id = %s AND relic_type = %s
+                    FOR UPDATE
+                    """,
+                    (user["id"], relic_type),
+                )
+                relic_row = cur.fetchone()
+                current_amount = int(relic_row["amount"] if relic_row else 0)
+                if current_amount < quantity:
+                    return jsonify({"error": "Insufficient relics"}), 400
+                next_amount = current_amount - quantity
+
+                cur.execute(
+                    """
+                    UPDATE user_relics
+                    SET amount = %s, updated_at = now()
+                    WHERE user_id = %s AND relic_type = %s
+                    """,
+                    (next_amount, user["id"], relic_type),
+                )
+                trade_metadata = {
+                    "side": "sell",
+                    "relic_type": relic_type,
+                    "quantity": quantity,
+                    "unit_price": unit_price,
+                    "total_price": total_price,
+                }
+                cur.execute(
+                    """
+                    INSERT INTO resource_transactions (
+                        user_id, resource_type, resource_key, delta, balance_after, reason, ref_type, ref_id, metadata
+                    )
+                    VALUES (%s, 'relic', %s, %s, %s, 'market_sell_relic', 'market_relic', NULL, %s::jsonb)
+                    """,
+                    (
+                        user["id"],
+                        relic_type,
+                        -quantity,
+                        next_amount,
+                        serialize_json(trade_metadata),
+                    ),
+                )
+
+                cur.execute(
+                    """
+                    SELECT dust_balance
+                    FROM user_wallets
+                    WHERE user_id = %s
+                    FOR UPDATE
+                    """,
+                    (user["id"],),
+                )
+                wallet = cur.fetchone()
+                current_balance = int(wallet["dust_balance"] if wallet else 0)
+                next_balance = current_balance + total_price
+
+                cur.execute(
+                    """
+                    UPDATE user_wallets
+                    SET dust_balance = %s, updated_at = now()
+                    WHERE user_id = %s
+                    """,
+                    (next_balance, user["id"]),
+                )
+                cur.execute(
+                    """
+                    INSERT INTO resource_transactions (
+                        user_id, resource_type, delta, balance_after, reason, ref_type, ref_id, metadata
+                    )
+                    VALUES (%s, 'dust', %s, %s, 'market_sell_relic', 'market_relic', NULL, %s::jsonb)
+                    """,
+                    (
+                        user["id"],
+                        total_price,
+                        next_balance,
+                        serialize_json(trade_metadata),
+                    ),
+                )
+            conn.commit()
+
+        return jsonify(
+            {
+                "ok": True,
+                "trade": {
+                    "side": "sell",
+                    "relicType": relic_type,
+                    "quantity": quantity,
+                    "unitPrice": unit_price,
+                    "totalPrice": total_price,
+                },
+                "economy": economy_snapshot(user),
+            }
+        )
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception as exc:
+        logging.exception(exc)
+        return jsonify({"error": str(exc)}), 500
+
+
 @app.route("/api/cards/<card_id>/equip-relic", methods=["POST"])
 @auth_required
 def equip_card_relic(card_id):
@@ -2735,5 +2988,11 @@ def list_my_battles():
 
 if __name__ == "__main__":
     port = settings.port
+    debug_enabled = os.getenv("FLASK_DEBUG", "0").strip().lower() in {"1", "true", "yes"}
     print(f"Server starting on http://127.0.0.1:{port}")
-    app.run(host="127.0.0.1", port=port, debug=True)
+    app.run(
+        host="127.0.0.1",
+        port=port,
+        debug=debug_enabled,
+        use_reloader=debug_enabled,
+    )

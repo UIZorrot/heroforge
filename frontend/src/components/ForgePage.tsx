@@ -1,13 +1,13 @@
 import { useMemo, useRef, useState } from 'react';
-import { AlertCircle, Check, Gem, ImagePlus, RefreshCw, ScrollText, Shield, UploadCloud, WandSparkles, X } from 'lucide-react';
+import { AlertCircle, Check, ImagePlus, RefreshCw, Shield, UploadCloud, WandSparkles, X } from 'lucide-react';
 import { HeroCard } from './HeroCard';
 import { PageHeader, PageHeaderStat } from './PageHeader';
 import type { CharacterData } from '../lib/gameLogic';
 import { mockRelicCatalog, mockRelicInventory } from '../lib/mockContent';
 import { getRelicIconSrc } from '../lib/relics';
-import type { EconomySnapshot, MaterialDefinition, MaterialInventory, RelicDefinition, SavedHero } from '../types';
+import type { EconomySnapshot, RelicDefinition, SavedHero } from '../types';
 
-type ForgeStep = 'upload' | 'enchant' | 'generate' | 'result';
+type ForgeStep = 'upload' | 'generate' | 'result';
 export type ForgeSideKey = 'create' | 'enchant' | 'break';
 
 type ForgePageProps = {
@@ -15,16 +15,9 @@ type ForgePageProps = {
   error: string | null;
   resultImage: string | null;
   resultHero: CharacterData | null;
-  selectedInfusions: Array<{
-    label: string;
-    count: number;
-    overlayClass: string;
-    particleClass: string;
-  }>;
   heroes: SavedHero[];
   economy: EconomySnapshot | null;
-  materials: MaterialInventory;
-  materialDefinitions: MaterialDefinition[];
+  demoMode?: boolean;
   activeTab?: ForgeSideKey;
   onEquipRelic?: (heroId: string, relicId: string | null) => Promise<void> | void;
   onEnchantHero?: (heroId: string, relicId: string) => Promise<void> | void;
@@ -43,9 +36,9 @@ type RelicOption = {
   definition?: RelicDefinition;
 };
 
-function relicOptions(economy: EconomySnapshot | null): RelicOption[] {
-  const sourceRelics = !economy || economy.relics.length === 0 ? mockRelicInventory : economy.relics;
-  const sourceCatalog = !economy || economy.relic_catalog.length === 0 ? mockRelicCatalog : economy.relic_catalog;
+function relicOptions(economy: EconomySnapshot | null, demoMode: boolean): RelicOption[] {
+  const sourceRelics = demoMode && (!economy || economy.relics.length === 0) ? mockRelicInventory : economy?.relics ?? [];
+  const sourceCatalog = demoMode && (!economy || economy.relic_catalog.length === 0) ? mockRelicCatalog : economy?.relic_catalog ?? [];
   const catalog = Object.fromEntries(sourceCatalog.map((item) => [item.relic_type, item]));
   return sourceRelics.map((entry) => {
     const definition = catalog[entry.relic_type];
@@ -69,21 +62,20 @@ function formatNumber(value: unknown) {
 function inferStep(hasFile: boolean, loading: boolean, resultHero: CharacterData | null): ForgeStep {
   if (loading) return 'generate';
   if (resultHero) return 'result';
-  if (hasFile) return 'enchant';
+  if (hasFile) return 'generate';
   return 'upload';
 }
 
 function StepIndicator({ currentStep }: { currentStep: ForgeStep }) {
   const steps: Array<{ key: ForgeStep; title: string; description: string }> = [
     { key: 'upload', title: 'Upload', description: 'Add an image' },
-    { key: 'enchant', title: 'Enchant', description: 'Use a relic' },
     { key: 'generate', title: 'Generate', description: 'Forge your hero' },
     { key: 'result', title: 'Result', description: 'View and break' },
   ];
   const currentIndex = steps.findIndex((step) => step.key === currentStep);
 
   return (
-    <div className="grid grid-cols-4 gap-6 border-b border-white/8 px-8 py-6">
+    <div className="grid grid-cols-3 gap-6 border-b border-white/8 px-8 py-6">
       {steps.map((step, index) => {
         const active = step.key === currentStep;
         const complete = index < currentIndex;
@@ -115,13 +107,9 @@ function StepIndicator({ currentStep }: { currentStep: ForgeStep }) {
 
 function LeftPanel({
   heroes,
-  materials,
-  materialDefinitions,
   relics,
 }: {
   heroes: SavedHero[];
-  materials: MaterialInventory;
-  materialDefinitions: MaterialDefinition[];
   relics: RelicOption[];
 }) {
   return (
@@ -136,51 +124,6 @@ function LeftPanel({
         </div>
         <div className="mt-5 border-t border-white/8 py-5 text-center text-[10px] uppercase tracking-[0.28em] text-stone-600">
           {heroes.length > 0 ? `${heroes.length} cards in vault` : 'No cards forged'}
-        </div>
-      </section>
-
-      <section className="border border-white/8 bg-black/20 p-5">
-        <div className="mb-5 flex items-center justify-between">
-          <div className="text-[10px] font-semibold uppercase tracking-[0.24em] text-stone-400">Daily ritual</div>
-          <div className="text-[10px] uppercase tracking-[0.18em] text-stone-600">Refresh in 12:34:56</div>
-        </div>
-        <div className="space-y-3">
-          <div className="flex items-center justify-between border-b border-white/8 pb-3">
-            <div>
-              <div className="text-sm text-stone-200">Forge one card</div>
-              <div className="mt-1 text-xs text-stone-500">+100 score</div>
-            </div>
-            <button type="button" className="bg-white/10 px-4 py-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-stone-200">
-              Claim
-            </button>
-          </div>
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="text-sm text-stone-200">Use one relic</div>
-              <div className="mt-1 text-xs text-stone-500">+300 score</div>
-            </div>
-            <button type="button" className="bg-white/10 px-4 py-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-stone-200">
-              Claim
-            </button>
-          </div>
-        </div>
-      </section>
-
-      <section className="border border-white/8 bg-black/20 p-5">
-        <div className="mb-4 flex items-center justify-between">
-          <div className="text-[10px] font-semibold uppercase tracking-[0.24em] text-stone-400">Material vault</div>
-          <button type="button" className="text-[10px] uppercase tracking-[0.18em] text-stone-500">View all</button>
-        </div>
-        <div className="max-h-[260px] space-y-1 overflow-y-auto pr-1">
-          {materialDefinitions.map((material) => (
-            <div key={material.key} className="flex items-center justify-between border-b border-white/8 py-3">
-              <div className="flex items-center gap-3">
-                <Gem size={15} className="text-stone-300" />
-                <span className="text-[10px] uppercase tracking-[0.2em] text-stone-500">{material.label}</span>
-              </div>
-              <span className="text-sm text-[#d7c096]">{formatNumber(materials[material.key])}</span>
-            </div>
-          ))}
         </div>
       </section>
 
@@ -285,67 +228,6 @@ function UploadStage({
   );
 }
 
-function EnchantStage({
-  relics,
-  selectedRelicId,
-  onSelectRelic,
-}: {
-  relics: RelicOption[];
-  selectedRelicId: string;
-  onSelectRelic: (id: string) => void;
-}) {
-  return (
-    <div className="min-h-[520px] border border-white/10 bg-black/25 p-8">
-      <div className="text-[10px] uppercase tracking-[0.3em] text-[#d7a852]">Enchant</div>
-      <h2 className="mt-3 font-display text-5xl font-light uppercase tracking-[0.16em] text-stone-100">Use a relic</h2>
-      <p className="mt-4 max-w-2xl text-sm leading-7 text-stone-500">
-        Relic enchantment is a forging modifier. It guides the intended fantasy and can later be wired into the backend relic economy.
-      </p>
-      <div className="mt-8 grid grid-cols-3 gap-4">
-        <button
-          type="button"
-          onClick={() => onSelectRelic('')}
-          className={`min-h-[150px] border p-5 text-left transition ${
-            selectedRelicId === '' ? 'border-[#b49664] bg-[#b49664]/8' : 'border-white/10 bg-black/30 hover:border-stone-600'
-          }`}
-        >
-          <div className="text-[10px] uppercase tracking-[0.24em] text-stone-500">No relic</div>
-          <div className="mt-4 text-lg text-stone-200">Pure Forge</div>
-          <div className="mt-3 text-sm leading-6 text-stone-500">Generate from image identity only.</div>
-        </button>
-        {relics.slice(0, 5).map((relic) => (
-          <button
-            key={relic.id}
-            type="button"
-            onClick={() => onSelectRelic(relic.id)}
-            className={`min-h-[150px] border p-5 text-left transition ${
-              selectedRelicId === relic.id ? 'border-[#b49664] bg-[#b49664]/8' : 'border-white/10 bg-black/30 hover:border-stone-600'
-            }`}
-          >
-            <div className="flex items-center justify-between">
-              <div className="text-[10px] uppercase tracking-[0.24em] text-[#d7a852]">{relic.tier}</div>
-              <div className="text-xs text-stone-500">x{relic.amount}</div>
-            </div>
-            <div className="mt-4 flex items-start gap-4">
-              <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden border border-white/10 bg-white/[0.03]">
-                {relic.iconSrc ? (
-                  <img src={relic.iconSrc} alt={relic.name} className="h-full w-full object-cover" />
-                ) : (
-                  <ScrollText size={18} className="text-stone-500" />
-                )}
-              </div>
-              <div className="min-w-0">
-                <div className="text-lg text-stone-200">{relic.name}</div>
-                <div className="mt-3 text-sm leading-6 text-stone-500">{relic.family}</div>
-              </div>
-            </div>
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 function GenerateStage() {
   return (
     <div className="flex min-h-[520px] flex-col items-center justify-center border border-white/10 bg-black/25 text-center">
@@ -364,19 +246,17 @@ function GenerateStage() {
 function ResultStage({
   hero,
   image,
-  infusions,
   onBreak,
 }: {
   hero: CharacterData | null;
   image: string | null;
-  infusions: ForgePageProps['selectedInfusions'];
   onBreak: () => void;
 }) {
   return (
     <div className="flex min-h-[560px] flex-col items-center justify-center border border-white/10 bg-[radial-gradient(circle_at_50%_42%,rgba(180,150,100,0.10),rgba(0,0,0,0.18)_40%,rgba(0,0,0,0.48)_100%)] p-8">
       {hero ? (
         <>
-          <HeroCard character={hero} image={image ?? undefined} infusions={infusions} className="h-[520px] w-[340px]" />
+          <HeroCard character={hero} image={image ?? undefined} className="h-[520px] w-[340px]" />
           <button
             type="button"
             onClick={onBreak}
@@ -399,7 +279,6 @@ function ResultStage({
 function SummaryPanel({
   uploadedFile,
   uploadedPreview,
-  selectedRelic,
   resultHero,
   loading,
   error,
@@ -408,7 +287,6 @@ function SummaryPanel({
 }: {
   uploadedFile: File | null;
   uploadedPreview: string | null;
-  selectedRelic: RelicOption | null;
   resultHero: CharacterData | null;
   loading: boolean;
   error: string | null;
@@ -430,26 +308,9 @@ function SummaryPanel({
         </div>
 
         <div className="border-t border-white/8 pt-5">
-          <div className="text-[10px] uppercase tracking-[0.24em] text-stone-600">Enchant</div>
-          <div className="mt-4 flex items-center gap-4">
-            <div className="flex h-12 w-12 items-center justify-center overflow-hidden border border-white/10 bg-white/[0.03]">
-              {selectedRelic?.iconSrc ? (
-                <img src={selectedRelic.iconSrc} alt={selectedRelic.name} className="h-full w-full object-cover" />
-              ) : (
-                <ScrollText size={18} className="text-stone-500" />
-              )}
-            </div>
-            <div>
-              <div className="text-sm text-stone-300">{selectedRelic?.name ?? 'No relic selected'}</div>
-              <div className="mt-1 text-xs uppercase tracking-[0.16em] text-stone-600">{selectedRelic?.family ?? 'Pure forge'}</div>
-            </div>
-          </div>
-        </div>
-
-        <div className="border-t border-white/8 pt-5">
           <div className="text-[10px] uppercase tracking-[0.24em] text-stone-600">Estimated output</div>
           <div className="mt-4 text-sm leading-7 text-stone-400">
-            {resultHero ? `${resultHero.name} / ${formatNumber(resultHero.BP)} BP` : selectedRelic ? 'Relic-enchanted hero' : 'Image-based hero'}
+            {resultHero ? `${resultHero.name} / ${formatNumber(resultHero.BP)} BP` : 'Image-based hero'}
           </div>
         </div>
 
@@ -622,11 +483,9 @@ export function ForgePage({
   error,
   resultImage,
   resultHero,
-  selectedInfusions,
   heroes,
   economy,
-  materials,
-  materialDefinitions,
+  demoMode = false,
   activeTab = 'create',
   onEquipRelic,
   onEnchantHero,
@@ -636,9 +495,7 @@ export function ForgePage({
 }: ForgePageProps) {
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [uploadedPreview, setUploadedPreview] = useState<string | null>(null);
-  const [selectedRelicId, setSelectedRelicId] = useState('');
-  const relics = useMemo(() => relicOptions(economy), [economy]);
-  const selectedRelic = relics.find((relic) => relic.id === selectedRelicId) ?? null;
+  const relics = useMemo(() => relicOptions(economy, demoMode), [demoMode, economy]);
   const currentStep = inferStep(Boolean(uploadedFile || uploadedPreview), loading, resultHero);
   const displayImage = resultImage || uploadedPreview;
 
@@ -650,7 +507,6 @@ export function ForgePage({
   const clearUpload = () => {
     setUploadedFile(null);
     setUploadedPreview(null);
-    setSelectedRelicId('');
   };
 
   const generate = () => {
@@ -687,10 +543,7 @@ export function ForgePage({
       );
     }
     if (loading) return <GenerateStage />;
-    if (resultHero) return <ResultStage hero={resultHero} image={displayImage} infusions={selectedInfusions} onBreak={onBreak} />;
-    if (uploadedFile || uploadedPreview) {
-      return <EnchantStage relics={relics} selectedRelicId={selectedRelicId} onSelectRelic={setSelectedRelicId} />;
-    }
+    if (resultHero) return <ResultStage hero={resultHero} image={displayImage} onBreak={onBreak} />;
     return <UploadStage imagePreview={uploadedPreview} onPickFile={setFile} onClear={clearUpload} />;
   })();
 
@@ -700,27 +553,18 @@ export function ForgePage({
         title="Forge"
         eyebrow="Hero Forge"
         subtitle={activeTab === 'enchant' ? 'Relic Chamber' : activeTab === 'break' ? 'Salvage Desk' : 'Workshop'}
-        description={
-          activeTab === 'enchant'
-            ? 'Bind relics before generation.'
-            : activeTab === 'break'
-              ? 'Break cards down for materials.'
-              : 'Images become heroes.'
-        }
+        description={activeTab === 'enchant' ? 'Bind one relic to an existing card.' : activeTab === 'break' ? 'Clear the current forge result.' : 'Images become heroes. Relics are applied afterward.'}
         stats={
           <>
             <PageHeaderStat label="Cards Forged" value={formatNumber(heroes.length)} />
             <PageHeaderStat label="Relics Ready" value={formatNumber(relics.length)} />
-            <PageHeaderStat
-              label="Materials"
-              value={formatNumber(materialDefinitions.reduce((sum, material) => sum + (materials[material.key] || 0), 0))}
-            />
+            <PageHeaderStat label="Forge Cost" value={formatNumber(economy?.costs.forge ?? 100)} />
             <PageHeaderStat label="Forge State" value={loading ? 'Active' : resultHero ? 'Result' : uploadedFile ? 'Ready' : 'Idle'} />
           </>
         }
       />
       <div className="mt-7 grid grid-cols-1 gap-6 xl:grid-cols-[300px_minmax(0,1fr)]">
-        <LeftPanel heroes={heroes} materials={materials} materialDefinitions={materialDefinitions} relics={relics} />
+        <LeftPanel heroes={heroes} relics={relics} />
         <section className="border border-white/8 bg-black/20">
           {activeTab === 'create' ? (
             <>
@@ -730,7 +574,6 @@ export function ForgePage({
                 <SummaryPanel
                   uploadedFile={uploadedFile}
                   uploadedPreview={displayImage}
-                  selectedRelic={selectedRelic}
                   resultHero={resultHero}
                   loading={loading}
                   error={error}
@@ -745,7 +588,7 @@ export function ForgePage({
           <div className="grid grid-cols-[1fr_280px] border-t border-white/8">
             <div className="flex items-center gap-5 px-8 py-6 text-sm leading-6 text-stone-500">
               <Shield size={28} className="text-[#b49664]" />
-              <span>Each forge is unique. Stats and traits are generated by the rule-based system. Relic enchantment is presented as UX and can be connected to economy rules later.</span>
+              <span>Each forge is unique. Stats and traits are generated by the rule-based system, while relic inventory and enchantment actions are resolved by the backend.</span>
             </div>
             <button type="button" className="border-l border-white/8 px-8 py-6 text-left text-[10px] uppercase tracking-[0.24em] text-stone-500 hover:text-stone-300">
               Learn more about<br />

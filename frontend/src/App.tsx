@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { ArrowRight, CalendarDays, Gem, Gift, Mail, Newspaper, RefreshCw, Send, ShoppingBag, Sparkles, Swords, WalletCards, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { GameShell, type ArenaSideKey, type ForgeSideKey, type GameSectionKey, type HomeSideKey } from './components/GameShell';
@@ -6,6 +6,7 @@ import { VaultPage } from './components/VaultPage';
 import { ForgePage } from './components/ForgePage';
 import { ArenaPage } from './components/ArenaPage';
 import { VfxTestPage } from './components/VfxTestPage';
+import { MarketPage } from './components/MarketPage';
 import { DailyActivity } from './components/DailyActivity';
 import { SectionHeader } from './components/Effects';
 import { PageHeader, PageHeaderStat } from './components/PageHeader';
@@ -26,49 +27,15 @@ import {
 } from './lib/api';
 import { normalizeCharacterData, type CharacterData, type Rarity } from './lib/gameLogic';
 import { mockEconomy, mockHeroes, mockRelicCatalog } from './lib/mockContent';
-import type { AuthUser, EconomySnapshot, HeroHistoryRecord, MaterialDefinition, MaterialInventory, SavedHero } from './types';
+import { IS_MOCK_MODE } from './lib/runtimeMode';
+import type { AuthUser, EconomySnapshot, HeroHistoryRecord, SavedHero } from './types';
 
 type VaultSort = 'date' | 'bp' | 'name';
 
 const LOGIN_RESEND_SECONDS = 60;
-const MATERIAL_STORAGE_KEY = 'hero_forge_material_inventory_v1';
 
-const MATERIAL_DEFINITIONS: MaterialDefinition[] = [
-  { key: 'glowGem', label: 'Luminous Gem', effect: 'Light, precision, speed', rewardTag: 'Luminous Gem', overlayClass: 'from-gold-matte/25 via-gold-matte/10 to-transparent mix-blend-screen', particleClass: 'bg-gold-matte/80', badgeClass: 'border-gold-matte/35 bg-gold-matte/5 text-gold-100' },
-  { key: 'chaosMind', label: 'Chaos Mind', effect: 'Shadow, burst, control', rewardTag: 'Chaos Mind', overlayClass: 'from-violet-400/24 via-violet-300/12 to-transparent mix-blend-screen', particleClass: 'bg-violet-300/70', badgeClass: 'border-violet-400/28 bg-violet-400/6 text-violet-200' },
-  { key: 'emberCore', label: 'Ember Core', effect: 'Fire, burn, suppression', rewardTag: 'Ember Core', overlayClass: 'from-orange-400/24 via-orange-300/12 to-transparent mix-blend-screen', particleClass: 'bg-orange-300/70', badgeClass: 'border-orange-400/28 bg-orange-400/6 text-orange-200' },
-  { key: 'frostShard', label: 'Frost Shard', effect: 'Frost, slow, survival', rewardTag: 'Frost Shard', overlayClass: 'from-sky-300/24 via-blue-300/12 to-transparent mix-blend-screen', particleClass: 'bg-sky-300/70', badgeClass: 'border-sky-400/28 bg-sky-400/6 text-sky-200' },
-  { key: 'stormSigil', label: 'Storm Sigil', effect: 'Lightning, combo, rhythm', rewardTag: 'Storm Sigil', overlayClass: 'from-indigo-400/24 via-sky-300/12 to-transparent mix-blend-screen', particleClass: 'bg-indigo-300/70', badgeClass: 'border-indigo-400/28 bg-indigo-400/6 text-indigo-200' },
-  { key: 'voidDust', label: 'Void Dust', effect: 'Penetration, disruption', rewardTag: 'Void Dust', overlayClass: 'from-fuchsia-400/24 via-purple-300/12 to-transparent mix-blend-screen', particleClass: 'bg-fuchsia-300/70', badgeClass: 'border-fuchsia-400/28 bg-fuchsia-400/6 text-fuchsia-200' },
-];
-
-const createEmptyInventory = (): MaterialInventory => ({
-  glowGem: 0,
-  chaosMind: 0,
-  emberCore: 0,
-  frostShard: 0,
-  stormSigil: 0,
-  voidDust: 0,
-});
-
-function readStoredMaterials(): MaterialInventory {
-  try {
-    const raw = localStorage.getItem(MATERIAL_STORAGE_KEY);
-    if (!raw) return createEmptyInventory();
-    const parsed = JSON.parse(raw) as Partial<MaterialInventory>;
-    return { ...createEmptyInventory(), ...parsed };
-  } catch {
-    return createEmptyInventory();
-  }
-}
-
-function materialInfusions(inventory: Partial<MaterialInventory>) {
-  return MATERIAL_DEFINITIONS.filter(({ key }) => (inventory[key] ?? 0) > 0).map((material) => ({
-    label: material.label,
-    count: inventory[material.key] ?? 0,
-    overlayClass: material.overlayClass,
-    particleClass: material.particleClass,
-  }));
+function createMockSession() {
+  return { token: 'mock-token', email: 'forger@example.com', expiresAt: new Date(Date.now() + 86400000).toISOString() };
 }
 
 function dustBalance(economy: EconomySnapshot | null) {
@@ -104,7 +71,6 @@ function heroRecordToSavedHero(record: HeroHistoryRecord): SavedHero {
     createdAt: new Date(record.created_at).getTime() || Date.now(),
     image: heroImageFromSourcePayload(record.source_payload),
     character: normalizeCharacterData(record.hero_payload),
-    infusedMaterials: createEmptyInventory(),
     equippedRelicId: record.equipped_relic_type ?? null,
     enchantment: normalizeHeroEnchantment(record.enchantment),
     pvpLifeState: record.pvp_life_state,
@@ -126,6 +92,7 @@ function AuthPanel({
   cooldown,
   authError,
   authMessage,
+  showMockLogin,
   onEmailChange,
   onCodeChange,
   onRequestCode,
@@ -140,6 +107,7 @@ function AuthPanel({
   cooldown: number;
   authError: string;
   authMessage: string;
+  showMockLogin: boolean;
   onEmailChange: (value: string) => void;
   onCodeChange: (value: string) => void;
   onRequestCode: () => void;
@@ -215,13 +183,15 @@ function AuthPanel({
             </motion.div>
           )}
         </AnimatePresence>
-        <button
-          type="button"
-          onClick={onMockLogin}
-          className="w-full border border-white/10 px-4 py-3 text-[10px] uppercase tracking-[0.22em] text-stone-500 transition hover:border-stone-600 hover:text-stone-200"
-        >
-          Skip to demo vault
-        </button>
+        {showMockLogin && (
+          <button
+            type="button"
+            onClick={onMockLogin}
+            className="w-full border border-white/10 px-4 py-3 text-[10px] uppercase tracking-[0.22em] text-stone-500 transition hover:border-stone-600 hover:text-stone-200"
+          >
+            Open Preview Mode
+          </button>
+        )}
       </div>
     </div>
   );
@@ -278,6 +248,7 @@ function HomePage({
   onNavigate,
   onEconomyChange,
   onOpenAuth,
+  previewContentEnabled,
 }: {
   user: AuthUser | null;
   activeTab: HomeSideKey;
@@ -288,6 +259,7 @@ function HomePage({
   onNavigate: (section: GameSectionKey) => void;
   onEconomyChange: (economy: EconomySnapshot) => void;
   onOpenAuth: () => void;
+  previewContentEnabled: boolean;
 }) {
   const dailyToken = token && token !== 'mock-token' ? token : null;
   const playerName = user?.email?.split('@')[0] || 'Visitor';
@@ -301,7 +273,7 @@ function HomePage({
     {
       title: 'Relic Enchanting',
       tag: 'Forge',
-      description: 'New forge rituals bias generated heroes through relic-bound effects.',
+      description: 'New relic rituals are applied to cards after generation.',
       tone: 'from-[#34244f] via-[#111014] to-[#050505]',
     },
     {
@@ -311,10 +283,14 @@ function HomePage({
       tone: 'from-[#17313a] via-[#0d1112] to-[#050505]',
     },
   ];
-  const offers = [
+  const offers = previewContentEnabled ? [
     ['新手大礼', '$6.99', 'Starter dust, relic rolls, and first-week forge boosts'],
     ['粉尘包', '$9.99', 'A direct Dust pack for forge costs and Arena stakes'],
     ['遗物包', '$9.99', 'Relic rolls for enchantment and collection growth'],
+  ] : [
+    ['Dust Economy', 'Internal', 'Dust currently circulates through forge, revive, Arena entry, and relic trading.'],
+    ['Relic Loop', 'Live', 'Relics can already drop, equip, enchant, and trade inside the current MVP loop.'],
+    ['Recharge', 'Deferred', 'Real-money recharge and Stripe settlement are intentionally out of scope for the first release.'],
   ];
   const quickLinks: Array<[GameSectionKey, string, string, React.ReactNode]> = [
     ['forge', 'Forge', 'Create or break a hero card.', <Sparkles size={16} />],
@@ -322,6 +298,18 @@ function HomePage({
     ['arena', 'Arena', 'Queue, train, and battle.', <Swords size={16} />],
     ['market', 'Market', 'Browse offers and orders.', <ShoppingBag size={16} />],
   ];
+  const profileLevel = previewContentEnabled ? '12' : 'Beta';
+  const profileTitle = previewContentEnabled ? 'Forger' : 'Player';
+  const profileProgress = previewContentEnabled ? 68 : 0;
+  const combatRating = previewContentEnabled ? 'Elite III' : 'Season 0';
+  const combatWinRate = previewContentEnabled ? '63.2%' : 'Not tracked';
+  const combatStreak = previewContentEnabled ? '8' : 'Pending';
+  const bestBp = previewContentEnabled ? '11,500' : heroCount ? 'Recorded in Vault' : '--';
+  const relicUses = previewContentEnabled ? '10' : 'Tracked after live play';
+  const membershipTitle = previewContentEnabled ? 'Standard Forger' : 'Founders Beta';
+  const membershipDescription = previewContentEnabled
+    ? 'Daily rewards, Arena queue, Forge, and Vault are available.'
+    : 'Core beta scope is live: Forge, Vault, Train, Arena, Daily rewards, and the internal relic market.';
   const header = (
     <PageHeader
       title="Home"
@@ -346,7 +334,9 @@ function HomePage({
   );
 
   if (!user) {
-    return <GuestLandingHome onJoin={onOpenAuth} onNavigate={onNavigate} />;
+    return previewContentEnabled
+      ? <GuestLandingHome onJoin={onOpenAuth} onNavigate={onNavigate} previewContentEnabled={previewContentEnabled} />
+      : <GuestLandingHomeLive onJoin={onOpenAuth} onNavigate={onNavigate} />;
   }
 
   if (activeTab === 'profile') {
@@ -368,19 +358,22 @@ function HomePage({
                   </div>
                 </div>
                 <div className="mt-6 grid grid-cols-2 gap-3">
-                  <SmallProfileStat label="Level" value={user ? '12' : '--'} />
-                  <SmallProfileStat label="Title" value={user ? 'Forger' : 'Guest'} />
+                  <SmallProfileStat label="Level" value={user ? profileLevel : '--'} />
+                  <SmallProfileStat label="Title" value={user ? profileTitle : 'Guest'} />
                   <SmallProfileStat label="Cards" value={heroCount} />
                   <SmallProfileStat label="Relics" value={relics} />
                 </div>
                 <div className="mt-6">
                   <div className="flex items-center justify-between text-[10px] uppercase tracking-[0.24em] text-stone-600">
                     <span>Progress</span>
-                    <span>{user ? '68%' : 'Locked'}</span>
+                    <span>{user ? (previewContentEnabled ? `${profileProgress}%` : 'Beta') : 'Locked'}</span>
                   </div>
                   <div className="mt-3 h-2 border border-white/8 bg-black">
-                    <div className="h-full w-[68%] bg-[#b49664]" />
+                    <div className="h-full bg-[#b49664]" style={{ width: `${profileProgress}%` }} />
                   </div>
+                  {!previewContentEnabled && (
+                    <div className="mt-3 text-xs leading-5 text-stone-500">Account-wide progression tiers are not finalized for MVP. Real progression today lives in your Vault assets and resource ledger.</div>
+                  )}
                 </div>
               </div>
 
@@ -393,7 +386,7 @@ function HomePage({
                 </div>
                 <div className="mt-6 grid gap-4 md:grid-cols-2">
                   <ProfileAction title="Security" description={user ? 'Email session active. Token managed locally.' : 'Sign in to bind progress to an account.'} />
-                  <ProfileAction title="Preferences" description="Audio, motion, and notification preferences will live here." />
+                  <ProfileAction title="Beta Scope" description="MVP scope is Forge, Vault, Train, Arena, Daily rewards, and the internal relic market. Chronicle and recharge are intentionally deferred." />
                 </div>
               </div>
             </section>
@@ -402,17 +395,17 @@ function HomePage({
               <div className="border border-white/8 bg-black/20 p-6">
                 <HomeSectionTitle icon={<Swords size={16} />} eyebrow="Arena" title="Combat Record" />
                 <div className="mt-6 grid grid-cols-3 gap-3">
-                  <SmallProfileStat label="Rating" value={user ? 'Elite III' : '--'} />
-                  <SmallProfileStat label="Win Rate" value={user ? '63.2%' : '--'} />
-                  <SmallProfileStat label="Streak" value={user ? '8' : '--'} />
+                  <SmallProfileStat label="Rating" value={user ? combatRating : '--'} />
+                  <SmallProfileStat label="Win Rate" value={user ? combatWinRate : '--'} />
+                  <SmallProfileStat label="Streak" value={user ? combatStreak : '--'} />
                 </div>
               </div>
               <div className="border border-white/8 bg-black/20 p-6">
                 <HomeSectionTitle icon={<Sparkles size={16} />} eyebrow="Forge" title="Creation Status" />
                 <div className="mt-6 grid grid-cols-3 gap-3">
                   <SmallProfileStat label="Today" value="0" />
-                  <SmallProfileStat label="Best BP" value={heroCount ? '11,500' : '--'} />
-                  <SmallProfileStat label="Relic Uses" value={relics ? '10' : '--'} />
+                  <SmallProfileStat label="Best BP" value={bestBp} />
+                  <SmallProfileStat label="Relic Uses" value={relics ? relicUses : '--'} />
                 </div>
               </div>
             </section>
@@ -422,9 +415,9 @@ function HomePage({
             <section className="border border-white/8 bg-black/20 p-6">
               <HomeSectionTitle icon={<Gift size={16} />} eyebrow="Status" title="Membership" />
               <div className="mt-6 border border-[#b49664]/25 bg-[#b49664]/8 p-5">
-                <div className="text-sm uppercase tracking-[0.2em] text-stone-100">{user ? 'Standard Forger' : 'Visitor'}</div>
+                <div className="text-sm uppercase tracking-[0.2em] text-stone-100">{user ? membershipTitle : 'Visitor'}</div>
                 <p className="mt-3 text-sm leading-6 text-stone-500">
-                  {user ? 'Daily rewards, Arena queue, Forge, and Vault are available.' : 'Sign in to unlock persistent progress and daily claims.'}
+                  {user ? membershipDescription : 'Sign in to unlock persistent progress and daily claims.'}
                 </p>
               </div>
             </section>
@@ -501,7 +494,7 @@ function HomePage({
                 onClick={() => onNavigate('market')}
                 className="mt-5 w-full border border-[#b49664]/35 bg-[#806838]/35 px-4 py-3 text-[10px] font-semibold uppercase tracking-[0.22em] text-stone-100 transition hover:bg-[#806838]/55"
               >
-                View Deal
+                {previewContentEnabled ? 'View Deal' : 'Open Market'}
               </button>
             </div>
           ))}
@@ -544,7 +537,53 @@ function HomeSectionTitle({ icon, eyebrow, title }: { icon: React.ReactNode; eye
   );
 }
 
-function GuestLandingHome({ onJoin, onNavigate }: { onJoin: () => void; onNavigate: (section: GameSectionKey) => void }) {
+function GuestLandingHome({
+  onJoin,
+  onNavigate,
+  previewContentEnabled,
+}: {
+  onJoin: () => void;
+  onNavigate: (section: GameSectionKey) => void;
+  previewContentEnabled: boolean;
+}) {
+  const guestPanels = previewContentEnabled
+    ? [
+        ['12M+', 'Heroes Forged'],
+        ['2.4M+', 'Battles Fought'],
+        ['850K+', 'Players'],
+        ['∞', 'Legends Remembered'],
+      ]
+    : [
+        ['Forge', 'Turn an image into a persistent hero card'],
+        ['Train', 'Test builds privately before ranked queueing'],
+        ['Arena', 'Enter tactical PvP under BP constraints'],
+        ['Market', 'Recycle Dust and relic inventory inside the loop'],
+      ];
+  const guestTicker = previewContentEnabled
+    ? [
+        ['Latest Battle', 'Angron defeated Lucius in 8 rounds'],
+        ['New Relic', 'Voidwalker Cloak joined the relic vault'],
+        ['System Update', 'Balance patch v1.2.4 adjusts Arena rewards'],
+      ]
+    : [
+        ['MVP Scope', 'Forge, Vault, Train, Arena, Daily rewards, and relic market are in scope.'],
+        ['Chronicle', 'PvE campaign is planned after MVP and does not gate first release.'],
+        ['Payments', 'Recharge and Stripe settlement stay out of the first public build.'],
+      ];
+  const guestStore = previewContentEnabled
+    ? [
+        ['新手大礼', '$6.99'],
+        ['粉尘包', '$9.99'],
+        ['遗物包', '$9.99'],
+      ]
+    : [
+        ['Internal Economy', 'Dust only'],
+        ['Relic Trading', 'Live'],
+        ['Recharge Later', 'Stripe deferred'],
+      ];
+  void guestPanels;
+  void guestTicker;
+  void guestStore;
   return (
     <div className="mx-auto max-w-[1540px] px-6 py-8 2xl:px-8">
       <section className="relative overflow-hidden border border-white/8 bg-[#050505] px-8 py-10 xl:min-h-[650px]">
@@ -685,6 +724,150 @@ function GuestLandingHome({ onJoin, onNavigate }: { onJoin: () => void; onNaviga
   );
 }
 
+function GuestLandingHomeLive({ onJoin, onNavigate }: { onJoin: () => void; onNavigate: (section: GameSectionKey) => void }) {
+  return (
+    <div className="mx-auto max-w-[1540px] px-6 py-8 2xl:px-8">
+      <section className="relative overflow-hidden border border-white/8 bg-[#050505] px-8 py-10 xl:min-h-[650px]">
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_47%_45%,rgba(190,120,54,0.24),transparent_22%),radial-gradient(circle_at_42%_42%,rgba(255,230,170,0.11),transparent_16%),linear-gradient(90deg,rgba(0,0,0,0.36),transparent_42%,rgba(0,0,0,0.58))]" />
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 h-48 bg-gradient-to-t from-black via-black/60 to-transparent" />
+
+        <div className="relative grid gap-8 xl:grid-cols-[minmax(310px,0.85fr)_minmax(360px,520px)_340px] xl:items-center">
+          <div>
+            <div className="text-[10px] uppercase tracking-[0.36em] text-[#b49664]">MVP Beta</div>
+            <h1 className="mt-5 font-display text-6xl font-light uppercase leading-[1.05] tracking-[0.18em] text-stone-100 md:text-7xl">
+              Forge
+              <br />
+              Legends
+            </h1>
+            <p className="mt-6 max-w-xl text-sm leading-7 text-stone-500">
+              Turn an image into a persistent hero card, test it in training, queue for ranked Arena, and recycle Dust and relics inside a server-authoritative game loop.
+            </p>
+            <div className="mt-10 flex flex-wrap items-center gap-4">
+              <button
+                type="button"
+                onClick={onJoin}
+                className="bg-[#806838] px-8 py-4 text-[11px] font-semibold uppercase tracking-[0.24em] text-stone-100 transition hover:bg-[#9a7d4a]"
+              >
+                Join the Forge
+              </button>
+              <button
+                type="button"
+                onClick={() => onNavigate('market')}
+                className="border border-white/10 px-6 py-4 text-[11px] font-semibold uppercase tracking-[0.24em] text-stone-400 transition hover:border-stone-500 hover:text-stone-200"
+              >
+                View Beta Scope
+              </button>
+            </div>
+          </div>
+
+          <div className="relative mx-auto w-full max-w-[420px]">
+            <div className="pointer-events-none absolute inset-x-8 -bottom-7 h-16 rounded-[50%] border border-[#b49664]/25 bg-[#b49664]/15 blur-sm" />
+            <div className="relative border border-[#b49664]/45 bg-black/70 p-4 shadow-[0_0_80px_rgba(180,120,54,0.2)]">
+              <div className="relative min-h-[520px] overflow-hidden border border-white/10 bg-[radial-gradient(circle_at_50%_26%,rgba(210,150,80,0.28),transparent_25%),linear-gradient(180deg,#17100c_0%,#050505_58%,#090909_100%)]">
+                <div className="absolute inset-x-6 top-6 flex items-start justify-between">
+                  <div className="space-y-2">
+                    <div className="text-[10px] uppercase tracking-[0.28em] text-[#d8b06c]">MVP</div>
+                    <div className="inline-flex border border-white/10 bg-black/50 px-3 py-1 text-[10px] uppercase tracking-[0.22em] text-stone-300">Server Authoritative</div>
+                  </div>
+                  <div className="font-display text-3xl font-light text-stone-100">Forge</div>
+                </div>
+                <div className="absolute inset-x-10 top-28 h-56 bg-[radial-gradient(circle_at_50%_30%,rgba(255,226,160,0.35),transparent_18%),radial-gradient(circle_at_50%_62%,rgba(150,58,22,0.38),transparent_30%)]" />
+                <div className="absolute inset-x-8 bottom-8">
+                  <h2 className="font-display text-3xl font-light tracking-[0.12em] text-stone-100">Current Loop</h2>
+                  <p className="mt-3 text-sm leading-6 text-stone-400">Forge, Vault, Train, Arena, Daily rewards, and the relic market are live. Chronicle and recharge are intentionally deferred.</p>
+                  <div className="mt-5 grid grid-cols-2 gap-2 text-[10px] uppercase tracking-[0.18em]">
+                    <span className="border border-emerald-400/25 bg-emerald-400/10 px-2 py-2 text-emerald-200">Forge</span>
+                    <span className="border border-amber-400/25 bg-amber-400/10 px-2 py-2 text-amber-200">Arena</span>
+                    <span className="border border-violet-400/25 bg-violet-400/10 px-2 py-2 text-violet-200">Market</span>
+                    <span className="border border-teal-400/25 bg-teal-400/10 px-2 py-2 text-teal-200">Daily</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <aside className="space-y-5">
+            <div className="grid gap-4">
+              {[
+                ['Forge', 'Turn an image into a persistent hero card'],
+                ['Train', 'Test builds privately before ranked queueing'],
+                ['Arena', 'Enter tactical PvP under BP constraints'],
+                ['Market', 'Recycle Dust and relic inventory inside the loop'],
+              ].map(([value, label]) => (
+                <div key={label} className="grid grid-cols-[70px_1fr] items-center gap-4">
+                  <div className="font-display text-2xl font-light text-stone-100">{value}</div>
+                  <div className="text-[10px] uppercase tracking-[0.24em] text-stone-600">{label}</div>
+                </div>
+              ))}
+            </div>
+            <div className="border border-white/8 bg-black/30 p-5">
+              <HomeSectionTitle icon={<CalendarDays size={16} />} eyebrow="Daily" title="Ritual Preview" />
+              <DailyPreview />
+            </div>
+          </aside>
+        </div>
+      </section>
+
+      <section className="grid border-x border-b border-white/8 bg-black/20 xl:grid-cols-3">
+        {[
+          ['Vault', 'Your heroes. Eternal record.', 'vault'],
+          ['Arena', 'Tactical battles. Real consequences.', 'arena'],
+          ['Relics', 'Ancient relics. Alter fate.', 'market'],
+        ].map(([title, description, target]) => (
+          <button
+            key={title}
+            type="button"
+            onClick={() => onNavigate(target as GameSectionKey)}
+            className="min-h-56 border-t border-white/8 p-8 text-left transition hover:bg-white/[0.03] xl:border-t-0 xl:border-r xl:last:border-r-0"
+          >
+            <div className="text-[10px] uppercase tracking-[0.28em] text-[#b49664]">{title}</div>
+            <div className="mt-4 font-display text-2xl font-light uppercase leading-8 tracking-[0.12em] text-stone-100">{description}</div>
+            <div className="mt-10 text-[10px] uppercase tracking-[0.24em] text-[#d8b06c]">Enter {title}</div>
+          </button>
+        ))}
+      </section>
+
+      <section className="grid border-x border-b border-white/8 bg-black/30 xl:grid-cols-[1fr_1fr_1fr_220px]">
+        {[
+          ['MVP Scope', 'Forge, Vault, Train, Arena, Daily rewards, and relic market are in scope.'],
+          ['Chronicle', 'PvE campaign is planned after MVP and does not gate first release.'],
+          ['Payments', 'Recharge and Stripe settlement stay out of the first public build.'],
+        ].map(([label, value]) => (
+          <div key={label} className="border-b border-white/8 px-8 py-5 xl:border-b-0 xl:border-r">
+            <div className="text-[9px] uppercase tracking-[0.24em] text-[#b49664]">{label}</div>
+            <div className="mt-2 text-sm leading-6 text-stone-500">{value}</div>
+          </div>
+        ))}
+        <button
+          type="button"
+          onClick={() => onNavigate('home')}
+          className="px-8 py-5 text-left text-[10px] uppercase tracking-[0.24em] text-[#d8b06c] hover:bg-white/[0.03]"
+        >
+          View All News
+        </button>
+      </section>
+
+      <section className="mt-6">
+        <div className="border border-white/8 bg-black/20 p-6">
+          <HomeSectionTitle icon={<Gift size={16} />} eyebrow="Economy" title="Launch Scope" />
+          <div className="mt-5 grid gap-4 md:grid-cols-3">
+            {[
+              ['Internal Economy', 'Dust only'],
+              ['Relic Trading', 'Live'],
+              ['Recharge Later', 'Stripe deferred'],
+            ].map(([title, price]) => (
+              <div key={title} className="border border-white/8 bg-black/30 p-4">
+                <div className="text-sm uppercase tracking-[0.18em] text-stone-200">{title}</div>
+                <div className="mt-3 font-display text-2xl font-light text-stone-100">{price}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function SmallProfileStat({ label, value }: { label: string; value: string | number }) {
   return (
     <div className="border border-white/8 bg-black/25 px-4 py-3">
@@ -731,7 +914,7 @@ function DailyPreview() {
       {[
         ['Daily Sign In', '+30 Dust', 'Login to claim today.'],
         ['Forge One Card', '+100 Dust', 'Create a hero in Forge.'],
-        ['Use One Relic', '+300 Dust', 'Enchant a forge with relic power.'],
+        ['Use One Relic', '+300 Dust', 'Enchant an existing card with relic power.'],
       ].map(([title, reward, description]) => (
         <div key={title} className="border border-white/8 bg-black/30 p-4">
           <div className="flex items-center justify-between gap-3">
@@ -808,9 +991,6 @@ const App: React.FC = () => {
   const [authMessage, setAuthMessage] = useState('');
   const [economy, setEconomy] = useState<EconomySnapshot | null>(null);
   const [savedHeroes, setSavedHeroes] = useState<SavedHero[]>([]);
-  const [materials, setMaterials] = useState<MaterialInventory>(readStoredMaterials);
-  const [forgeSpend, setForgeSpend] = useState<MaterialInventory>(createEmptyInventory());
-  const [lastForgeInfusion, setLastForgeInfusion] = useState<MaterialInventory>(createEmptyInventory());
   const [image, setImage] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [character, setCharacter] = useState<CharacterData | null>(null);
@@ -840,17 +1020,19 @@ const App: React.FC = () => {
 
   useEffect(() => {
     const boot = async () => {
-      const stored = getStoredSession();
-      if (!stored) {
+      if (IS_MOCK_MODE) {
+        const mockSession = createMockSession();
+        setSession(mockSession);
+        setUser({ id: 'mock-user', email: mockSession.email, expires_at: mockSession.expiresAt });
+        setEmail(mockSession.email);
+        setEconomy(mockEconomy);
+        setSavedHeroes(mockHeroes);
         setBooting(false);
         return;
       }
-      if (stored.token === 'mock-token') {
-        setSession(stored);
-        setUser({ id: 'mock-user', email: stored.email, expires_at: stored.expiresAt });
-        setEmail(stored.email);
-        setEconomy(mockEconomy);
-        setSavedHeroes(mockHeroes);
+
+      const stored = getStoredSession();
+      if (!stored) {
         setBooting(false);
         return;
       }
@@ -882,10 +1064,6 @@ const App: React.FC = () => {
   }, [cooldown]);
 
   useEffect(() => {
-    localStorage.setItem(MATERIAL_STORAGE_KEY, JSON.stringify(materials));
-  }, [materials]);
-
-  useEffect(() => {
     window.scrollTo({ top: 0, left: 0 });
   }, [activeSection]);
 
@@ -899,6 +1077,7 @@ const App: React.FC = () => {
       cooldown={cooldown}
       authError={authError}
       authMessage={authMessage}
+      showMockLogin={IS_MOCK_MODE}
       onEmailChange={setEmail}
       onCodeChange={setCode}
       onRequestCode={async () => {
@@ -950,7 +1129,8 @@ const App: React.FC = () => {
         }
       }}
       onMockLogin={() => {
-        const mockSession = { token: 'mock-token', email: 'forger@example.com', expiresAt: new Date(Date.now() + 86400000).toISOString() };
+        if (!IS_MOCK_MODE) return;
+        const mockSession = createMockSession();
         setStoredSession(mockSession);
         setSession(mockSession);
         setUser({ id: 'mock-user', email: mockSession.email, expires_at: mockSession.expiresAt });
@@ -964,19 +1144,13 @@ const App: React.FC = () => {
   );
 
   const isAuthenticated = Boolean(user);
-  const demoMode = session?.token === 'mock-token';
+  const demoMode = IS_MOCK_MODE;
   const handleNavigate = (section: GameSectionKey) => {
     if (section === 'home') setHomeTab('welcome');
     if (section === 'forge') setForgeTab('create');
     setActiveSection(section);
   };
-  const forgePreviewInfusions = useMemo(() => materialInfusions(lastForgeInfusion), [lastForgeInfusion]);
-
   const handleImageSelect = async (file: File) => {
-    const selectedKey = MATERIAL_DEFINITIONS.find(({ key }) => forgeSpend[key] > 0 && materials[key] > 0)?.key;
-    const spendSnapshot = createEmptyInventory();
-    if (selectedKey) spendSnapshot[selectedKey] = 1;
-
     const base64Image = await new Promise<string>((resolve) => {
       const reader = new FileReader();
       reader.onloadend = () => resolve(reader.result as string);
@@ -991,10 +1165,9 @@ const App: React.FC = () => {
     try {
       const token = session?.token ?? getStoredToken();
       if (!token || token === 'mock-token') throw new Error('Login with a real session to forge cards.');
-      const heroData = await forgeHero(file, spendSnapshot, token);
+      const heroData = await forgeHero(file, token);
       const normalizedHero = normalizeCharacterData(heroData);
       setCharacter(normalizedHero);
-      setLastForgeInfusion(spendSnapshot);
       const refreshedHeroes = await reloadCollections(token);
       const forgedHeroId = refreshedHeroes.find((hero) => hero.character.name === normalizedHero.name)?.id ?? refreshedHeroes[0]?.id;
       if (forgedHeroId) {
@@ -1002,14 +1175,6 @@ const App: React.FC = () => {
           hero.id === forgedHeroId ? { ...hero, image: base64Image } : hero
         )));
       }
-      setMaterials((prev) => {
-        const next = { ...prev };
-        MATERIAL_DEFINITIONS.forEach(({ key }) => {
-          next[key] = Math.max(0, next[key] - spendSnapshot[key]);
-        });
-        return next;
-      });
-      setForgeSpend(createEmptyInventory());
     } catch (forgeError) {
       setError(forgeError instanceof Error ? forgeError.message : 'Forging failed.');
     } finally {
@@ -1021,18 +1186,17 @@ const App: React.FC = () => {
     setImage(null);
     setCharacter(null);
     setError(null);
-    setLastForgeInfusion(createEmptyInventory());
-    setForgeSpend(createEmptyInventory());
   };
 
   const findRelicDefinition = (relicId: string) => {
-    const catalog = economy?.relic_catalog?.length ? economy.relic_catalog : mockRelicCatalog;
+    const catalog = economy?.relic_catalog?.length ? economy.relic_catalog : IS_MOCK_MODE ? mockRelicCatalog : [];
     return catalog.find((relic) => relic.relic_type === relicId);
   };
 
   const updateRelicAmount = (relicId: string, delta: number) => {
     setEconomy((prev) => {
-      const base = prev ?? mockEconomy;
+      const base = prev ?? (IS_MOCK_MODE ? mockEconomy : null);
+      if (!base) return prev;
       return {
         ...base,
         relics: base.relics.map((relic) => (
@@ -1063,6 +1227,11 @@ const App: React.FC = () => {
       return;
     }
 
+    if (!IS_MOCK_MODE) {
+      setError('Login with a live session to equip relics.');
+      return;
+    }
+
     setSavedHeroes((prev) => prev.map((hero) => (
       hero.id === heroId ? { ...hero, equippedRelicId: relicId } : hero
     )));
@@ -1078,6 +1247,11 @@ const App: React.FC = () => {
       } catch (enchantError) {
         setError(enchantError instanceof Error ? enchantError.message : 'Failed to enchant card.');
       }
+      return;
+    }
+
+    if (!IS_MOCK_MODE) {
+      setError('Login with a live session to enchant cards.');
       return;
     }
 
@@ -1117,6 +1291,11 @@ const App: React.FC = () => {
       return;
     }
 
+    if (!IS_MOCK_MODE) {
+      setError('Login with a live session to wash enchantments.');
+      return;
+    }
+
     setSavedHeroes((prev) => prev.map((hero) => {
       if (hero.id !== heroId || !hero.enchantment || hero.enchantment.removedAt) return hero;
       return {
@@ -1142,6 +1321,7 @@ const App: React.FC = () => {
           onNavigate={handleNavigate}
           onEconomyChange={setEconomy}
           onOpenAuth={() => setAuthOpen(true)}
+          previewContentEnabled={IS_MOCK_MODE}
         />
       );
     }
@@ -1177,11 +1357,9 @@ const App: React.FC = () => {
           error={error}
           resultImage={image}
           resultHero={character}
-          selectedInfusions={forgePreviewInfusions}
           heroes={savedHeroes}
           economy={economy}
-          materials={materials}
-          materialDefinitions={MATERIAL_DEFINITIONS}
+          demoMode={demoMode}
           activeTab={forgeTab}
           onEquipRelic={handleEquipRelic}
           onEnchantHero={handleEnchantHero}
@@ -1214,16 +1392,18 @@ const App: React.FC = () => {
         <PlaceholderPage
           eyebrow="Chronicle"
           title="Chronicle"
-          description="PvE run content will live here. The page now uses the new game client shell and is ready for the next UX pass."
+          description="Chronicle is reserved for the future PvE campaign branch. It is intentionally not part of the first MVP release, so the current live loop stays focused on Forge, Vault, Train, Arena, Daily rewards, and the relic market."
         />
       );
     }
 
     return (
-      <PlaceholderPage
-        eyebrow="Market"
-        title="Market"
-        description="Relic trading and limited item surfaces will be implemented here. Missing item art can use the same dark placeholders as Vault."
+      <MarketPage
+        heroes={savedHeroes}
+        economy={economy}
+        token={session?.token ?? getStoredToken()}
+        demoMode={demoMode}
+        onEconomyChange={setEconomy}
       />
     );
   })();

@@ -10,6 +10,8 @@ import pytest
 from PIL import Image
 
 import battle_logic
+from market_logic import relic_market_quote
+from relic_catalog import get_relic_catalog
 from relic_catalog import get_low_tier_relic_types
 
 
@@ -240,6 +242,164 @@ def test_initial_economy_includes_relic_catalog(harness):
     assert ember["display_name"] == "Ember Shard"
     assert ember["tier"] == "common"
     assert "soulslike item icon" in ember["icon_prompt"]
+
+
+@pytest.mark.integration
+def test_market_relic_buy_updates_wallet_inventory_and_ledger(harness):
+    headers = harness.login("integration-market-buy@example.com")
+
+    response = harness.client.post(
+        "/api/market/relics/buy",
+        headers=headers,
+        json={"relicType": "low_ember_shard", "quantity": 2},
+    )
+    harness.trace("market-buy", response)
+    assert response.status_code == 200, response.get_data(as_text=True)
+
+    payload = response.get_json()
+    assert payload["ok"] is True
+    assert payload["trade"]["side"] == "buy"
+    assert payload["trade"]["relicType"] == "low_ember_shard"
+    assert payload["trade"]["quantity"] == 2
+
+    quote = relic_market_quote("low_ember_shard", get_relic_catalog())
+    expected_total = int(quote["ask_price"]) * 2
+    assert payload["trade"]["unitPrice"] == int(quote["ask_price"])
+    assert payload["trade"]["totalPrice"] == expected_total
+
+    economy = payload["economy"]
+    assert economy["wallet"]["dust_balance"] == 500 - expected_total
+    ember_row = next(row for row in economy["relics"] if row["relic_type"] == "low_ember_shard")
+    assert ember_row["amount"] == 2
+
+    market_transactions = [row for row in economy["transactions"] if row["reason"] == "market_buy_relic"]
+    assert len(market_transactions) == 2
+    dust_txn = next(row for row in market_transactions if row["resource_type"] == "dust")
+    relic_txn = next(row for row in market_transactions if row["resource_type"] == "relic")
+    assert dust_txn["delta"] == -expected_total
+    assert relic_txn["resource_key"] == "low_ember_shard"
+    assert relic_txn["delta"] == 2
+
+
+@pytest.mark.integration
+def test_market_board_snapshot_returns_server_authored_sections(harness):
+    headers = harness.login("integration-market-board@example.com")
+
+    response = harness.client.get("/api/market/board", headers=headers)
+    harness.trace("market-board", response)
+    assert response.status_code == 200, response.get_data(as_text=True)
+
+    payload = response.get_json()["data"]
+    assert isinstance(payload["relic_listings"], list)
+    assert isinstance(payload["featured_relics"], list)
+    assert isinstance(payload["broker_offers"], list)
+    assert isinstance(payload["order_tape"], list)
+    assert isinstance(payload["notes"], list)
+    assert payload["broker_offers"]
+
+    ember = next(row for row in payload["relic_listings"] if row["relic_type"] == "low_ember_shard")
+    quote = relic_market_quote("low_ember_shard", get_relic_catalog())
+    assert ember["ask_price"] == int(quote["ask_price"])
+    assert ember["bid_price"] == int(quote["bid_price"])
+    assert ember["category"] == "artifact"
+    assert ember["icon_path"].endswith("/Ember%20Shard.png")
+    assert ember["owned_amount"] == 0
+
+
+@pytest.mark.integration
+def test_market_board_order_tape_prefers_real_transactions(harness):
+    headers = harness.login("integration-market-board-tape@example.com")
+
+    buy_response = harness.client.post(
+        "/api/market/relics/buy",
+        headers=headers,
+        json={"relicType": "low_ember_shard", "quantity": 1},
+    )
+    harness.trace("market-board-buy", buy_response)
+    assert buy_response.status_code == 200, buy_response.get_data(as_text=True)
+
+    response = harness.client.get("/api/market/board", headers=headers)
+    harness.trace("market-board-after-buy", response)
+    assert response.status_code == 200, response.get_data(as_text=True)
+
+    payload = response.get_json()["data"]
+    assert any(entry["action"] == "Bought from market" for entry in payload["order_tape"])
+    assert any(entry["label"] == "low_ember_shard" for entry in payload["order_tape"])
+
+
+@pytest.mark.integration
+def test_market_relic_sell_updates_wallet_inventory_and_ledger(harness):
+    headers = harness.login("integration-market-sell@example.com")
+    user_id = harness.last_user["id"]
+    harness.grant_relic(user_id, "low_ember_shard", 3)
+
+    response = harness.client.post(
+        "/api/market/relics/sell",
+        headers=headers,
+        json={"relicType": "low_ember_shard", "quantity": 2},
+    )
+    harness.trace("market-sell", response)
+    assert response.status_code == 200, response.get_data(as_text=True)
+
+    payload = response.get_json()
+    assert payload["ok"] is True
+    assert payload["trade"]["side"] == "sell"
+    assert payload["trade"]["relicType"] == "low_ember_shard"
+    assert payload["trade"]["quantity"] == 2
+
+    quote = relic_market_quote("low_ember_shard", get_relic_catalog())
+    expected_total = int(quote["bid_price"]) * 2
+    assert payload["trade"]["unitPrice"] == int(quote["bid_price"])
+    assert payload["trade"]["totalPrice"] == expected_total
+
+    economy = payload["economy"]
+    assert economy["wallet"]["dust_balance"] == 500 + expected_total
+    ember_row = next(row for row in economy["relics"] if row["relic_type"] == "low_ember_shard")
+    assert ember_row["amount"] == 1
+
+    market_transactions = [row for row in economy["transactions"] if row["reason"] == "market_sell_relic"]
+    assert len(market_transactions) == 2
+    dust_txn = next(row for row in market_transactions if row["resource_type"] == "dust")
+    relic_txn = next(row for row in market_transactions if row["resource_type"] == "relic")
+    assert dust_txn["delta"] == expected_total
+    assert relic_txn["resource_key"] == "low_ember_shard"
+    assert relic_txn["delta"] == -2
+
+
+@pytest.mark.integration
+def test_market_relic_buy_rejects_insufficient_dust(harness):
+    headers = harness.login("integration-market-no-dust@example.com")
+
+    response = harness.client.post(
+        "/api/market/relics/buy",
+        headers=headers,
+        json={"relicType": "named_echo_heart", "quantity": 1},
+    )
+    harness.trace("market-buy-insufficient-dust", response)
+    assert response.status_code == 400
+    assert response.get_json()["error"] == "Insufficient dust"
+
+    economy = harness.economy(headers)
+    assert economy["wallet"]["dust_balance"] == 500
+    assert economy["relics"] == []
+
+
+@pytest.mark.integration
+def test_market_relic_sell_rejects_insufficient_inventory(harness):
+    headers = harness.login("integration-market-no-relics@example.com")
+
+    response = harness.client.post(
+        "/api/market/relics/sell",
+        headers=headers,
+        json={"relicType": "low_ember_shard", "quantity": 1},
+    )
+    harness.trace("market-sell-insufficient-relics", response)
+    assert response.status_code == 400
+    assert response.get_json()["error"] == "Insufficient relics"
+
+    economy = harness.economy(headers)
+    assert economy["wallet"]["dust_balance"] == 500
+    assert economy["relics"] == []
 
 
 @pytest.mark.integration
