@@ -109,7 +109,7 @@ export function VfxTestPage() {
   }
 
   return (
-    <div className="mx-auto min-h-[calc(100vh-74px)] max-w-[1680px] px-6 py-8 xl:px-8">
+    <div className="mx-auto min-h-[calc(100vh-74px)] max-w-[1680px] px-3 py-5 sm:px-6 sm:py-8 xl:px-8">
       <PageHeader
         title="VFX"
         eyebrow="Battle Lab"
@@ -179,7 +179,7 @@ export function VfxTestPage() {
                         setSequence((value) => value + 1);
                       }}
                       className={cn(
-                        'min-h-10 border px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-[0.16em] transition',
+                        'min-h-11 border px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-[0.16em] transition',
                         active
                           ? 'border-[#d8b06c]/70 bg-[#d8b06c]/10 text-stone-100'
                           : 'border-white/8 bg-black/24 text-stone-500 hover:border-white/18 hover:text-stone-300'
@@ -276,7 +276,7 @@ export function VfxTestPage() {
               <button
                 type="button"
                 onClick={resetFormation}
-                className="mt-3 inline-flex items-center gap-2 border border-white/10 px-3 py-2 text-[10px] uppercase tracking-[0.2em] text-stone-400 transition hover:border-stone-500 hover:text-stone-100"
+                className="mt-3 inline-flex min-h-11 items-center gap-2 border border-white/10 px-3 py-2 text-[10px] uppercase tracking-[0.2em] text-stone-400 transition hover:border-stone-500 hover:text-stone-100"
               >
                 <RotateCcw size={13} />
                 Reset formation

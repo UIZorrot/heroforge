@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { resolveBattleActionVfx } from './battleActionVfxCatalog';
+import { battleActionVfxDefinitions, resolveBattleActionVfx } from './battleActionVfxCatalog';
+import { namedActionVfxAssetsFor } from './battleNamedActionVfxAssets';
 import type { BattleEvent } from './battleTypes';
 
 function event(overrides: Partial<BattleEvent>): BattleEvent {
@@ -12,18 +13,27 @@ function event(overrides: Partial<BattleEvent>): BattleEvent {
 }
 
 describe('battle action VFX contracts', () => {
-  it('routes basic attacks to the bespoke treatment', () => {
-    expect(resolveBattleActionVfx(event({ actionType: 'attack', typeCatalog: 'instant', typeEffect: 'slash' }))?.id).toBe('basic-attack');
-    expect(resolveBattleActionVfx(event({ actionType: 'attack', typeCatalog: 'proj', typeEffect: 'gun' }))).toBeNull();
+  it('covers the basic attack and every real starter skill with an independent texture', () => {
+    expect(battleActionVfxDefinitions).toHaveLength(17);
+    expect(new Set(battleActionVfxDefinitions.map((definition) => definition.assetId))).toHaveLength(17);
+    for (const definition of battleActionVfxDefinitions) {
+      expect(namedActionVfxAssetsFor(definition).map((asset) => asset.id)).toContain(definition.assetId);
+    }
   });
 
-  it('requires Witchflame Cut to remain instant fire', () => {
-    expect(resolveBattleActionVfx(event({ skillName: 'Witchflame Cut', typeCatalog: 'instant', typeEffect: 'fire' }))?.id).toBe('witchflame-cut');
+  it('resolves every generated contract without mutating its gameplay fields', () => {
+    for (const definition of battleActionVfxDefinitions) {
+      expect(resolveBattleActionVfx(event({
+        actionType: definition.actionType,
+        skillName: definition.skillName ?? undefined,
+        typeCatalog: definition.typeCatalog,
+        typeEffect: definition.typeEffect,
+      }))?.id).toBe(definition.id);
+    }
+  });
+
+  it('rejects similarly named events when their catalog contract is wrong', () => {
     expect(resolveBattleActionVfx(event({ skillName: 'Witchflame Cut', typeCatalog: 'proj', typeEffect: 'fire' }))).toBeNull();
-  });
-
-  it('requires Arcane Comet to remain projectile magic', () => {
-    expect(resolveBattleActionVfx(event({ skillName: 'Arcane Comet', type_catalog: 'proj', type_effect: 'magic' }))?.id).toBe('arcane-comet');
     expect(resolveBattleActionVfx(event({ skillName: 'Arcane Comet', typeCatalog: 'instant', typeEffect: 'magic' }))).toBeNull();
   });
 });

@@ -14,7 +14,7 @@ import {
 } from '../lib/battleVfxAssets';
 import { resolveBattleVfxDescriptor, type BattleVfxMode, type BattleVfxTone } from '../lib/battleVfxCatalog';
 import { resolveBattleActionVfx } from '../lib/battleActionVfxCatalog';
-import { battleNamedActionVfxAssets } from '../lib/battleNamedActionVfxAssets';
+import { namedActionVfxAssetsFor } from '../lib/battleNamedActionVfxAssets';
 import { renderNamedActionVfx } from '../lib/battleNamedActionRenderer';
 import type { BattleBoardState, BattleBoardUnit, BattleEvent, BattleResult } from '../lib/battleTypes';
 import {
@@ -491,8 +491,8 @@ function FormationGrid({
   }
 
   return (
-    <div className="w-[284px] shrink-0 xl:w-[300px] 2xl:w-[316px]">
-      <div className="grid grid-cols-[130px_130px] grid-rows-[196px_196px_196px] justify-center gap-x-6 gap-y-5 xl:grid-cols-[136px_136px] xl:grid-rows-[204px_204px_204px] 2xl:grid-cols-[144px_144px] 2xl:grid-rows-[216px_216px_216px]">
+    <div className="relative h-[345px] w-[158px] shrink-0 sm:h-[452px] sm:w-[204px] md:h-[540px] md:w-[244px] lg:h-[628px] lg:w-[284px] xl:h-[652px] xl:w-[300px] 2xl:h-[688px] 2xl:w-[316px]">
+      <div className="absolute left-1/2 top-0 grid origin-top -translate-x-1/2 scale-[0.55] grid-cols-[130px_130px] grid-rows-[196px_196px_196px] justify-center gap-x-6 gap-y-5 sm:scale-[0.72] md:scale-[0.86] lg:scale-100 xl:grid-cols-[136px_136px] xl:grid-rows-[204px_204px_204px] 2xl:grid-cols-[144px_144px] 2xl:grid-rows-[216px_216px_216px]">
         {slots.map((slot) => {
           const unit = boardSlotUnit(units, slot.slot);
           return (
@@ -658,12 +658,6 @@ type BattleVfxTextures = {
   slash: Texture;
   impact: Texture;
   ring: Texture;
-  namedActions: {
-    basicAttack: Texture;
-    witchflameCut: Texture;
-    arcaneCometProjectile: Texture;
-    arcaneCometImpact: Texture;
-  };
 };
 
 function pixiPalette(tone: BattleVfxTone): PixiPalette {
@@ -865,12 +859,6 @@ function createBattleVfxTextures(loadedTextures: Record<string, Texture>): Battl
     slash: loadedTextures.slashStreak,
     impact: loadedTextures.impactBurst,
     ring: loadedTextures.ring,
-    namedActions: {
-      basicAttack: createBlackBackedVfxRuntimeTexture(loadedTextures.basicAttack),
-      witchflameCut: createBlackBackedVfxRuntimeTexture(loadedTextures.witchflameCut),
-      arcaneCometProjectile: createBlackBackedVfxRuntimeTexture(loadedTextures.arcaneCometProjectile),
-      arcaneCometImpact: createBlackBackedVfxRuntimeTexture(loadedTextures.arcaneCometImpact),
-    },
   };
 }
 
@@ -1919,6 +1907,7 @@ function BattleEffectLayer({ board, event, disabled }: { board: BattleBoardState
   const appRef = useRef<Application | null>(null);
   const layerRef = useRef<Container | null>(null);
   const texturesRef = useRef<BattleVfxTextures | null>(null);
+  const namedTexturesRef = useRef<Record<string, Texture>>({});
   const tweensRef = useRef<gsap.core.Tween[]>([]);
   const tickerCleanupRef = useRef<TickerCleanup[]>([]);
   const [renderToken, setRenderToken] = useState(0);
@@ -1940,9 +1929,9 @@ function BattleEffectLayer({ board, event, disabled }: { board: BattleBoardState
         resolution: Math.min(window.devicePixelRatio || 1, 2),
         preference: 'webgl',
       });
-      const loadedEntries = await Promise.all(
-        [...battleVfxTextureAssets, ...battleNamedActionVfxAssets].map(async (asset) => [asset.id, await Assets.load<Texture>(asset.src)] as const)
-      );
+      const loadedEntries = await Promise.all(battleVfxTextureAssets.map(
+        async (asset) => [asset.id, await Assets.load<Texture>(asset.src)] as const,
+      ));
       initialized = true;
       if (disposed) {
         app.destroy(true);
@@ -1966,6 +1955,7 @@ function BattleEffectLayer({ board, event, disabled }: { board: BattleBoardState
       tweensRef.current = [];
       layerRef.current = null;
       texturesRef.current = null;
+      namedTexturesRef.current = {};
       appRef.current = null;
       if (initialized) {
         app.destroy(true);
@@ -1994,6 +1984,24 @@ function BattleEffectLayer({ board, event, disabled }: { board: BattleBoardState
 
     const mode = eventVfxMode(event);
     const namedAction = resolveBattleActionVfx(event);
+    if (namedAction) {
+      const assets = namedActionVfxAssetsFor(namedAction);
+      const missingAssets = assets.filter((asset) => !namedTexturesRef.current[asset.id]);
+      if (missingAssets.length) {
+        let cancelled = false;
+        void Promise.all(missingAssets.map(async (asset) => {
+          const source = await Assets.load<Texture>(asset.src);
+          return [asset.id, createBlackBackedVfxRuntimeTexture(source)] as const;
+        })).then((entries) => {
+          if (cancelled) return;
+          Object.assign(namedTexturesRef.current, Object.fromEntries(entries));
+          setRenderToken((value) => value + 1);
+        });
+        return () => {
+          cancelled = true;
+        };
+      }
+    }
     const tone = eventVfxTone(event);
     const palette = pixiPalette(tone);
     const profile = createProjectileVfxProfile(event);
@@ -2035,7 +2043,7 @@ function BattleEffectLayer({ board, event, disabled }: { board: BattleBoardState
         end,
         event,
         action: namedAction,
-        textures: textures.namedActions,
+        textures: namedTexturesRef.current,
       });
       return;
     }
@@ -2144,7 +2152,7 @@ function ArenaStage({
   onUnitSlotChange?: (unitTag: string, slot: number) => void;
 }) {
   return (
-    <section className="relative min-h-[clamp(720px,78vh,820px)] overflow-hidden border border-[#2b241b] bg-[#050505] pb-12">
+    <section className="relative min-h-[480px] overflow-hidden border border-[#2b241b] bg-[#050505] pb-6 sm:min-h-[590px] sm:pb-9 lg:min-h-[clamp(720px,78vh,820px)] lg:pb-12">
       <div
         className="pointer-events-none absolute inset-0 bg-cover bg-center opacity-80"
         style={{
@@ -2158,24 +2166,24 @@ function ArenaStage({
       <BattleEffectLayer board={board} event={currentEvent} disabled={reducedMotion} />
       <BattleFloatingTextLayer event={currentEvent} disabled={reducedMotion} />
 
-      <div className="relative z-10 min-h-20 px-6 pt-5">
-        <div className="absolute left-6 top-5">
+      <div className="relative z-10 min-h-20 px-3 pt-4 sm:px-6 sm:pt-5">
+        <div className="absolute left-3 top-4 hidden sm:block sm:left-6 sm:top-5">
           <div className="text-[10px] uppercase tracking-[0.3em] text-stone-600">Round</div>
           <div className="mt-1 text-xl font-light text-stone-100">{board.round}</div>
         </div>
         <div className="absolute left-1/2 top-5 -translate-x-1/2 text-center">
           <div className="text-[10px] uppercase tracking-[0.34em] text-stone-500">Round {board.round} / {Math.max(board.round, totalRounds)}</div>
-          <div className="mt-1 font-display text-2xl font-light uppercase tracking-[0.28em] text-[#e3c589]">
+          <div className="mt-1 max-w-[220px] truncate font-display text-lg font-light uppercase tracking-[0.2em] text-[#e3c589] sm:max-w-none sm:text-2xl sm:tracking-[0.28em]">
             {currentEvent?.skillName ?? (currentEvent?.actionType === 'attack' ? 'Basic Attack' : 'Combat')}
           </div>
           {currentEvent?.typeCatalog && currentEvent?.typeEffect ? (
             <div className="mt-1 text-[9px] uppercase tracking-[0.24em] text-stone-500">{currentEvent.typeCatalog} / {currentEvent.typeEffect}</div>
           ) : null}
-          <div className="mx-auto mt-2 h-px w-52 bg-gradient-to-r from-transparent via-[#b49664] to-transparent" />
+          <div className="mx-auto mt-2 h-px w-36 bg-gradient-to-r from-transparent via-[#b49664] to-transparent sm:w-52" />
         </div>
       </div>
 
-      <div className="relative z-10 mx-auto mt-7 grid w-full max-w-[980px] grid-cols-[minmax(0,1fr)_96px_minmax(0,1fr)] items-center gap-10 px-6 pb-10 2xl:max-w-[1040px] 2xl:gap-12">
+      <div className="relative z-10 mx-auto mt-3 grid w-full max-w-[980px] grid-cols-[minmax(0,1fr)_32px_minmax(0,1fr)] items-center gap-1 px-1 pb-6 sm:mt-5 sm:grid-cols-[minmax(0,1fr)_52px_minmax(0,1fr)] sm:gap-2 sm:px-3 md:grid-cols-[minmax(0,1fr)_72px_minmax(0,1fr)] md:gap-4 lg:mt-7 lg:grid-cols-[minmax(0,1fr)_96px_minmax(0,1fr)] lg:gap-8 lg:px-6 lg:pb-10 2xl:max-w-[1040px] 2xl:gap-12">
         <FormationGrid
           units={board.bottom}
           side="forger"
@@ -2183,14 +2191,14 @@ function ArenaStage({
           editUnitSlots={editUnitSlots}
           onUnitSlotChange={onUnitSlotChange}
         />
-        <div className="flex min-h-[628px] flex-col items-center justify-center 2xl:min-h-[688px]">
-          <div className="h-32 w-px bg-gradient-to-b from-transparent via-[#b49664]/46 to-transparent" />
-          <div className="relative my-5 flex h-28 w-28 items-center justify-center">
+        <div className="flex min-h-[345px] flex-col items-center justify-center sm:min-h-[452px] md:min-h-[540px] lg:min-h-[628px] 2xl:min-h-[688px]">
+          <div className="h-20 w-px bg-gradient-to-b from-transparent via-[#b49664]/46 to-transparent sm:h-24 lg:h-32" />
+          <div className="relative my-3 flex h-8 w-8 items-center justify-center sm:my-4 sm:h-12 sm:w-12 md:h-16 md:w-16 lg:my-5 lg:h-28 lg:w-28">
             <div className="pointer-events-none absolute inset-0 rounded-full border border-[#b49664]/18 shadow-[inset_0_0_24px_rgba(216,176,108,0.08),0_0_34px_rgba(216,176,108,0.08)]" />
             <div className="pointer-events-none absolute inset-4 rounded-full border border-[#b49664]/10" />
-            <div className="font-display text-3xl font-light tracking-[0.08em] text-[#d8b06c]/90">VS</div>
+            <div className="font-display text-sm font-light tracking-[0.08em] text-[#d8b06c]/90 sm:text-lg lg:text-3xl">VS</div>
           </div>
-          <div className="h-32 w-px bg-gradient-to-b from-transparent via-[#b49664]/46 to-transparent" />
+          <div className="h-20 w-px bg-gradient-to-b from-transparent via-[#b49664]/46 to-transparent sm:h-24 lg:h-32" />
         </div>
         <FormationGrid
           units={board.top}
@@ -2290,7 +2298,7 @@ export function ArenaBattleScene({
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between gap-4 border border-[#2b241b] bg-black/30 px-4 py-3">
+      <div className="flex flex-col items-stretch justify-between gap-3 border border-[#2b241b] bg-black/30 px-3 py-3 sm:flex-row sm:items-center sm:gap-4 sm:px-4">
         <div className="min-w-0">
           <div className="text-[10px] uppercase tracking-[0.28em] text-[#b49664]">Battle Control</div>
           <div className="mt-1 truncate text-xs text-stone-500">
@@ -2300,7 +2308,7 @@ export function ArenaBattleScene({
             {currentEvent ? `${eventActionLabel(currentEvent)} · ${currentEvent.attacker} to ${currentEvent.defender}` : 'Waiting for combat feed'}
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center justify-end gap-2">
           <div className="hidden text-[10px] uppercase tracking-[0.2em] text-stone-600 sm:block">
             {started && events.length ? safeEventIndex + 1 : 0} / {events.length}
           </div>
@@ -2314,7 +2322,7 @@ export function ArenaBattleScene({
               setIsPlaying((value) => !value);
             }}
             disabled={!events.length || (started && reducedMotion)}
-            className="flex h-9 items-center justify-center gap-2 border border-white/10 bg-black/45 px-3 text-[10px] uppercase tracking-[0.18em] text-stone-300 transition hover:border-[#b49664]/45 hover:text-[#f0d8ad] disabled:cursor-not-allowed disabled:opacity-40"
+            className="flex h-11 items-center justify-center gap-2 border border-white/10 bg-black/45 px-4 text-[10px] uppercase tracking-[0.18em] text-stone-300 transition hover:border-[#b49664]/45 hover:text-[#f0d8ad] disabled:cursor-not-allowed disabled:opacity-40"
             aria-label={isPlaying ? 'Pause battle playback' : 'Play battle playback'}
           >
             {isPlaying ? <Pause size={15} /> : <Play size={15} />}
@@ -2324,7 +2332,7 @@ export function ArenaBattleScene({
             type="button"
             onClick={restartPlayback}
             disabled={!started}
-            className="flex h-9 w-9 items-center justify-center border border-white/10 bg-black/45 text-stone-300 transition hover:border-[#b49664]/45 hover:text-[#f0d8ad] disabled:cursor-not-allowed disabled:opacity-40"
+            className="flex h-11 w-11 items-center justify-center border border-white/10 bg-black/45 text-stone-300 transition hover:border-[#b49664]/45 hover:text-[#f0d8ad] disabled:cursor-not-allowed disabled:opacity-40"
             aria-label="Restart battle playback"
           >
             <RotateCcw size={15} />

@@ -1,17 +1,11 @@
 import { gsap } from 'gsap';
 import { BlurFilter, Container, Graphics, Sprite, Text, Texture } from 'pixi.js';
-import type { BattleActionVfxDefinition } from './battleActionVfxCatalog';
+import type { BattleActionVfxDefinition, BattleActionVfxTimingPreset } from './battleActionVfxCatalog';
 import type { BattleEvent } from './battleTypes';
 
 export type NamedActionPoint = { x: number; y: number };
 export type NamedActionAdd = <T extends Container | Graphics | Text | Sprite>(node: T, zIndex?: number) => T;
-
-export type NamedActionTextures = {
-  basicAttack: Texture;
-  witchflameCut: Texture;
-  arcaneCometProjectile: Texture;
-  arcaneCometImpact: Texture;
-};
+export type NamedActionTextures = Record<string, Texture>;
 
 type RenderNamedActionVfxOptions = {
   add: NamedActionAdd;
@@ -23,22 +17,49 @@ type RenderNamedActionVfxOptions = {
   textures: NamedActionTextures;
 };
 
+type Timing = {
+  anticipation: number;
+  action: number;
+  impact: number;
+  plateScale: number;
+  impactScale: number;
+};
+
+const TIMINGS: Record<BattleActionVfxTimingPreset, Timing> = {
+  'melee-snap': { anticipation: 0.08, action: 0.12, impact: 0.3, plateScale: 0.21, impactScale: 0.21 },
+  'melee-heavy': { anticipation: 0.15, action: 0.15, impact: 0.5, plateScale: 0.28, impactScale: 0.28 },
+  'projectile-precise': { anticipation: 0.13, action: 0.4, impact: 0.32, plateScale: 0.17, impactScale: 0.16 },
+  'projectile-heavy': { anticipation: 0.18, action: 0.5, impact: 0.52, plateScale: 0.18, impactScale: 0.23 },
+  'projectile-rapid': { anticipation: 0.06, action: 0.3, impact: 0.25, plateScale: 0.18, impactScale: 0.14 },
+  'impact-critical': { anticipation: 0.1, action: 0.1, impact: 0.48, plateScale: 0.25, impactScale: 0.25 },
+  'control-snap': { anticipation: 0.12, action: 0.12, impact: 0.56, plateScale: 0.27, impactScale: 0.27 },
+  'control-bloom': { anticipation: 0.16, action: 0.16, impact: 0.68, plateScale: 0.27, impactScale: 0.27 },
+  'support-bloom': { anticipation: 0.2, action: 0.18, impact: 0.78, plateScale: 0.28, impactScale: 0.28 },
+};
+
 function pointBetween(start: NamedActionPoint, end: NamedActionPoint, progress: number) {
-  return {
-    x: start.x + (end.x - start.x) * progress,
-    y: start.y + (end.y - start.y) * progress,
-  };
+  return { x: start.x + (end.x - start.x) * progress, y: start.y + (end.y - start.y) * progress };
+}
+
+function renderAnticipation(add: NamedActionAdd, tweens: gsap.core.Tween[], point: NamedActionPoint, duration: number, supportive: boolean) {
+  const ring = add(new Graphics(), 8);
+  const color = supportive ? 0xbfffe8 : 0xe3c589;
+  ring.blendMode = 'add';
+  ring.circle(point.x, point.y, 14).stroke({ color, width: 1.5, alpha: 0.72 });
+  ring.circle(point.x, point.y, 24).stroke({ color, width: 0.75, alpha: 0.3 });
+  const state = { alpha: 0.85, scale: 0.62 };
+  tweens.push(gsap.to(state, {
+    alpha: 0,
+    scale: supportive ? 1.85 : 1.45,
+    duration,
+    ease: 'expo.out',
+    onUpdate: () => { ring.alpha = state.alpha; ring.scale.set(state.scale); },
+    onComplete: () => ring.destroy(),
+  }));
 }
 
 function renderImpactPlate({
-  add,
-  tweens,
-  point,
-  texture,
-  scale,
-  duration,
-  rotation,
-  delay = 0,
+  add, tweens, point, texture, scale, duration, delay = 0, rotation = 0, supportive = false,
 }: {
   add: NamedActionAdd;
   tweens: gsap.core.Tween[];
@@ -46,133 +67,111 @@ function renderImpactPlate({
   texture: Texture;
   scale: number;
   duration: number;
-  rotation: number;
   delay?: number;
+  rotation?: number;
+  supportive?: boolean;
 }) {
   const bloom = add(new Sprite(texture), 10);
   const plate = add(new Sprite(texture), 11);
-  const state = { alpha: 0, scale: scale * 0.48, rotation: rotation - 0.08 };
-
+  const state = { alpha: 0, scale: scale * 0.42, rotation: rotation - 0.045, y: point.y + (supportive ? 20 : 0) };
   for (const sprite of [bloom, plate]) {
     sprite.anchor.set(0.5);
     sprite.blendMode = 'add';
-    sprite.x = point.x;
-    sprite.y = point.y;
+    sprite.position.set(point.x, state.y);
     sprite.alpha = 0;
     sprite.rotation = state.rotation;
     sprite.scale.set(state.scale);
   }
-  bloom.filters = [new BlurFilter({ strength: 7 })];
+  bloom.filters = [new BlurFilter({ strength: supportive ? 5 : 7 })];
 
   tweens.push(gsap.to(state, {
     alpha: 1,
     scale,
     rotation,
-    duration: duration * 0.42,
+    y: point.y,
+    duration: duration * 0.38,
     delay,
-    ease: 'power4.out',
+    ease: 'expo.out',
     onUpdate: () => {
       plate.alpha = state.alpha;
       plate.scale.set(state.scale);
       plate.rotation = state.rotation;
-      bloom.alpha = state.alpha * 0.32;
+      plate.y = state.y;
+      bloom.alpha = state.alpha * (supportive ? 0.2 : 0.32);
       bloom.scale.set(state.scale * 1.08);
       bloom.rotation = state.rotation;
+      bloom.y = state.y;
     },
   }));
-
   tweens.push(gsap.to(state, {
     alpha: 0,
-    scale: scale * 1.14,
-    duration: duration * 0.58,
-    delay: delay + duration * 0.42,
+    scale: scale * (supportive ? 1.08 : 1.16),
+    y: point.y - (supportive ? 12 : 0),
+    duration: duration * 0.62,
+    delay: delay + duration * 0.38,
     ease: 'power3.in',
     onUpdate: () => {
       plate.alpha = state.alpha;
       plate.scale.set(state.scale);
-      bloom.alpha = state.alpha * 0.3;
+      plate.y = state.y;
+      bloom.alpha = state.alpha * 0.26;
       bloom.scale.set(state.scale * 1.1);
+      bloom.y = state.y;
     },
-    onComplete: () => {
-      plate.destroy();
-      bloom.destroy();
-    },
+    onComplete: () => { plate.destroy(); bloom.destroy(); },
   }));
 }
 
-function renderArcaneComet(options: RenderNamedActionVfxOptions) {
-  const { add, tweens, start, end, textures } = options;
+function renderProjectile(options: RenderNamedActionVfxOptions, texture: Texture, impactTexture: Texture, timing: Timing) {
+  const { add, tweens, start, end } = options;
   const angle = Math.atan2(end.y - start.y, end.x - start.x);
-  const bloom = add(new Sprite(textures.arcaneCometProjectile), 10);
-  const comet = add(new Sprite(textures.arcaneCometProjectile), 11);
-  const charge = add(new Graphics(), 8);
-  const state = { progress: 0, alpha: 0, scale: 0.105 };
-  const chargeState = { alpha: 1, scale: 1 };
-
-  charge.blendMode = 'add';
-  charge.circle(start.x, start.y, 12);
-  charge.stroke({ color: 0xd8b4fe, width: 2, alpha: 0.75 });
-  charge.circle(start.x, start.y, 24);
-  charge.stroke({ color: 0x8b5cf6, width: 1, alpha: 0.42 });
-
-  for (const sprite of [bloom, comet]) {
+  const bloom = add(new Sprite(texture), 10);
+  const projectile = add(new Sprite(texture), 11);
+  const state = { progress: 0, alpha: 0, scale: timing.plateScale * 0.68 };
+  for (const sprite of [bloom, projectile]) {
     sprite.anchor.set(0.82, 0.5);
     sprite.blendMode = 'add';
-    sprite.x = start.x;
-    sprite.y = start.y;
+    sprite.position.set(start.x, start.y);
     sprite.rotation = angle;
     sprite.alpha = 0;
     sprite.scale.set(state.scale);
   }
-  bloom.filters = [new BlurFilter({ strength: 8 })];
-
-  tweens.push(gsap.to(chargeState, {
-    alpha: 0,
-    scale: 1.8,
-    duration: 0.2,
-    ease: 'power3.out',
-    onUpdate: () => {
-      charge.alpha = chargeState.alpha;
-      charge.scale.set(chargeState.scale);
-    },
-    onComplete: () => charge.destroy(),
-  }));
-
+  bloom.filters = [new BlurFilter({ strength: 7 })];
   tweens.push(gsap.to(state, {
     progress: 1,
     alpha: 1,
-    scale: 0.17,
-    duration: 0.46,
-    ease: 'power2.in',
+    scale: timing.plateScale,
+    duration: timing.action,
+    delay: timing.anticipation * 0.5,
+    ease: options.action.timingPreset === 'projectile-heavy' ? 'power2.in' : 'power1.inOut',
     onUpdate: () => {
       const point = pointBetween(start, end, state.progress);
-      comet.x = bloom.x = point.x;
-      comet.y = bloom.y = point.y;
-      comet.alpha = Math.min(1, state.alpha * 1.2);
-      bloom.alpha = state.alpha * 0.34;
-      comet.scale.set(state.scale);
-      bloom.scale.set(state.scale * 1.1);
+      projectile.position.set(point.x, point.y);
+      bloom.position.set(point.x, point.y);
+      projectile.alpha = Math.min(1, state.alpha * 1.2);
+      bloom.alpha = state.alpha * 0.3;
+      projectile.scale.set(state.scale);
+      bloom.scale.set(state.scale * 1.08);
     },
     onComplete: () => {
-      comet.destroy();
+      projectile.destroy();
       bloom.destroy();
-      renderImpactPlate({
-        add,
-        tweens,
-        point: end,
-        texture: textures.arcaneCometImpact,
-        scale: 0.3,
-        duration: 0.55,
-        rotation: angle + Math.PI / 2,
-      });
+      renderImpactPlate({ add, tweens, point: end, texture: impactTexture, scale: timing.impactScale, duration: timing.impact, rotation: angle + Math.PI / 2 });
     },
   }));
 }
 
 export function renderNamedActionVfx(options: RenderNamedActionVfxOptions) {
-  const { action, add, tweens, end, textures } = options;
-  if (action.id === 'arcane-comet') {
-    renderArcaneComet(options);
+  const { action, add, tweens, start, end, textures } = options;
+  const texture = textures[action.assetId];
+  if (!texture) return;
+  const timing = TIMINGS[action.timingPreset];
+  const supportive = action.treatment === 'heal-plate' || action.treatment === 'buff-plate';
+  renderAnticipation(add, tweens, supportive ? end : start, timing.anticipation, supportive);
+
+  if (action.treatment === 'projectile-plate') {
+    const impactTexture = textures[action.impactAssetId ?? action.assetId] ?? texture;
+    renderProjectile(options, texture, impactTexture, timing);
     return;
   }
 
@@ -180,9 +179,11 @@ export function renderNamedActionVfx(options: RenderNamedActionVfxOptions) {
     add,
     tweens,
     point: end,
-    texture: action.id === 'witchflame-cut' ? textures.witchflameCut : textures.basicAttack,
-    scale: action.id === 'witchflame-cut' ? 0.25 : 0.21,
-    duration: action.id === 'witchflame-cut' ? 0.48 : 0.3,
-    rotation: action.id === 'witchflame-cut' ? 0.04 : -0.08,
+    texture,
+    scale: timing.impactScale,
+    duration: timing.impact,
+    delay: timing.anticipation * 0.35,
+    supportive,
+    rotation: action.id === 'witchflame-cut' ? 0.04 : action.id === 'basic-attack' ? -0.08 : 0,
   });
 }

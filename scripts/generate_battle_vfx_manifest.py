@@ -1,0 +1,137 @@
+from __future__ import annotations
+
+import argparse
+import importlib.util
+import json
+import sys
+from pathlib import Path
+from types import ModuleType
+from typing import Any
+
+
+ROOT = Path(__file__).resolve().parents[1]
+SOURCE = ROOT / "backend" / "starter_cards.py"
+OUTPUT = ROOT / "frontend" / "src" / "generated" / "battleVfxManifest.ts"
+
+
+VISUAL_PRESETS: dict[str, dict[str, str | None]] = {
+    "Lumen Spear": {"assetId": "lumen-spear", "timingPreset": "projectile-precise"},
+    "Tide of Grace": {"assetId": "tide-of-grace", "timingPreset": "support-bloom"},
+    "Arcane Comet": {"assetId": "arcane-comet-projectile", "impactAssetId": "arcane-comet-impact", "timingPreset": "projectile-heavy"},
+    "Frost Prism": {"assetId": "frost-prism", "timingPreset": "control-snap"},
+    "Witchflame Cut": {"assetId": "witchflame-cut", "timingPreset": "melee-snap"},
+    "Corrupting Sigil": {"assetId": "corrupting-sigil", "timingPreset": "control-bloom"},
+    "Deadeye Volley": {"assetId": "deadeye-volley", "timingPreset": "projectile-rapid"},
+    "Point Blank Execute": {"assetId": "point-blank-execute", "timingPreset": "impact-critical"},
+    "Briar Arrow": {"assetId": "briar-arrow", "timingPreset": "projectile-precise"},
+    "Venom Root": {"assetId": "venom-root", "timingPreset": "control-bloom"},
+    "Null Lance": {"assetId": "null-lance", "timingPreset": "projectile-heavy"},
+    "Grave Hex": {"assetId": "grave-hex", "timingPreset": "control-bloom"},
+    "Rending Claw": {"assetId": "rending-claw", "timingPreset": "melee-heavy"},
+    "Blood Banner": {"assetId": "blood-banner", "timingPreset": "support-bloom"},
+    "Shieldbreaker Slash": {"assetId": "shieldbreaker-slash", "timingPreset": "melee-heavy"},
+    "Storm Oath": {"assetId": "storm-oath", "timingPreset": "control-snap"},
+}
+
+
+def load_starter_cards() -> list[dict[str, Any]]:
+    db_stub = ModuleType("db")
+    db_stub.get_connection = lambda: None  # type: ignore[attr-defined]
+    db_stub.serialize_json = json.dumps  # type: ignore[attr-defined]
+    sys.modules.setdefault("db", db_stub)
+    spec = importlib.util.spec_from_file_location("starter_cards_manifest_source", SOURCE)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"Unable to load {SOURCE}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.STARTER_CARDS
+
+
+def treatment_for(skill: dict[str, Any]) -> str:
+    role = str(skill.get("ROLE", "attack")).lower()
+    if role == "heal":
+        return "heal-plate"
+    if role == "buff":
+        return "buff-plate"
+    if skill.get("type_catalog") == "proj":
+        return "projectile-plate"
+    return "instant-plate"
+
+
+def build_manifest() -> list[dict[str, Any]]:
+    cards = load_starter_cards()
+    garran = next(card for card in cards if card["name"] == "Garran")
+    state = garran["state"]
+    manifest: list[dict[str, Any]] = [{
+        "id": "basic-attack",
+        "value": "basic:garran",
+        "label": "Basic Attack",
+        "heroName": "Garran",
+        "description": "Uses Garran's real character-state VFX contract.",
+        "actionType": "attack",
+        "skillName": None,
+        "attackType": state["TYPE"],
+        "typeCatalog": state["type_catalog"],
+        "typeEffect": state["type_effect"],
+        "buffTypeEffect": None,
+        "buffName": None,
+        "skillRole": None,
+        "rangeMode": "melee",
+        "treatment": "instant-plate",
+        "assetId": "basic-attack",
+        "impactAssetId": None,
+        "timingPreset": "melee-snap",
+    }]
+
+    for card_index, card in enumerate(cards):
+        for slot, skill in card["skill"].items():
+            name = skill["name"]
+            visual = VISUAL_PRESETS[name]
+            role = str(skill.get("ROLE", "attack")).lower()
+            manifest.append({
+                "id": str(visual["assetId"]).removesuffix("-projectile"),
+                "value": f"skill:starter-{card_index + 1}:{slot}",
+                "label": name,
+                "heroName": card["name"],
+                "description": skill["description"],
+                "actionType": "heal" if role == "heal" else "skill",
+                "skillName": name,
+                "attackType": skill["TYPE"],
+                "typeCatalog": skill["type_catalog"],
+                "typeEffect": skill["type_effect"],
+                "buffTypeEffect": skill.get("buff_type_effect") or None,
+                "buffName": skill.get("BUFF_NAME") or None,
+                "skillRole": role,
+                "rangeMode": str(skill.get("RANGE", "enemy")).lower(),
+                "treatment": treatment_for(skill),
+                "assetId": visual["assetId"],
+                "impactAssetId": visual.get("impactAssetId"),
+                "timingPreset": visual["timingPreset"],
+            })
+    return manifest
+
+
+def render(manifest: list[dict[str, Any]]) -> str:
+    payload = json.dumps(manifest, ensure_ascii=False, indent=2)
+    return "// Generated by scripts/generate_battle_vfx_manifest.py. Do not edit by hand.\n" + f"export const battleVfxManifest = {payload} as const;\n"
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--check", action="store_true")
+    args = parser.parse_args()
+    expected = render(build_manifest())
+    if args.check:
+        if not OUTPUT.exists() or OUTPUT.read_text(encoding="utf-8") != expected:
+            print(f"Battle VFX manifest is stale. Run: python {Path(__file__).as_posix()}")
+            return 1
+        print(f"Battle VFX manifest is in sync ({len(build_manifest())} actions).")
+        return 0
+    OUTPUT.parent.mkdir(parents=True, exist_ok=True)
+    OUTPUT.write_text(expected, encoding="utf-8", newline="\n")
+    print(f"Wrote {OUTPUT} ({len(build_manifest())} actions).")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

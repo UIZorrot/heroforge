@@ -1,23 +1,36 @@
+import { battleVfxManifest } from '../generated/battleVfxManifest';
 import type { BattleEvent } from './battleTypes';
 
-export type BattleActionVfxId = 'basic-attack' | 'witchflame-cut' | 'arcane-comet';
+export type BattleActionVfxId = (typeof battleVfxManifest)[number]['id'];
+export type BattleActionVfxTreatment = 'instant-plate' | 'projectile-plate' | 'buff-plate' | 'heal-plate';
+export type BattleActionVfxTimingPreset =
+  | 'melee-snap'
+  | 'melee-heavy'
+  | 'projectile-precise'
+  | 'projectile-heavy'
+  | 'projectile-rapid'
+  | 'impact-critical'
+  | 'control-snap'
+  | 'control-bloom'
+  | 'support-bloom';
 
 export type BattleActionVfxDefinition = {
   id: BattleActionVfxId;
   label: string;
+  heroName: string;
+  description: string;
   actionType: BattleEvent['actionType'];
   skillName: string | null;
   typeCatalog: 'instant' | 'proj';
   typeEffect: string;
-  treatment: 'instant-plate' | 'projectile-plate';
+  treatment: BattleActionVfxTreatment;
+  assetId: string;
+  impactAssetId: string | null;
+  timingPreset: BattleActionVfxTimingPreset;
 };
 
-/** The gameplay event is the source of truth for every named treatment. */
-export const battleActionVfxDefinitions: readonly BattleActionVfxDefinition[] = [
-  { id: 'basic-attack', label: 'Basic Attack', actionType: 'attack', skillName: null, typeCatalog: 'instant', typeEffect: 'slash', treatment: 'instant-plate' },
-  { id: 'witchflame-cut', label: 'Witchflame Cut', actionType: 'skill', skillName: 'Witchflame Cut', typeCatalog: 'instant', typeEffect: 'fire', treatment: 'instant-plate' },
-  { id: 'arcane-comet', label: 'Arcane Comet', actionType: 'skill', skillName: 'Arcane Comet', typeCatalog: 'proj', typeEffect: 'magic', treatment: 'projectile-plate' },
-] as const;
+/** Generated from backend/starter_cards.py; visual fields are joined by the generator. */
+export const battleActionVfxDefinitions = battleVfxManifest as readonly BattleActionVfxDefinition[];
 
 function token(value: unknown) {
   return String(value ?? '').trim().toLowerCase().replace(/[\s-]+/g, '_');
@@ -31,13 +44,6 @@ function eventCatalog(event: BattleEvent) {
 }
 
 export function resolveBattleActionVfx(event: BattleEvent): BattleActionVfxDefinition | null {
-  if (event.actionType === 'attack') {
-    const basicAttack = battleActionVfxDefinitions[0];
-    return eventCatalog(event) === basicAttack.typeCatalog
-      && token(event.typeEffect ?? event.type_effect) === basicAttack.typeEffect
-      ? basicAttack
-      : null;
-  }
   const skillName = token(event.skillName);
   const typeEffect = token(event.typeEffect ?? event.type_effect);
   return battleActionVfxDefinitions.find((definition) => (
