@@ -13,6 +13,9 @@ import {
   projectileBeamSequenceFrameRect,
 } from '../lib/battleVfxAssets';
 import { resolveBattleVfxDescriptor, type BattleVfxMode, type BattleVfxTone } from '../lib/battleVfxCatalog';
+import { resolveBattleActionVfx } from '../lib/battleActionVfxCatalog';
+import { battleNamedActionVfxAssets } from '../lib/battleNamedActionVfxAssets';
+import { renderNamedActionVfx } from '../lib/battleNamedActionRenderer';
 import type { BattleBoardState, BattleBoardUnit, BattleEvent, BattleResult } from '../lib/battleTypes';
 import {
   createFastProjectilePlan,
@@ -655,6 +658,12 @@ type BattleVfxTextures = {
   slash: Texture;
   impact: Texture;
   ring: Texture;
+  namedActions: {
+    basicAttack: Texture;
+    witchflameCut: Texture;
+    arcaneCometProjectile: Texture;
+    arcaneCometImpact: Texture;
+  };
 };
 
 function pixiPalette(tone: BattleVfxTone): PixiPalette {
@@ -856,6 +865,12 @@ function createBattleVfxTextures(loadedTextures: Record<string, Texture>): Battl
     slash: loadedTextures.slashStreak,
     impact: loadedTextures.impactBurst,
     ring: loadedTextures.ring,
+    namedActions: {
+      basicAttack: createBlackBackedVfxRuntimeTexture(loadedTextures.basicAttack),
+      witchflameCut: createBlackBackedVfxRuntimeTexture(loadedTextures.witchflameCut),
+      arcaneCometProjectile: createBlackBackedVfxRuntimeTexture(loadedTextures.arcaneCometProjectile),
+      arcaneCometImpact: createBlackBackedVfxRuntimeTexture(loadedTextures.arcaneCometImpact),
+    },
   };
 }
 
@@ -1926,7 +1941,7 @@ function BattleEffectLayer({ board, event, disabled }: { board: BattleBoardState
         preference: 'webgl',
       });
       const loadedEntries = await Promise.all(
-        battleVfxTextureAssets.map(async (asset) => [asset.id, await Assets.load<Texture>(asset.src)] as const)
+        [...battleVfxTextureAssets, ...battleNamedActionVfxAssets].map(async (asset) => [asset.id, await Assets.load<Texture>(asset.src)] as const)
       );
       initialized = true;
       if (disposed) {
@@ -1978,6 +1993,7 @@ function BattleEffectLayer({ board, event, disabled }: { board: BattleBoardState
     layer.removeChildren().forEach((child) => child.destroy({ children: true }));
 
     const mode = eventVfxMode(event);
+    const namedAction = resolveBattleActionVfx(event);
     const tone = eventVfxTone(event);
     const palette = pixiPalette(tone);
     const profile = createProjectileVfxProfile(event);
@@ -2010,6 +2026,19 @@ function BattleEffectLayer({ board, event, disabled }: { board: BattleBoardState
       },
       onComplete: () => pulse.destroy(),
     }));
+
+    if (namedAction && textures) {
+      renderNamedActionVfx({
+        add,
+        tweens: tweensRef.current,
+        start,
+        end,
+        event,
+        action: namedAction,
+        textures: textures.namedActions,
+      });
+      return;
+    }
 
     if (mode === 'buff') {
       renderPixiBuff(add, tweensRef.current, end, targetBox, palette, event, textures);
@@ -2115,7 +2144,7 @@ function ArenaStage({
   onUnitSlotChange?: (unitTag: string, slot: number) => void;
 }) {
   return (
-    <section className="relative min-h-[760px] overflow-hidden border border-[#2b241b] bg-[#050505] pb-12">
+    <section className="relative min-h-[clamp(720px,78vh,820px)] overflow-hidden border border-[#2b241b] bg-[#050505] pb-12">
       <div
         className="pointer-events-none absolute inset-0 bg-cover bg-center opacity-80"
         style={{
@@ -2136,12 +2165,17 @@ function ArenaStage({
         </div>
         <div className="absolute left-1/2 top-5 -translate-x-1/2 text-center">
           <div className="text-[10px] uppercase tracking-[0.34em] text-stone-500">Round {board.round} / {Math.max(board.round, totalRounds)}</div>
-          <div className="mt-1 font-display text-2xl font-light uppercase tracking-[0.28em] text-[#e3c589]">Combat</div>
+          <div className="mt-1 font-display text-2xl font-light uppercase tracking-[0.28em] text-[#e3c589]">
+            {currentEvent?.skillName ?? (currentEvent?.actionType === 'attack' ? 'Basic Attack' : 'Combat')}
+          </div>
+          {currentEvent?.typeCatalog && currentEvent?.typeEffect ? (
+            <div className="mt-1 text-[9px] uppercase tracking-[0.24em] text-stone-500">{currentEvent.typeCatalog} / {currentEvent.typeEffect}</div>
+          ) : null}
           <div className="mx-auto mt-2 h-px w-52 bg-gradient-to-r from-transparent via-[#b49664] to-transparent" />
         </div>
       </div>
 
-      <div className="relative z-10 mx-auto mt-7 grid w-full max-w-[900px] grid-cols-[minmax(0,1fr)_96px_minmax(0,1fr)] items-center gap-10 px-6 pb-10 2xl:max-w-[980px] 2xl:gap-12">
+      <div className="relative z-10 mx-auto mt-7 grid w-full max-w-[980px] grid-cols-[minmax(0,1fr)_96px_minmax(0,1fr)] items-center gap-10 px-6 pb-10 2xl:max-w-[1040px] 2xl:gap-12">
         <FormationGrid
           units={board.bottom}
           side="forger"
@@ -2298,17 +2332,23 @@ export function ArenaBattleScene({
         </div>
       </div>
       {showCommanders ? (
-        <div className="grid gap-4 xl:grid-cols-[240px_minmax(0,1fr)_240px] 2xl:grid-cols-[260px_minmax(0,1fr)_260px]">
-          <CommanderPanel label={playbackBoard.bottomLabel} units={playbackBoard.bottom} side="forger" />
-          <ArenaStage
-            board={playbackBoard}
-            currentEvent={currentEvent}
-            totalRounds={totalRounds}
-            reducedMotion={reducedMotion}
-            editUnitSlots={editUnitSlots}
-            onUnitSlotChange={onUnitSlotChange}
-          />
-          <CommanderPanel label={playbackBoard.topLabel} units={playbackBoard.top} side="rival" />
+        <div className="grid gap-4 lg:grid-cols-2 2xl:grid-cols-[260px_minmax(0,1fr)_260px]">
+          <div className="order-2 min-w-0 2xl:order-1">
+            <CommanderPanel label={playbackBoard.bottomLabel} units={playbackBoard.bottom} side="forger" />
+          </div>
+          <div className="order-1 min-w-0 lg:col-span-2 2xl:order-2 2xl:col-span-1">
+            <ArenaStage
+              board={playbackBoard}
+              currentEvent={currentEvent}
+              totalRounds={totalRounds}
+              reducedMotion={reducedMotion}
+              editUnitSlots={editUnitSlots}
+              onUnitSlotChange={onUnitSlotChange}
+            />
+          </div>
+          <div className="order-3 min-w-0">
+            <CommanderPanel label={playbackBoard.topLabel} units={playbackBoard.top} side="rival" />
+          </div>
         </div>
       ) : (
         <ArenaStage
