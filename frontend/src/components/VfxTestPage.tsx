@@ -14,7 +14,6 @@ import {
 import type { BattleBoardState, BattleBoardUnit } from '../lib/battleTypes';
 
 const categoryIcons: Record<VfxTestCategory, typeof Zap> = {
-  action: Sparkles,
   projectile: Zap,
   instant: Crosshair,
   buff: Shield,
@@ -60,8 +59,8 @@ function moveUnitWithinTeam(units: Array<BattleBoardUnit | null>, unitTag: strin
 }
 
 export function VfxTestPage() {
-  const [category, setCategory] = useState<VfxTestCategory>('action');
-  const [effect, setEffect] = useState(vfxTestOptions.action[0]?.value ?? '');
+  const [category, setCategory] = useState<VfxTestCategory>('projectile');
+  const [effect, setEffect] = useState(vfxTestOptions.projectile[0]?.value ?? '');
   const [sequence, setSequence] = useState(1);
   const [amount, setAmount] = useState(360);
   const [angleOffsetDeg, setAngleOffsetDeg] = useState(0);
@@ -70,7 +69,7 @@ export function VfxTestPage() {
   const options = vfxTestOptions[category];
   const selectedEffect = options.some((option) => option.value === effect) ? effect : options[0]?.value ?? effect;
   const defaultBoard = useMemo(() => createVfxTestBoard(category, selectedEffect), [category, selectedEffect]);
-  const [board, setBoard] = useState<BattleBoardState>(() => createVfxTestBoard('action', vfxTestOptions.action[0]?.value ?? ''));
+  const [board, setBoard] = useState<BattleBoardState>(() => createVfxTestBoard('projectile', vfxTestOptions.projectile[0]?.value ?? ''));
 
   useEffect(() => {
     setBoard((currentBoard) => mergeBoardLayout(defaultBoard, currentBoard));
@@ -117,7 +116,6 @@ export function VfxTestPage() {
         description="The same action events, renderer, textures, and timing used by Battle."
         stats={
           <>
-            <PageHeaderStat label="Actions" value={vfxTestOptions.action.length} />
             <PageHeaderStat label="Projectiles" value={vfxTestOptions.projectile.length} />
             <PageHeaderStat label="Instant" value={vfxTestOptions.instant.length} />
             <PageHeaderStat label="Buffs" value={vfxTestOptions.buff.length} />
@@ -192,16 +190,6 @@ export function VfxTestPage() {
               </div>
             </div>
 
-            {category === 'action' ? (
-              <div className="border border-[#d8b06c]/18 bg-[#d8b06c]/5 px-3 py-3">
-                <div className="text-[9px] font-semibold uppercase tracking-[0.2em] text-[#b49664]">Gameplay Contract</div>
-                <div className="mt-2 flex items-center justify-between gap-3 text-[10px] uppercase tracking-[0.14em]">
-                  <span className="truncate text-stone-300">{event.skillName ?? 'Basic Attack'}</span>
-                  <span className="shrink-0 text-stone-500">{event.typeCatalog} / {event.typeEffect}</span>
-                </div>
-              </div>
-            ) : null}
-
             <div className="border-t border-white/8 pt-5">
               <div className="mb-3 flex items-center justify-between">
                 <div className="text-[10px] font-semibold uppercase tracking-[0.24em] text-stone-600">Amount</div>
@@ -219,7 +207,7 @@ export function VfxTestPage() {
               />
             </div>
 
-            {category === 'projectile' || event.typeCatalog === 'proj' ? (
+            {category === 'projectile' ? (
               <div className="border-t border-white/8 pt-5">
                 <div className="mb-3 flex items-center justify-between">
                   <div className="text-[10px] font-semibold uppercase tracking-[0.24em] text-stone-600">Angle</div>

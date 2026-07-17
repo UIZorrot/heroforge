@@ -13,9 +13,6 @@ import {
   projectileBeamSequenceFrameRect,
 } from '../lib/battleVfxAssets';
 import { resolveBattleVfxDescriptor, type BattleVfxMode, type BattleVfxTone } from '../lib/battleVfxCatalog';
-import { resolveBattleActionVfx } from '../lib/battleActionVfxCatalog';
-import { namedActionVfxAssetsFor } from '../lib/battleNamedActionVfxAssets';
-import { renderNamedActionVfx } from '../lib/battleNamedActionRenderer';
 import type { BattleBoardState, BattleBoardUnit, BattleEvent, BattleResult } from '../lib/battleTypes';
 import {
   createFastProjectilePlan,
@@ -1907,7 +1904,6 @@ function BattleEffectLayer({ board, event, disabled }: { board: BattleBoardState
   const appRef = useRef<Application | null>(null);
   const layerRef = useRef<Container | null>(null);
   const texturesRef = useRef<BattleVfxTextures | null>(null);
-  const namedTexturesRef = useRef<Record<string, Texture>>({});
   const tweensRef = useRef<gsap.core.Tween[]>([]);
   const tickerCleanupRef = useRef<TickerCleanup[]>([]);
   const [renderToken, setRenderToken] = useState(0);
@@ -1955,7 +1951,6 @@ function BattleEffectLayer({ board, event, disabled }: { board: BattleBoardState
       tweensRef.current = [];
       layerRef.current = null;
       texturesRef.current = null;
-      namedTexturesRef.current = {};
       appRef.current = null;
       if (initialized) {
         app.destroy(true);
@@ -1983,25 +1978,6 @@ function BattleEffectLayer({ board, event, disabled }: { board: BattleBoardState
     layer.removeChildren().forEach((child) => child.destroy({ children: true }));
 
     const mode = eventVfxMode(event);
-    const namedAction = resolveBattleActionVfx(event);
-    if (namedAction) {
-      const assets = namedActionVfxAssetsFor(namedAction);
-      const missingAssets = assets.filter((asset) => !namedTexturesRef.current[asset.id]);
-      if (missingAssets.length) {
-        let cancelled = false;
-        void Promise.all(missingAssets.map(async (asset) => {
-          const source = await Assets.load<Texture>(asset.src);
-          return [asset.id, createBlackBackedVfxRuntimeTexture(source)] as const;
-        })).then((entries) => {
-          if (cancelled) return;
-          Object.assign(namedTexturesRef.current, Object.fromEntries(entries));
-          setRenderToken((value) => value + 1);
-        });
-        return () => {
-          cancelled = true;
-        };
-      }
-    }
     const tone = eventVfxTone(event);
     const palette = pixiPalette(tone);
     const profile = createProjectileVfxProfile(event);
@@ -2034,19 +2010,6 @@ function BattleEffectLayer({ board, event, disabled }: { board: BattleBoardState
       },
       onComplete: () => pulse.destroy(),
     }));
-
-    if (namedAction && textures) {
-      renderNamedActionVfx({
-        add,
-        tweens: tweensRef.current,
-        start,
-        end,
-        event,
-        action: namedAction,
-        textures: namedTexturesRef.current,
-      });
-      return;
-    }
 
     if (mode === 'buff') {
       renderPixiBuff(add, tweensRef.current, end, targetBox, palette, event, textures);

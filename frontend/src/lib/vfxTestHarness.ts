@@ -6,10 +6,9 @@ import {
   type BattleVfxInstantTypeEffect,
   type BattleVfxProjectileTypeEffect,
 } from './battleVfxCatalog';
-import { battleVfxLabActions, getBattleVfxLabAction } from './battleVfxLabActions';
 import type { BattleBoardState, BattleBoardUnit, BattleEvent, BattleResult, BuffState } from './battleTypes';
 
-export type VfxTestCategory = 'action' | 'projectile' | 'instant' | 'buff';
+export type VfxTestCategory = 'projectile' | 'instant' | 'buff';
 export type VfxTestEffect = BattleVfxProjectileTypeEffect | BattleVfxInstantTypeEffect | BattleVfxBuffName;
 
 export type VfxTestOption = {
@@ -24,7 +23,6 @@ export type VfxTestEventOptions = {
 };
 
 export const vfxTestCategories: Array<{ value: VfxTestCategory; label: string }> = [
-  { value: 'action', label: 'Actions' },
   { value: 'projectile', label: 'Projectile' },
   { value: 'instant', label: 'Instant' },
   { value: 'buff', label: 'Buff' },
@@ -39,7 +37,6 @@ function optionsFromCatalog<T extends readonly string[]>(catalog: T): VfxTestOpt
 }
 
 export const vfxTestOptions: Record<VfxTestCategory, VfxTestOption[]> = {
-  action: battleVfxLabActions.map(({ value, label }) => ({ value, label })),
   projectile: optionsFromCatalog(canonicalBattleProjectileTypeEffects),
   instant: optionsFromCatalog(canonicalBattleInstantTypeEffects),
   buff: optionsFromCatalog(canonicalBattleBuffNames),
@@ -85,16 +82,14 @@ function unit({
 }
 
 export function createVfxTestBoard(category: VfxTestCategory, effect: string): BattleBoardState {
-  const action = category === 'action' ? getBattleVfxLabAction(effect) : null;
-  const typeEffect = action?.typeEffect ?? effect;
   const buff = category === 'buff' ? [{ name: effect, duration: 3, value: effect === 'vulnerable' ? 1 : 2 }] : [];
-  const caster = unit({ tag: 'A1', side: 'A', name: action?.heroName ?? 'VFX CASTER', typeEffect, buffs: buff });
+  const caster = unit({ tag: 'A1', side: 'A', name: 'VFX CASTER', typeEffect: effect, buffs: buff });
   const target = unit({ tag: 'B1', side: 'B', name: 'TARGET CARD', typeEffect: 'flesh' });
 
   return {
     round: 1,
     riverLabel: 'VFX',
-    bottomLabel: action?.heroName ?? 'Tester',
+    bottomLabel: 'Tester',
     topLabel: 'Target',
     bottom: emptySlots(caster),
     top: emptySlots(target),
@@ -136,42 +131,6 @@ export function createVfxTestEvent(
 ): BattleEvent {
   const amount = Math.max(0, Math.floor(options.amount ?? 360));
   const base = eventBase(sequence, amount);
-
-  if (category === 'action') {
-    const action = getBattleVfxLabAction(effect);
-    const isSupport = action.skillRole === 'buff' || action.skillRole === 'heal';
-    const isSelfTarget = action.rangeMode === 'self' || action.rangeMode === 'ally' || action.actionType === 'heal';
-    const resolvedAmount = options.crit ? Math.floor(amount * 1.45) : amount;
-    const damage = isSupport ? 0 : resolvedAmount;
-    const heal = action.actionType === 'heal' ? resolvedAmount : 0;
-    const buff = action.buffName ? [{ name: action.buffName, duration: 3, value: 2 }] : [];
-
-    return {
-      ...base,
-      defender: isSelfTarget ? 'A1' : 'B1',
-      actionType: action.actionType,
-      skillName: action.skillName ?? undefined,
-      attackType: action.attackType,
-      buffName: action.buffName,
-      typeCatalog: action.typeCatalog,
-      typeEffect: action.typeEffect,
-      buffTypeEffect: action.buffTypeEffect,
-      skillRole: action.skillRole,
-      rangeMode: action.rangeMode,
-      vfxAngleOffsetDeg: options.angleOffsetDeg ?? 0,
-      damage,
-      heal,
-      isCrit: Boolean(options.crit) && damage > 0,
-      isStunned: action.buffName === 'stun',
-      hpA: 2200 + heal,
-      hpB: Math.max(1, 1800 - damage),
-      buffsA: isSelfTarget ? buff : [],
-      buffsB: isSelfTarget ? [] : buff,
-      log: action.skillName
-        ? `A1 uses [${action.skillName}] with ${action.typeCatalog} / ${action.typeEffect}.`
-        : `A1 uses [Basic Attack] with ${action.typeCatalog} / ${action.typeEffect}.`,
-    };
-  }
 
   if (category === 'buff') {
     const heal = effect === 'heal' ? amount : 0;
