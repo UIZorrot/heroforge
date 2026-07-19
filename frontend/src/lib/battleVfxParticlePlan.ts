@@ -63,10 +63,7 @@ export type ProjectileVfxProfile = {
   bloomWidth: number;
   headShape: 'beam';
   beamSequenceKey: ProjectileVfxSequenceTextureKey;
-  beamSequenceMode?: 'fixed-frame';
   beamSequenceScale?: number;
-  beamSequenceBloomScale?: number;
-  beamSequenceBloomAlpha?: number;
   beamSequenceFrameRange?: [number, number];
   impactTextureKey: ProjectileVfxImpactTextureKey;
   impactAnchor: VfxPoint;
@@ -144,10 +141,8 @@ const PROJECTILE_PROFILES: Record<ProjectileVfxProfile['id'], ProjectileVfxProfi
     bloomWidth: 27,
     headShape: 'beam',
     beamSequenceKey: 'projectileFire',
-    beamSequenceMode: 'fixed-frame',
-    beamSequenceScale: 0.5,
-    beamSequenceBloomScale: 0.58,
-    beamSequenceFrameRange: [1, 3],
+    beamSequenceScale: 0.44,
+    beamSequenceFrameRange: [2, 11],
     impactTextureKey: 'impactFire',
     impactAnchor: IMPACT_BURST_ANCHOR,
     impactRingAnchor: IMPACT_RING_ANCHOR,
@@ -187,11 +182,8 @@ const PROJECTILE_PROFILES: Record<ProjectileVfxProfile['id'], ProjectileVfxProfi
     bloomWidth: 24,
     headShape: 'beam',
     beamSequenceKey: 'projectileBlood',
-    beamSequenceMode: 'fixed-frame',
-    beamSequenceScale: 0.51,
-    beamSequenceBloomScale: 0.59,
-    beamSequenceBloomAlpha: 0,
-    beamSequenceFrameRange: [2, 10],
+    beamSequenceScale: 0.43,
+    beamSequenceFrameRange: [2, 11],
     impactTextureKey: 'impactBlood',
     impactAnchor: IMPACT_BURST_ANCHOR,
     impactRingAnchor: IMPACT_RING_ANCHOR,
@@ -231,10 +223,8 @@ const PROJECTILE_PROFILES: Record<ProjectileVfxProfile['id'], ProjectileVfxProfi
     bloomWidth: 21,
     headShape: 'beam',
     beamSequenceKey: 'projectileFrost',
-    beamSequenceMode: 'fixed-frame',
-    beamSequenceScale: 0.49,
-    beamSequenceBloomScale: 0.57,
-    beamSequenceFrameRange: [2, 10],
+    beamSequenceScale: 0.42,
+    beamSequenceFrameRange: [2, 11],
     impactTextureKey: 'impactFrost',
     impactAnchor: IMPACT_BURST_ANCHOR,
     impactRingAnchor: IMPACT_RING_ANCHOR,
@@ -274,6 +264,8 @@ const PROJECTILE_PROFILES: Record<ProjectileVfxProfile['id'], ProjectileVfxProfi
     bloomWidth: 30,
     headShape: 'beam',
     beamSequenceKey: 'projectileVoid',
+    beamSequenceScale: 0.4,
+    beamSequenceFrameRange: [2, 11],
     impactTextureKey: 'impactVoid',
     impactAnchor: IMPACT_BURST_ANCHOR,
     impactRingAnchor: IMPACT_RING_ANCHOR,
@@ -313,6 +305,8 @@ const PROJECTILE_PROFILES: Record<ProjectileVfxProfile['id'], ProjectileVfxProfi
     bloomWidth: 26,
     headShape: 'beam',
     beamSequenceKey: 'projectileBeam',
+    beamSequenceScale: 0.4,
+    beamSequenceFrameRange: [2, 11],
     impactTextureKey: 'impactCurse',
     impactAnchor: IMPACT_BURST_ANCHOR,
     impactRingAnchor: IMPACT_RING_ANCHOR,
@@ -352,6 +346,8 @@ const PROJECTILE_PROFILES: Record<ProjectileVfxProfile['id'], ProjectileVfxProfi
     bloomWidth: 22,
     headShape: 'beam',
     beamSequenceKey: 'projectileNature',
+    beamSequenceScale: 0.42,
+    beamSequenceFrameRange: [2, 11],
     impactTextureKey: 'impactNature',
     impactAnchor: IMPACT_BURST_ANCHOR,
     impactRingAnchor: IMPACT_RING_ANCHOR,
@@ -391,6 +387,8 @@ const PROJECTILE_PROFILES: Record<ProjectileVfxProfile['id'], ProjectileVfxProfi
     bloomWidth: 25,
     headShape: 'beam',
     beamSequenceKey: 'projectileWater',
+    beamSequenceScale: 0.42,
+    beamSequenceFrameRange: [2, 11],
     impactTextureKey: 'impactWater',
     impactAnchor: IMPACT_BURST_ANCHOR,
     impactRingAnchor: IMPACT_RING_ANCHOR,
@@ -430,6 +428,8 @@ const PROJECTILE_PROFILES: Record<ProjectileVfxProfile['id'], ProjectileVfxProfi
     bloomWidth: 18,
     headShape: 'beam',
     beamSequenceKey: 'projectileLighting',
+    beamSequenceScale: 0.38,
+    beamSequenceFrameRange: [2, 11],
     impactTextureKey: 'impactStorm',
     impactAnchor: IMPACT_BURST_ANCHOR,
     impactRingAnchor: IMPACT_RING_ANCHOR,
@@ -469,6 +469,8 @@ const PROJECTILE_PROFILES: Record<ProjectileVfxProfile['id'], ProjectileVfxProfi
     bloomWidth: 28,
     headShape: 'beam',
     beamSequenceKey: 'projectileMagic',
+    beamSequenceScale: 0.42,
+    beamSequenceFrameRange: [2, 11],
     impactTextureKey: 'impactMagic',
     impactAnchor: IMPACT_BURST_ANCHOR,
     impactRingAnchor: IMPACT_RING_ANCHOR,
@@ -508,11 +510,8 @@ const PROJECTILE_PROFILES: Record<ProjectileVfxProfile['id'], ProjectileVfxProfi
     bloomWidth: 24,
     headShape: 'beam',
     beamSequenceKey: 'projectileHoly',
-    beamSequenceMode: 'fixed-frame',
-    beamSequenceScale: 0.49,
-    beamSequenceBloomScale: 0.57,
-    beamSequenceBloomAlpha: 0,
-    beamSequenceFrameRange: [2, 9],
+    beamSequenceScale: 0.42,
+    beamSequenceFrameRange: [2, 11],
     impactTextureKey: 'impactHoly',
     impactAnchor: IMPACT_BURST_ANCHOR,
     impactRingAnchor: IMPACT_RING_ANCHOR,
@@ -554,6 +553,8 @@ const PROJECTILE_PROFILES: Record<ProjectileVfxProfile['id'], ProjectileVfxProfi
     bloomWidth: 13,
     headShape: 'beam',
     beamSequenceKey: 'projectileArrow',
+    beamSequenceScale: 0.36,
+    beamSequenceFrameRange: [2, 11],
     impactTextureKey: 'impactSteel',
     impactAnchor: IMPACT_BURST_ANCHOR,
     impactRingAnchor: IMPACT_RING_ANCHOR,
@@ -593,6 +594,8 @@ const PROJECTILE_PROFILES: Record<ProjectileVfxProfile['id'], ProjectileVfxProfi
     bloomWidth: 10,
     headShape: 'beam',
     beamSequenceKey: 'projectileBullet',
+    beamSequenceScale: 0.3,
+    beamSequenceFrameRange: [2, 11],
     impactTextureKey: 'impactSteel',
     impactAnchor: IMPACT_BURST_ANCHOR,
     impactRingAnchor: IMPACT_RING_ANCHOR,
@@ -632,10 +635,8 @@ const PROJECTILE_PROFILES: Record<ProjectileVfxProfile['id'], ProjectileVfxProfi
     bloomWidth: 23,
     headShape: 'beam',
     beamSequenceKey: 'projectileBeam',
-    beamSequenceMode: 'fixed-frame',
-    beamSequenceScale: 0.48,
-    beamSequenceBloomScale: 0.56,
-    beamSequenceFrameRange: [2, 15],
+    beamSequenceScale: 0.42,
+    beamSequenceFrameRange: [2, 11],
     impactTextureKey: 'impactGold',
     impactAnchor: IMPACT_BURST_ANCHOR,
     impactRingAnchor: IMPACT_RING_ANCHOR,
@@ -793,13 +794,13 @@ export function createBuffBorderVfxPlan(event: ProjectileProfileEvent = {}): Buf
 
 export function createFastProjectilePlan(distance: number, profile: ProjectileVfxProfile = PROJECTILE_PROFILES.gold): FastProjectilePlan {
   const normalized = clamp(distance, 220, 720);
-  const flightDurationMs = Math.round(clamp((146 + normalized * 0.14) * profile.speedScale, 185, 255));
+  const flightDurationMs = Math.round(clamp((142 + normalized * 0.13) * profile.speedScale, 175, 235));
 
   return {
     flightDurationMs,
-    trailFraction: clamp(profile.trailFraction, 0.08, 0.18),
+    trailFraction: clamp(profile.trailFraction, 0.07, 0.14),
     trailFadeMs: Math.round(clamp(profile.trailFadeMs, 96, 180)),
-    beamLingerMs: 28,
+    beamLingerMs: 0,
     impactDelayMs: flightDurationMs,
     particleCount: Math.round(clamp((10 + normalized / 42) * profile.particleDensity, 10, 34)),
     emitterParticleCount: Math.round(clamp((16 + normalized / 30) * profile.particleDensity, 18, 54)),
@@ -817,16 +818,26 @@ export function projectileTrailWindow(headT: number, plan: FastProjectilePlan) {
 
 export function projectileHeadProgress(timeProgress: number) {
   const t = clamp(timeProgress, 0, 1);
-  return 1 - Math.pow(1 - t, 2);
+  return t * (0.42 + 0.58 * t);
 }
 
-export function projectileSequenceReveal(headProgress: number) {
-  const t = clamp(headProgress / 0.72, 0, 1);
-  const eased = 1 - Math.pow(1 - t, 2.4);
+export function projectileBodyEnvelope(headProgress: number) {
+  const t = clamp(headProgress / 0.16, 0, 1);
+  const eased = 1 - Math.pow(1 - t, 3);
   return {
-    scaleX: clamp(0.18 + eased * 0.82, 0.18, 1),
-    scaleY: clamp(0.78 + eased * 0.22, 0.78, 1),
+    scale: clamp(0.72 + eased * 0.28, 0.72, 1),
+    alpha: clamp(0.32 + eased * 0.68, 0.32, 1),
   };
+}
+
+export function projectileFlightFrameIndex(
+  flightProgress: number,
+  frameRange: [number, number] = [2, 11],
+) {
+  const first = clamp(Math.floor(frameRange[0]), 0, 11);
+  const last = clamp(Math.floor(frameRange[1]), first, 11);
+  const t = clamp(flightProgress, 0, 1);
+  return first + Math.min(last - first, Math.floor(t * (last - first + 1)));
 }
 
 export function projectileAimBasis(start: VfxPoint, end: VfxPoint, angleOffsetDeg = 0) {

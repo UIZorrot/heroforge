@@ -9,7 +9,6 @@ import {
   blackBackedVfxAlphaForLuminance,
   battleVfxTextureAssets,
   projectileBeamSequence,
-  projectileBeamSequenceFrameIndex,
   projectileBeamSequenceFrameRect,
 } from '../lib/battleVfxAssets';
 import { resolveBattleVfxDescriptor, type BattleVfxMode, type BattleVfxTone } from '../lib/battleVfxCatalog';
@@ -19,9 +18,10 @@ import {
   createBuffBorderVfxPlan,
   createProjectileVfxProfile,
   projectileAimBasis,
+  projectileBodyEnvelope,
+  projectileFlightFrameIndex,
   projectileHeadProgress,
   projectileParticleAlpha,
-  projectileSequenceReveal,
   projectileTrailWindow,
   pointInHost,
   rectInHost,
@@ -1402,7 +1402,6 @@ function renderPixiProjectileEmitter({
   const core = add(new Graphics(), 6);
   const bloom = add(new Graphics(), 5);
   const source = add(new Graphics(), 4);
-  const beamBloom = add(new Sprite(initialBeamTexture), 8);
   const beam = add(new Sprite(initialBeamTexture), 9);
   const particleLayer = add(new ParticleContainer<Particle>({
     dynamicProperties: {
@@ -1437,7 +1436,7 @@ function renderPixiProjectileEmitter({
   const activeParticles: LiveVfxParticle[] = [];
   const allParticles: Particle[] = [];
   const sourceState = { alpha: 1, radius: 10 };
-  const totalMs = plan.flightDurationMs + plan.beamLingerMs + 320;
+  const totalMs = plan.flightDurationMs + 320;
   let elapsedMs = 0;
   let emitterBudget = plan.emitterParticleCount;
   let emitterAccumulator = 0;
@@ -1445,31 +1444,21 @@ function renderPixiProjectileEmitter({
   let disposed = false;
 
   core.blendMode = bloom.blendMode = source.blendMode = particleLayer.blendMode = smokeLayer.blendMode = shardLayer.blendMode = 'add';
-  beamBloom.blendMode = useBeamSequence ? projectileBeamSequence.blendMode : 'add';
   beam.blendMode = useBeamSequence ? projectileBeamSequence.blendMode : 'add';
   bloom.filters = [new BlurFilter({ strength: 3 })];
   source.filters = [new BlurFilter({ strength: 2 })];
-  beamBloom.anchor.set(0.96, 0.5);
-  beamBloom.alpha = 0;
-  beamBloom.tint = 0xffffff;
-  beamBloom.scale.set(0.01, 0.12);
   beam.anchor.set(0.94, 0.5);
   beam.alpha = 0;
   beam.tint = 0xffffff;
-  beam.scale.set(0.01, 0.12);
+  beam.scale.set(0.01);
 
   const updateBeamSequenceTexture = (progress: number) => {
     if (!useBeamSequence) return;
-    const baseFrameIndex = projectileBeamSequenceFrameIndex(progress);
-    const [firstFrame, lastFrame] = profile.beamSequenceFrameRange ?? [0, projectileBeamSequence.frameCount - 1];
-    const frameSpan = Math.max(1, Math.min(projectileBeamSequence.frameCount - 1, lastFrame) - Math.max(0, firstFrame) + 1);
-    const normalizedFrameProgress = baseFrameIndex / Math.max(1, projectileBeamSequence.frameCount - 1);
-    const frameIndex = Math.max(0, firstFrame) + Math.min(frameSpan - 1, Math.floor(normalizedFrameProgress * frameSpan));
+    const frameIndex = projectileFlightFrameIndex(progress, profile.beamSequenceFrameRange);
     if (frameIndex === currentBeamFrameIndex) return;
     currentBeamFrameIndex = frameIndex;
     const frameTexture = beamSequenceFrames[frameIndex] ?? initialBeamTexture;
     beam.texture = frameTexture;
-    beamBloom.texture = frameTexture;
   };
 
   const createParticle = (container: ParticleContainer<Particle>, texture: Texture, point: PixiPoint, velocity: PixiPoint, lifeMs: number, scale: number, alpha: number, delayMs = 0) => {
@@ -1589,14 +1578,17 @@ function renderPixiProjectileEmitter({
     core.destroy();
     bloom.destroy();
     source.destroy();
-    beamBloom.destroy();
     beam.destroy();
   };
 
   const spawnImpact = () => {
     if (impactDone) return;
     impactDone = true;
-    renderPixiImpact(add, tweens, end, palette, event, 0, textures, plan, profile, profile.impactDirectionalCut ?? true);
+    beam.alpha = 0;
+    beam.visible = false;
+    core.clear();
+    bloom.clear();
+    renderPixiImpact(add, tweens, end, palette, event, 0, textures, plan, profile, false);
     for (let i = 0; i < profile.shardCount; i += 1) {
       const angle = (Math.PI * 2 * i) / profile.shardCount + (Math.random() - 0.5) * 0.18;
       const speed = (0.08 + Math.random() * 0.18) * profile.scatter;
@@ -1643,7 +1635,6 @@ function renderPixiProjectileEmitter({
   function update() {
     const deltaMs = app.ticker.deltaMS;
     elapsedMs += deltaMs;
-    const postImpactMs = Math.max(0, elapsedMs - plan.flightDurationMs);
     const travelT = Math.min(1, elapsedMs / plan.flightDurationMs);
     const headT = projectileHeadProgress(travelT);
     const headPoint = linePoint(start, end, headT);
@@ -1660,53 +1651,24 @@ function renderPixiProjectileEmitter({
 
     core.clear();
     bloom.clear();
-    if (!impactDone && elapsedMs <= plan.flightDurationMs + plan.beamLingerMs) {
+    if (!impactDone && elapsedMs < plan.flightDurationMs) {
       updateBeamSequenceTexture(travelT);
-      const visibleLength = Math.min(dist * Math.max(0.94, profile.beamTrailFraction), dist * headT + 120);
-      const beamFade = postImpactMs > 0 ? Math.max(0, 1 - postImpactMs / plan.beamLingerMs) : 1;
-      const beamAlpha = Math.min(1, travelT / 0.07) * beamFade;
-      const useFixedSequenceFrame = useBeamSequence && profile.beamSequenceMode === 'fixed-frame';
-      const distanceScale = useFixedSequenceFrame ? Math.max(0.86, Math.min(1.08, dist / 520)) : 1;
-      const sequenceReveal = useFixedSequenceFrame ? projectileSequenceReveal(headT) : { scaleX: 1, scaleY: 1 };
-      const sequenceBaseScale = (profile.beamSequenceScale ?? 0.58) * distanceScale;
-      const sequenceBloomBaseScale = (profile.beamSequenceBloomScale ?? (profile.beamSequenceScale ?? 0.58) * 1.16) * distanceScale;
-      const sequenceBloomAlpha = profile.beamSequenceBloomAlpha ?? 0.38;
-      const beamScaleX = useFixedSequenceFrame
-        ? sequenceBaseScale * sequenceReveal.scaleX
-        : visibleLength / Math.max(1, beam.texture.width);
-      const beamScaleY = useFixedSequenceFrame
-        ? sequenceBaseScale * sequenceReveal.scaleY
-        : (0.24 + Math.min(1, dist / 760) * 0.075) * profile.beamThicknessScale;
-      const bloomScaleX = sequenceBloomBaseScale * sequenceReveal.scaleX;
-      const bloomScaleY = sequenceBloomBaseScale * sequenceReveal.scaleY;
-      const beamStartT = Math.max(0, headT - visibleLength / dist);
-      if (profile.vectorTrailAlpha > 0) {
-        drawLineSegment(bloom, start, end, beamStartT, trail.endT, beamPalette.core, profile.bloomWidth * 1.25, 0.24 * beamAlpha * profile.vectorTrailAlpha);
-        drawLineSegment(core, start, end, beamStartT, trail.endT, beamPalette.dark, profile.coreWidth + 8, 0.34 * beamAlpha * profile.vectorTrailAlpha);
-        drawLineSegment(core, start, end, beamStartT, trail.endT, beamPalette.core, Math.max(5, profile.coreWidth * 0.95), 0.68 * beamAlpha * profile.vectorTrailAlpha);
-        drawLineSegment(core, start, end, Math.max(beamStartT, headT - 0.22), trail.endT, beamPalette.hot, 3.6, 0.94 * beamAlpha * profile.vectorTrailAlpha);
-      }
+      const beamAlpha = Math.min(1, travelT / 0.08);
+      const body = projectileBodyEnvelope(headT);
+      const bodyScale = (profile.beamSequenceScale ?? 0.42) * body.scale;
+      drawLineSegment(bloom, start, end, trail.startT, trail.endT, beamPalette.core, Math.max(7, profile.bloomWidth * 0.46), 0.1 * beamAlpha);
+      drawLineSegment(core, start, end, trail.startT, trail.endT, beamPalette.core, Math.max(2, profile.coreWidth * 0.38), 0.34 * beamAlpha);
+      drawLineSegment(core, start, end, Math.max(trail.startT, trail.endT - 0.045), trail.endT, beamPalette.hot, 1.5, 0.72 * beamAlpha);
+      drawGlowCircle(bloom, headPoint.x, headPoint.y, Math.max(6, profile.headGlowRadius * 0.48), beamPalette.core, 0.08 * beamAlpha);
       if (profile.vectorHeadAlpha > 0) {
         drawBeamHead(core, headPoint, angle, effectNormal, beamPalette, profile);
       }
-      beamBloom.x = headPoint.x;
-      beamBloom.y = headPoint.y;
-      beamBloom.rotation = angle;
-      beamBloom.alpha = sequenceBloomAlpha * beamAlpha;
-      beamBloom.scale.set(
-        useFixedSequenceFrame ? bloomScaleX : beamScaleX * 1.12,
-        useFixedSequenceFrame ? bloomScaleY : beamScaleY * 1.24,
-      );
       beam.x = headPoint.x;
       beam.y = headPoint.y;
       beam.rotation = angle;
-      beam.alpha = 0.98 * beamAlpha;
-      beam.scale.set(
-        useFixedSequenceFrame ? beamScaleX : beamScaleX * 1.04,
-        useFixedSequenceFrame ? beamScaleY : beamScaleY * 0.96,
-      );
+      beam.alpha = body.alpha * beamAlpha;
+      beam.scale.set(bodyScale);
     } else {
-      beamBloom.alpha = 0;
       beam.alpha = 0;
     }
 

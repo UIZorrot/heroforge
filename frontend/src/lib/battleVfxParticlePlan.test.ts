@@ -5,22 +5,23 @@ import {
   createBuffBorderVfxPlan,
   createProjectileVfxProfile,
   targetHitPointInHost,
+  projectileBodyEnvelope,
+  projectileFlightFrameIndex,
   projectileHeadProgress,
   projectileTrailWindow,
   projectileParticleAlpha,
   projectileAimBasis,
-  projectileSequenceReveal,
 } from './battleVfxParticlePlan';
 
 describe('battle VFX particle plan', () => {
   it('keeps projectile timing fast and the visible trail short', () => {
     const plan = createFastProjectilePlan(520);
 
-    expect(plan.flightDurationMs).toBeGreaterThanOrEqual(205);
-    expect(plan.flightDurationMs).toBeLessThanOrEqual(255);
-    expect(plan.trailFraction).toBeLessThanOrEqual(0.18);
+    expect(plan.flightDurationMs).toBeGreaterThanOrEqual(175);
+    expect(plan.flightDurationMs).toBeLessThanOrEqual(235);
+    expect(plan.trailFraction).toBeLessThanOrEqual(0.14);
     expect(plan.trailFadeMs).toBeLessThanOrEqual(180);
-    expect(plan.beamLingerMs).toBeLessThanOrEqual(35);
+    expect(plan.beamLingerMs).toBe(0);
     expect(plan.impactDelayMs).toBe(plan.flightDurationMs);
   });
 
@@ -30,29 +31,34 @@ describe('battle VFX particle plan', () => {
 
     expect(window.endT).toBeCloseTo(0.72, 4);
     expect(window.startT).toBeGreaterThan(0.54);
-    expect(window.endT - window.startT).toBeLessThanOrEqual(0.18);
+    expect(window.endT - window.startT).toBeLessThanOrEqual(0.14);
   });
 
-  it('keeps the projectile body visible through the middle of the flight', () => {
+  it('accelerates the projectile into impact instead of slowing near the target', () => {
     expect(projectileHeadProgress(0)).toBe(0);
-    expect(projectileHeadProgress(0.5)).toBeLessThanOrEqual(0.78);
+    expect(projectileHeadProgress(0.5)).toBeLessThan(0.5);
     expect(projectileHeadProgress(0.85)).toBeLessThan(0.98);
     expect(projectileHeadProgress(1)).toBe(1);
   });
 
-  it('unfolds authored projectile sprites from the head instead of sliding a full decal', () => {
-    const start = projectileSequenceReveal(0);
-    const early = projectileSequenceReveal(0.18);
-    const middle = projectileSequenceReveal(0.42);
-    const late = projectileSequenceReveal(0.78);
+  it('reveals projectile bodies with uniform scaling so their art is never stretched', () => {
+    const start = projectileBodyEnvelope(0);
+    const early = projectileBodyEnvelope(0.08);
+    const settled = projectileBodyEnvelope(0.2);
 
-    expect(start.scaleX).toBeLessThan(0.24);
-    expect(start.scaleY).toBeGreaterThan(0.72);
-    expect(early.scaleX).toBeGreaterThan(start.scaleX);
-    expect(middle.scaleX).toBeGreaterThan(early.scaleX);
-    expect(middle.scaleX).toBeLessThan(1);
-    expect(late.scaleX).toBe(1);
-    expect(late.scaleY).toBe(1);
+    expect(start).toEqual({ scale: 0.72, alpha: 0.32 });
+    expect(early.scale).toBeGreaterThan(start.scale);
+    expect(early.alpha).toBeGreaterThan(start.alpha);
+    expect(settled).toEqual({ scale: 1, alpha: 1 });
+    expect(Object.keys(settled)).not.toContain('scaleX');
+    expect(Object.keys(settled)).not.toContain('scaleY');
+  });
+
+  it('uses only sustained flight frames and excludes dissolve frames at impact', () => {
+    expect(projectileFlightFrameIndex(0)).toBe(2);
+    expect(projectileFlightFrameIndex(0.5)).toBe(7);
+    expect(projectileFlightFrameIndex(1)).toBe(11);
+    expect(projectileFlightFrameIndex(1, [0, 15])).toBe(11);
   });
 
   it('can rotate the projectile visual basis without changing the card-to-card path', () => {
@@ -184,9 +190,9 @@ describe('battle VFX particle plan', () => {
     const steel = createFastProjectilePlan(520, createProjectileVfxProfile({ actionType: 'attack', attackType: 'slash' }));
 
     for (const plan of [fire, frost, steel]) {
-      expect(plan.flightDurationMs).toBeGreaterThanOrEqual(190);
-      expect(plan.flightDurationMs).toBeLessThanOrEqual(255);
-      expect(plan.trailFraction).toBeLessThanOrEqual(0.18);
+      expect(plan.flightDurationMs).toBeGreaterThanOrEqual(175);
+      expect(plan.flightDurationMs).toBeLessThanOrEqual(235);
+      expect(plan.trailFraction).toBeLessThanOrEqual(0.14);
       expect(plan.trailFadeMs).toBeLessThanOrEqual(180);
     }
     expect(fire.particleCount).toBeGreaterThan(steel.particleCount);
@@ -253,6 +259,18 @@ describe('battle VFX particle plan', () => {
     expect(new Set(signatures).size).toBeGreaterThanOrEqual(9);
   });
 
+  it('keeps every canonical projectile at a fixed, distance-independent body size', () => {
+    const effects = ['blood', 'fire', 'frost', 'holy', 'magic', 'nature', 'arrow', 'lighting', 'void', 'water', 'bullet', 'rock'];
+
+    for (const typeEffect of effects) {
+      const profile = createProjectileVfxProfile({ typeCatalog: 'proj', typeEffect });
+      expect(profile.beamSequenceScale).toBeGreaterThanOrEqual(0.3);
+      expect(profile.beamSequenceScale).toBeLessThanOrEqual(0.44);
+      expect(profile.beamSequenceFrameRange?.[0]).toBeGreaterThanOrEqual(2);
+      expect(profile.beamSequenceFrameRange?.[1]).toBeLessThanOrEqual(11);
+    }
+  });
+
   it('uses beam silhouettes instead of arrowhead projectile geometry', () => {
     const projectileTypes = ['fire', 'frost', 'dark', 'weapon', 'magic', 'thunder', 'nature', 'water'];
     const profiles = projectileTypes.map((attackType) => createProjectileVfxProfile({ attackType }));
@@ -278,32 +296,24 @@ describe('battle VFX particle plan', () => {
     const defaultGold = createProjectileVfxProfile();
 
     expect(fire.beamSequenceKey).toBe('projectileFire');
-    expect(fire.beamSequenceMode).toBe('fixed-frame');
-    expect(fire.beamSequenceScale).toBeGreaterThanOrEqual(0.4);
-    expect(fire.beamSequenceScale).toBeLessThanOrEqual(0.54);
-    expect(fire.beamSequenceBloomScale).toBeLessThanOrEqual(0.62);
-    expect(fire.beamSequenceFrameRange).toEqual([1, 3]);
+    expect(fire.beamSequenceScale).toBeGreaterThanOrEqual(0.3);
+    expect(fire.beamSequenceScale).toBeLessThanOrEqual(0.44);
+    expect(fire.beamSequenceFrameRange).toEqual([2, 11]);
     expect(fire.impactDirectionalCut ?? true).toBe(true);
     expect(fire.impactFlashTexture ?? true).toBe(true);
     expect(frost.beamSequenceKey).toBe('projectileFrost');
-    expect(frost.beamSequenceScale).toBeLessThanOrEqual(0.52);
-    expect(frost.beamSequenceBloomScale).toBeLessThanOrEqual(0.6);
-    expect(frost.beamSequenceFrameRange).toEqual([2, 10]);
+    expect(frost.beamSequenceScale).toBeLessThanOrEqual(0.44);
+    expect(frost.beamSequenceFrameRange).toEqual([2, 11]);
     expect(light.beamSequenceKey).toBe('projectileHoly');
-    expect(light.beamSequenceScale).toBeLessThanOrEqual(0.52);
-    expect(light.beamSequenceBloomScale).toBeLessThanOrEqual(0.6);
-    expect(light.beamSequenceBloomAlpha).toBe(0);
-    expect(light.beamSequenceFrameRange).toEqual([2, 9]);
+    expect(light.beamSequenceScale).toBeLessThanOrEqual(0.44);
+    expect(light.beamSequenceFrameRange).toEqual([2, 11]);
     expect(light.impactDirectionalCut).toBe(false);
     expect(light.impactFlashTexture).toBe(false);
     expect(blood.beamSequenceKey).toBe('projectileBlood');
-    expect(blood.beamSequenceScale).toBeLessThanOrEqual(0.53);
-    expect(blood.beamSequenceBloomScale).toBeLessThanOrEqual(0.61);
-    expect(blood.beamSequenceBloomAlpha).toBe(0);
-    expect(blood.beamSequenceFrameRange).toEqual([2, 10]);
+    expect(blood.beamSequenceScale).toBeLessThanOrEqual(0.44);
+    expect(blood.beamSequenceFrameRange).toEqual([2, 11]);
     expect(defaultGold.beamSequenceKey).toBe('projectileBeam');
-    expect(defaultGold.beamSequenceMode).toBe('fixed-frame');
-    expect(defaultGold.beamSequenceFrameRange).toEqual([2, 15]);
+    expect(defaultGold.beamSequenceFrameRange).toEqual([2, 11]);
     expect(createProjectileVfxProfile({ typeCatalog: 'proj', typeEffect: 'bullet' }).beamSequenceKey).toBe('projectileBullet');
   });
 
