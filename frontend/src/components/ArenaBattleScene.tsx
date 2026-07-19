@@ -1745,8 +1745,8 @@ function renderPixiProjectileEmitter({
         bloom.lineTo(segmentEnd.x, segmentEnd.y);
         bloom.stroke({
           color: beamPalette.core,
-          width: Math.max(8, profile.bloomWidth * 0.54) * (0.3 + segment.strength * 0.7),
-          alpha: 0.14 * strength,
+          width: Math.max(11, profile.bloomWidth * 0.72) * (0.28 + segment.strength * 0.72),
+          alpha: 0.28 * strength,
           cap: 'round',
         });
 
@@ -1754,8 +1754,8 @@ function renderPixiProjectileEmitter({
         core.lineTo(segmentEnd.x, segmentEnd.y);
         core.stroke({
           color: beamPalette.core,
-          width: Math.max(2.4, profile.coreWidth * 0.46) * (0.24 + segment.strength * 0.76),
-          alpha: 0.46 * strength,
+          width: Math.max(3.4, profile.coreWidth * 0.62) * (0.2 + segment.strength * 0.8),
+          alpha: 0.76 * strength,
           cap: 'round',
         });
 
@@ -1765,8 +1765,8 @@ function renderPixiProjectileEmitter({
           core.lineTo(segmentEnd.x, segmentEnd.y);
           core.stroke({
             color: beamPalette.hot,
-            width: 0.8 + hotStrength * 1.15,
-            alpha: 0.58 * hotStrength * beamAlpha,
+            width: 1.15 + hotStrength * 1.55,
+            alpha: 0.9 * hotStrength * beamAlpha,
             cap: 'round',
           });
         }

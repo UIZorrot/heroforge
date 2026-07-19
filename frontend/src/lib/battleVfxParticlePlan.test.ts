@@ -25,8 +25,8 @@ describe('battle VFX particle plan', () => {
 
     expect(plan.flightDurationMs).toBeGreaterThanOrEqual(175);
     expect(plan.flightDurationMs).toBeLessThanOrEqual(235);
-    expect(plan.trailFraction).toBeGreaterThanOrEqual(0.3);
-    expect(plan.trailFraction).toBeLessThanOrEqual(0.62);
+    expect(plan.trailFraction).toBeGreaterThanOrEqual(0.36);
+    expect(plan.trailFraction).toBeLessThanOrEqual(0.68);
     expect(plan.trailFadeMs).toBeLessThanOrEqual(180);
     expect(plan.launchDelayMs).toBeGreaterThanOrEqual(30);
     expect(plan.launchDelayMs).toBeLessThanOrEqual(84);
@@ -39,7 +39,7 @@ describe('battle VFX particle plan', () => {
 
     expect(window.endT).toBeCloseTo(0.72, 4);
     expect(window.startT).toBeGreaterThan(0.25);
-    expect(window.endT - window.startT).toBeLessThanOrEqual(0.62);
+    expect(window.endT - window.startT).toBeLessThanOrEqual(0.68);
   });
 
   it('ends the luminous trail behind the projectile body instead of drawing a second head', () => {
@@ -49,7 +49,7 @@ describe('battle VFX particle plan', () => {
 
     expect(junction).toBeGreaterThanOrEqual(window.startT);
     expect(junction).toBeLessThan(window.endT);
-    expect(window.endT - junction).toBeCloseTo(plan.bodyFootprintFraction, 6);
+    expect(window.endT - junction).toBeCloseTo(plan.bodyFootprintFraction * 0.72, 6);
   });
 
   it('builds a smooth tapered trail that grows brighter toward the projectile body', () => {
@@ -107,6 +107,20 @@ describe('battle VFX particle plan', () => {
     expect(middle.point.y).not.toBeCloseTo(120, 2);
     expect(middle.depthEnvelope).toBeCloseTo(1, 6);
     expect(launch.angle).not.toBe(impact.angle);
+  });
+
+  it('keeps arrow, bullet, and rock projectiles on an exact straight path', () => {
+    const start = { x: 40, y: 120 };
+    const end = { x: 440, y: 220 };
+
+    for (const typeEffect of ['arrow', 'bullet', 'rock']) {
+      const profile = createProjectileVfxProfile({ typeCatalog: 'proj', typeEffect });
+      const middle = projectilePathSample(start, end, 0.5, profile.arcBend, profile.pathWobble, profile.pathWaves);
+
+      expect(profile.arcBend).toBe(0);
+      expect(profile.pathWobble).toBe(0);
+      expect(middle.point).toEqual({ x: 240, y: 170 });
+    }
   });
 
   it('can rotate the projectile visual basis without changing the card-to-card path', () => {
@@ -240,7 +254,7 @@ describe('battle VFX particle plan', () => {
     for (const plan of [fire, frost, steel]) {
       expect(plan.flightDurationMs).toBeGreaterThanOrEqual(175);
       expect(plan.flightDurationMs).toBeLessThanOrEqual(235);
-      expect(plan.trailFraction).toBeLessThanOrEqual(0.62);
+      expect(plan.trailFraction).toBeLessThanOrEqual(0.68);
       expect(plan.trailFadeMs).toBeLessThanOrEqual(180);
     }
     expect(fire.particleCount).toBeGreaterThan(steel.particleCount);

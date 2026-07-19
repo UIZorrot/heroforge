@@ -689,12 +689,12 @@ const PROJECTILE_PROFILE_BY_TYPE: Record<BattleVfxProjectileTypeEffect, Projecti
   holy: { ...PROJECTILE_PROFILES.holy, arcBend: 0, pathWobble: 0.5, pathWaves: 1, depthScale: 0.04, wakeAlpha: 0.38, impactStyle: 'burst', launchDelayScale: 1.08 },
   magic: { ...PROJECTILE_PROFILES.magic, arcBend: -0.022, pathWobble: 4.2, pathWaves: 1.7, depthScale: 0.09, wakeAlpha: 0.58, impactStyle: 'burst', launchDelayScale: 1.12 },
   nature: { ...PROJECTILE_PROFILES.nature, arcBend: 0.036, pathWobble: 2.6, pathWaves: 1.3, depthScale: 0.07, wakeAlpha: 0.64, impactStyle: 'splash', launchDelayScale: 1.08 },
-  arrow: { ...PROJECTILE_PROFILES.steel, arcBend: 0.048, pathWobble: 0, pathWaves: 1, depthScale: 0.025, wakeAlpha: 0.18, impactStyle: 'pierce', launchDelayScale: 0.78 },
+  arrow: { ...PROJECTILE_PROFILES.steel, arcBend: 0, pathWobble: 0, pathWaves: 1, depthScale: 0.025, wakeAlpha: 0.18, impactStyle: 'pierce', launchDelayScale: 0.78 },
   lighting: { ...PROJECTILE_PROFILES.storm, arcBend: 0, pathWobble: 2.8, pathWaves: 3.4, depthScale: 0.035, wakeAlpha: 0.32, impactStyle: 'shock', launchDelayScale: 0.66 },
   void: { ...PROJECTILE_PROFILES.void, arcBend: -0.03, pathWobble: 5.2, pathWaves: 1.55, depthScale: 0.1, wakeAlpha: 0.44, impactStyle: 'collapse', launchDelayScale: 1.14 },
   water: { ...PROJECTILE_PROFILES.water, arcBend: 0.026, pathWobble: 5, pathWaves: 1.35, depthScale: 0.085, wakeAlpha: 0.72, impactStyle: 'splash', launchDelayScale: 1.04 },
   bullet: { ...PROJECTILE_PROFILES.bullet, arcBend: 0, pathWobble: 0, pathWaves: 1, depthScale: 0.015, wakeAlpha: 0.12, impactStyle: 'pierce', launchDelayScale: 0.48 },
-  rock: { ...PROJECTILE_PROFILES.gold, beamSequenceKey: 'projectileRock', beamSequenceScale: 0.44, speedScale: 1.16, arcBend: 0.068, pathWobble: 1.2, pathWaves: 0.8, depthScale: 0.06, wakeAlpha: 0.9, impactStyle: 'crush', launchDelayScale: 1.28 },
+  rock: { ...PROJECTILE_PROFILES.gold, beamSequenceKey: 'projectileRock', beamSequenceScale: 0.44, speedScale: 1.16, arcBend: 0, pathWobble: 0, pathWaves: 1, depthScale: 0.06, wakeAlpha: 0.9, impactStyle: 'crush', launchDelayScale: 1.28 },
 };
 
 function clamp(value: number, min: number, max: number) {
@@ -824,12 +824,12 @@ export function createFastProjectilePlan(distance: number, profile: ProjectileVf
   const flightDurationMs = Math.round(clamp((142 + normalized * 0.13) * profile.speedScale, 175, 235));
   const trailMaterialScale = clamp(profile.trailFraction / 0.14, 0.72, 1.18);
   const bodyLengthPx = clamp(314 * (profile.beamSequenceScale ?? 0.42) * 0.78 * PROJECTILE_BODY_LENGTH_SCALE, 76, 128);
-  const visibleTrailLengthPx = clamp((76 + normalized * 0.035) * trailMaterialScale, 72, 112);
+  const visibleTrailLengthPx = clamp((104 + normalized * 0.05) * trailMaterialScale, 96, 154);
 
   return {
     launchDelayMs,
     flightDurationMs,
-    trailFraction: clamp((bodyLengthPx + visibleTrailLengthPx) / Math.max(180, distance), 0.3, 0.62),
+    trailFraction: clamp((bodyLengthPx * 0.72 + visibleTrailLengthPx) / Math.max(180, distance), 0.36, 0.68),
     trailFadeMs: Math.round(clamp(profile.trailFadeMs, 96, 180)),
     impactDelayMs: launchDelayMs + flightDurationMs,
     particleCount: Math.round(clamp((10 + normalized / 42) * profile.particleDensity, 10, 34)),
@@ -864,7 +864,7 @@ export function projectileTrailWindow(headT: number, plan: FastProjectilePlan) {
 
 export function projectileTrailBodyJunction(headT: number, plan: FastProjectilePlan) {
   const trail = projectileTrailWindow(headT, plan);
-  const bodyFootprint = Math.min(plan.bodyFootprintFraction, plan.trailFraction * 0.72);
+  const bodyFootprint = Math.min(plan.bodyFootprintFraction * 0.72, plan.trailFraction * 0.58);
   return clamp(trail.endT - bodyFootprint, trail.startT, trail.endT);
 }
 
