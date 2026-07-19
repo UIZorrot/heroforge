@@ -5,6 +5,7 @@ import {
   projectileBeamSequence,
   projectileBeamSequenceFrameIndex,
   projectileBeamSequenceFrameRect,
+  projectileFrameTipAnchorFromRgba,
   projectileVfxAssetFiles,
 } from './battleVfxAssets';
 
@@ -81,6 +82,24 @@ describe('battle VFX texture assets', () => {
     expect(projectileBeamSequenceFrameRect(1252, 1252, 0)).toEqual({ x: 0, y: 0, width: 313, height: 313 });
     expect(projectileBeamSequenceFrameRect(1252, 1252, 5)).toEqual({ x: 313, y: 313, width: 313, height: 313 });
     expect(projectileBeamSequenceFrameRect(1252, 1252, 15)).toEqual({ x: 939, y: 939, width: 313, height: 313 });
+
+    expect(projectileBeamSequenceFrameRect(1254, 1254, 0)).toEqual({ x: 0, y: 0, width: 314, height: 314 });
+    expect(projectileBeamSequenceFrameRect(1254, 1254, 5)).toEqual({ x: 314, y: 314, width: 313, height: 313 });
+    expect(projectileBeamSequenceFrameRect(1254, 1254, 15)).toEqual({ x: 941, y: 941, width: 313, height: 313 });
+  });
+
+  it('anchors every sequence frame to its own bright projectile tip', () => {
+    const pixels = new Uint8ClampedArray(10 * 6 * 4);
+    for (const y of [2, 4]) {
+      const pixel = (y * 10 + 8) * 4;
+      pixels[pixel] = 240;
+      pixels[pixel + 1] = 220;
+      pixels[pixel + 2] = 180;
+      pixels[pixel + 3] = 255;
+    }
+
+    expect(projectileFrameTipAnchorFromRgba(pixels, 10, 6)).toBeCloseTo(0.9, 6);
+    expect(projectileFrameTipAnchorFromRgba(new Uint8ClampedArray(10 * 6 * 4), 10, 6)).toBe(0.9);
   });
 
   it('maps projectile flight progress to spritesheet frames', () => {

@@ -10,6 +10,7 @@ import {
   battleVfxTextureAssets,
   projectileBeamSequence,
   projectileBeamSequenceFrameRect,
+  projectileFrameTipAnchorFromRgba,
 } from '../lib/battleVfxAssets';
 import { resolveBattleVfxDescriptor, type BattleVfxMode, type BattleVfxTone } from '../lib/battleVfxCatalog';
 import type { BattleBoardState, BattleBoardUnit, BattleEvent, BattleResult } from '../lib/battleTypes';
@@ -19,10 +20,12 @@ import {
   createProjectileVfxProfile,
   projectileAimBasis,
   projectileBodyEnvelope,
+  projectileBodyRenderScale,
   projectileFlightFrameIndex,
   projectileHeadProgress,
   projectileParticleAlpha,
   projectilePathSample,
+  projectileTrailBodyJunction,
   projectileTrailWindow,
   pointInHost,
   rectInHost,
@@ -634,9 +637,10 @@ type PixiPoint = { x: number; y: number };
 type PixiRect = { x: number; y: number; width: number; height: number };
 type PixiPalette = { core: number; hot: number; dark: number; text: number };
 type PixiAdd = <T extends Container | Graphics | Text | Sprite>(node: T, zIndex?: number) => T;
+type ProjectileSequenceFrame = { texture: Texture; tipAnchorX: number };
 type BattleVfxTextures = {
-  projectileBeamFrames: Texture[];
-  projectileSequenceFrames: Record<ProjectileVfxSequenceTextureKey, Texture[]>;
+  projectileBeamFrames: ProjectileSequenceFrame[];
+  projectileSequenceFrames: Record<ProjectileVfxSequenceTextureKey, ProjectileSequenceFrame[]>;
   sparkA: Texture;
   sparkB: Texture;
   sparkC: Texture;
@@ -777,12 +781,26 @@ function drawImpactSignature(
 
 function createProjectileBeamSequenceTextures(texture: Texture) {
   const sourceTexture = createBlackBackedVfxRuntimeTexture(texture);
+  const resource = sourceTexture.source.resource as { getContext?: (contextId: '2d', options?: { willReadFrequently?: boolean }) => CanvasRenderingContext2D | null } | undefined;
+  const context = resource?.getContext?.('2d', { willReadFrequently: true }) ?? null;
   return Array.from({ length: projectileBeamSequence.frameCount }, (_, index) => {
     const rect = projectileBeamSequenceFrameRect(sourceTexture.width, sourceTexture.height, index);
-    return new Texture({
-      source: sourceTexture.source,
-      frame: new Rectangle(rect.x, rect.y, rect.width, rect.height),
-    });
+    let tipAnchorX = 0.9;
+    if (context) {
+      try {
+        const pixels = context.getImageData(rect.x, rect.y, rect.width, rect.height).data;
+        tipAnchorX = projectileFrameTipAnchorFromRgba(pixels, rect.width, rect.height);
+      } catch {
+        tipAnchorX = 0.9;
+      }
+    }
+    return {
+      texture: new Texture({
+        source: sourceTexture.source,
+        frame: new Rectangle(rect.x, rect.y, rect.width, rect.height),
+      }),
+      tipAnchorX,
+    };
   });
 }
 
@@ -824,7 +842,7 @@ function createBattleVfxTextures(loadedTextures: Record<string, Texture>): Battl
   const smokeB = loadedTextures.smokeB;
   const smokeC = loadedTextures.smokeC;
   const smokeD = loadedTextures.smokeD;
-  const projectileFrameCache = new Map<Texture, Texture[]>();
+  const projectileFrameCache = new Map<Texture, ProjectileSequenceFrame[]>();
   const projectileFrames = (key: ProjectileVfxSequenceTextureKey) => {
     const texture = loadedTextures[key] ?? loadedTextures.projectileBeam;
     const cached = projectileFrameCache.get(texture);
@@ -1490,13 +1508,13 @@ function renderPixiProjectileEmitter({
   const beamSequenceKey = profile.beamSequenceKey;
   const beamSequenceFrames = textures.projectileSequenceFrames[beamSequenceKey] ?? textures.projectileBeamFrames;
   const useBeamSequence = beamSequenceFrames.length > 0;
-  const initialBeamTexture = beamSequenceFrames[0] ?? textures.projectileBeamFrames[0];
+  const initialBeamFrame = beamSequenceFrames[0] ?? textures.projectileBeamFrames[0];
   let currentBeamFrameIndex = -1;
   const plan = createFastProjectilePlan(dist, profile);
   const core = add(new Graphics(), 6);
   const bloom = add(new Graphics(), 5);
   const source = add(new Graphics(), 4);
-  const beam = add(new Sprite(initialBeamTexture), 9);
+  const beam = add(new Sprite(initialBeamFrame.texture), 9);
   const particleLayer = add(new ParticleContainer<Particle>({
     dynamicProperties: {
       position: true,
@@ -1531,7 +1549,7 @@ function renderPixiProjectileEmitter({
   beam.blendMode = useBeamSequence ? projectileBeamSequence.blendMode : 'add';
   bloom.filters = [new BlurFilter({ strength: 3 })];
   source.filters = [new BlurFilter({ strength: 2 })];
-  beam.anchor.set(0.94, 0.5);
+  beam.anchor.set(initialBeamFrame.tipAnchorX, 0.5);
   beam.alpha = 0;
   beam.tint = 0xffffff;
   beam.scale.set(0.01);
@@ -1541,8 +1559,9 @@ function renderPixiProjectileEmitter({
     const frameIndex = projectileFlightFrameIndex(progress, profile.beamSequenceFrameRange);
     if (frameIndex === currentBeamFrameIndex) return;
     currentBeamFrameIndex = frameIndex;
-    const frameTexture = beamSequenceFrames[frameIndex] ?? initialBeamTexture;
-    beam.texture = frameTexture;
+    const frame = beamSequenceFrames[frameIndex] ?? initialBeamFrame;
+    beam.texture = frame.texture;
+    beam.anchor.x = frame.tipAnchorX;
   };
 
   const createParticle = (container: ParticleContainer<Particle>, texture: Texture, point: PixiPoint, velocity: PixiPoint, lifeMs: number, scale: number, alpha: number, delayMs = 0) => {
@@ -1720,6 +1739,8 @@ function renderPixiProjectileEmitter({
     const angle = path.angle + angleOffsetRad;
     const trail = projectileTrailWindow(headT, plan);
     const trailPoint = projectilePathSample(start, end, trail.startT, profile.arcBend, profile.pathWobble, profile.pathWaves).point;
+    const trailBodyT = projectileTrailBodyJunction(headT, plan);
+    const trailBodyPoint = projectilePathSample(start, end, trailBodyT, profile.arcBend, profile.pathWobble, profile.pathWaves).point;
 
     if (elapsedMs >= plan.launchDelayMs && !launchBurstDone) {
       spawnLaunchBurst();
@@ -1748,17 +1769,21 @@ function renderPixiProjectileEmitter({
       updateBeamSequenceTexture(travelT);
       const beamAlpha = Math.min(1, travelT / 0.08);
       const body = projectileBodyEnvelope(headT);
-      const bodyScale = (profile.beamSequenceScale ?? 0.42) * body.scale * (1 + (profile.depthScale ?? 0.05) * path.depthEnvelope);
+      const bodyScale = projectileBodyRenderScale(
+        (profile.beamSequenceScale ?? 0.42) * body.scale,
+        path.depthEnvelope,
+        profile.depthScale,
+      );
       bloom.moveTo(trailPoint.x, trailPoint.y);
-      bloom.lineTo(headPoint.x, headPoint.y);
+      bloom.lineTo(trailBodyPoint.x, trailBodyPoint.y);
       bloom.stroke({ color: beamPalette.core, width: Math.max(7, profile.bloomWidth * 0.46), alpha: 0.1 * beamAlpha, cap: 'round' });
       core.moveTo(trailPoint.x, trailPoint.y);
-      core.lineTo(headPoint.x, headPoint.y);
+      core.lineTo(trailBodyPoint.x, trailBodyPoint.y);
       core.stroke({ color: beamPalette.core, width: Math.max(2, profile.coreWidth * 0.38), alpha: 0.34 * beamAlpha, cap: 'round' });
-      const hotTrailT = Math.max(trail.startT, trail.endT - 0.045);
+      const hotTrailT = Math.max(trail.startT, trailBodyT - 0.035);
       const hotTrailPoint = projectilePathSample(start, end, hotTrailT, profile.arcBend, profile.pathWobble, profile.pathWaves).point;
       core.moveTo(hotTrailPoint.x, hotTrailPoint.y);
-      core.lineTo(headPoint.x, headPoint.y);
+      core.lineTo(trailBodyPoint.x, trailBodyPoint.y);
       core.stroke({ color: beamPalette.hot, width: 1.5, alpha: 0.72 * beamAlpha, cap: 'round' });
       drawGlowCircle(bloom, headPoint.x, headPoint.y, Math.max(6, profile.headGlowRadius * 0.48), beamPalette.core, 0.08 * beamAlpha);
       if (profile.vectorHeadAlpha > 0) {
@@ -1768,7 +1793,7 @@ function renderPixiProjectileEmitter({
       beam.y = headPoint.y;
       beam.rotation = angle;
       beam.alpha = body.alpha * beamAlpha;
-      beam.scale.set(bodyScale);
+      beam.scale.set(bodyScale.x, bodyScale.y);
     } else {
       beam.alpha = 0;
     }

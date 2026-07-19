@@ -88,16 +88,42 @@ export function projectileBeamSequenceFrameIndex(progress: number) {
 
 export function projectileBeamSequenceFrameRect(textureWidth: number, textureHeight: number, frameIndex: number) {
   const frame = clamp(Math.floor(frameIndex), 0, projectileBeamSequence.frameCount - 1);
-  const width = Math.floor(textureWidth / projectileBeamSequence.columns);
-  const height = Math.floor(textureHeight / projectileBeamSequence.rows);
   const column = frame % projectileBeamSequence.columns;
   const row = Math.floor(frame / projectileBeamSequence.columns);
+  const x = Math.round(column * textureWidth / projectileBeamSequence.columns);
+  const y = Math.round(row * textureHeight / projectileBeamSequence.rows);
+  const right = Math.round((column + 1) * textureWidth / projectileBeamSequence.columns);
+  const bottom = Math.round((row + 1) * textureHeight / projectileBeamSequence.rows);
   return {
-    x: column * width,
-    y: row * height,
-    width,
-    height,
+    x,
+    y,
+    width: right - x,
+    height: bottom - y,
   };
+}
+
+export function projectileFrameTipAnchorFromRgba(
+  rgba: ArrayLike<number>,
+  width: number,
+  height: number,
+) {
+  const safeWidth = Math.max(1, Math.floor(width));
+  const safeHeight = Math.max(1, Math.floor(height));
+  const top = Math.floor(safeHeight * 0.2);
+  const bottom = Math.max(top + 1, Math.ceil(safeHeight * 0.8));
+
+  for (let x = safeWidth - 1; x >= 0; x -= 1) {
+    let brightSamples = 0;
+    for (let y = top; y < bottom; y += 2) {
+      const pixel = (y * safeWidth + x) * 4;
+      const luminance = Math.max(rgba[pixel] ?? 0, rgba[pixel + 1] ?? 0, rgba[pixel + 2] ?? 0);
+      const alpha = rgba[pixel + 3] ?? 0;
+      if (luminance >= 150 && alpha >= 170) brightSamples += 1;
+      if (brightSamples >= 2) return clamp((x + 1) / safeWidth, 0.68, 0.98);
+    }
+  }
+
+  return 0.9;
 }
 
 export function blackBackedVfxAlphaForLuminance(luminance: number) {

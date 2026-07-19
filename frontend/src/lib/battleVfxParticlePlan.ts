@@ -11,6 +11,8 @@ export type RectLike = { left: number; top: number; width: number; height: numbe
 export type HostRectLike = { left: number; top: number; width?: number; height?: number };
 export type RenderSizeLike = { width: number; height: number };
 
+export const PROJECTILE_BODY_LENGTH_SCALE = 1.14;
+
 export type FastProjectilePlan = {
   launchDelayMs: number;
   flightDurationMs: number;
@@ -823,6 +825,12 @@ export function projectileTrailWindow(headT: number, plan: FastProjectilePlan) {
   };
 }
 
+export function projectileTrailBodyJunction(headT: number, plan: FastProjectilePlan) {
+  const trail = projectileTrailWindow(headT, plan);
+  const bodyFootprint = Math.min(0.06, plan.trailFraction * 0.5);
+  return clamp(trail.endT - bodyFootprint, trail.startT, trail.endT);
+}
+
 export function projectileHeadProgress(timeProgress: number) {
   const t = clamp(timeProgress, 0, 1);
   return t * (0.42 + 0.58 * t);
@@ -873,6 +881,18 @@ export function projectileBodyEnvelope(headProgress: number) {
   return {
     scale: clamp(0.72 + eased * 0.28, 0.72, 1),
     alpha: clamp(0.32 + eased * 0.68, 0.32, 1),
+  };
+}
+
+export function projectileBodyRenderScale(
+  envelopeScale: number,
+  depthEnvelope = 0,
+  depthScale = 0.05,
+) {
+  const visualScale = envelopeScale * (1 + depthScale * depthEnvelope);
+  return {
+    x: visualScale * PROJECTILE_BODY_LENGTH_SCALE,
+    y: visualScale,
   };
 }
 

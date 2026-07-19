@@ -4,11 +4,14 @@ import {
   createFastProjectilePlan,
   createBuffBorderVfxPlan,
   createProjectileVfxProfile,
+  PROJECTILE_BODY_LENGTH_SCALE,
   targetHitPointInHost,
   projectileBodyEnvelope,
+  projectileBodyRenderScale,
   projectileFlightFrameIndex,
   projectileHeadProgress,
   projectilePathSample,
+  projectileTrailBodyJunction,
   projectileTrailWindow,
   projectileParticleAlpha,
   projectileAimBasis,
@@ -36,6 +39,16 @@ describe('battle VFX particle plan', () => {
     expect(window.endT - window.startT).toBeLessThanOrEqual(0.14);
   });
 
+  it('ends the luminous trail behind the projectile body instead of drawing a second head', () => {
+    const plan = createFastProjectilePlan(520);
+    const window = projectileTrailWindow(0.72, plan);
+    const junction = projectileTrailBodyJunction(0.72, plan);
+
+    expect(junction).toBeGreaterThanOrEqual(window.startT);
+    expect(junction).toBeLessThan(window.endT);
+    expect(window.endT - junction).toBeCloseTo(0.06, 6);
+  });
+
   it('accelerates the projectile into impact instead of slowing near the target', () => {
     expect(projectileHeadProgress(0)).toBe(0);
     expect(projectileHeadProgress(0.5)).toBeLessThan(0.5);
@@ -43,10 +56,12 @@ describe('battle VFX particle plan', () => {
     expect(projectileHeadProgress(1)).toBe(1);
   });
 
-  it('reveals projectile bodies with uniform scaling so their art is never stretched', () => {
+  it('keeps a subtle authored length ratio without distance-based stretching', () => {
     const start = projectileBodyEnvelope(0);
     const early = projectileBodyEnvelope(0.08);
     const settled = projectileBodyEnvelope(0.2);
+    const startRenderScale = projectileBodyRenderScale(start.scale);
+    const settledRenderScale = projectileBodyRenderScale(settled.scale, 1, 0.08);
 
     expect(start).toEqual({ scale: 0.72, alpha: 0.32 });
     expect(early.scale).toBeGreaterThan(start.scale);
@@ -54,6 +69,8 @@ describe('battle VFX particle plan', () => {
     expect(settled).toEqual({ scale: 1, alpha: 1 });
     expect(Object.keys(settled)).not.toContain('scaleX');
     expect(Object.keys(settled)).not.toContain('scaleY');
+    expect(startRenderScale.x / startRenderScale.y).toBeCloseTo(PROJECTILE_BODY_LENGTH_SCALE, 6);
+    expect(settledRenderScale.x / settledRenderScale.y).toBeCloseTo(PROJECTILE_BODY_LENGTH_SCALE, 6);
   });
 
   it('uses only sustained flight frames and excludes dissolve frames at impact', () => {
