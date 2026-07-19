@@ -25,8 +25,7 @@ import {
   projectileHeadProgress,
   projectileParticleAlpha,
   projectilePathSample,
-  projectileTrailBodyJunction,
-  projectileTrailWindow,
+  projectileTrailSegments,
   pointInHost,
   rectInHost,
   targetHitPointInHost,
@@ -1737,10 +1736,7 @@ function renderPixiProjectileEmitter({
     const path = projectilePathSample(start, end, headT, profile.arcBend, profile.pathWobble, profile.pathWaves);
     const headPoint = path.point;
     const angle = path.angle + angleOffsetRad;
-    const trail = projectileTrailWindow(headT, plan);
-    const trailPoint = projectilePathSample(start, end, trail.startT, profile.arcBend, profile.pathWobble, profile.pathWaves).point;
-    const trailBodyT = projectileTrailBodyJunction(headT, plan);
-    const trailBodyPoint = projectilePathSample(start, end, trailBodyT, profile.arcBend, profile.pathWobble, profile.pathWaves).point;
+    const trailSegments = projectileTrailSegments(headT, plan);
 
     if (elapsedMs >= plan.launchDelayMs && !launchBurstDone) {
       spawnLaunchBurst();
@@ -1774,17 +1770,41 @@ function renderPixiProjectileEmitter({
         path.depthEnvelope,
         profile.depthScale,
       );
-      bloom.moveTo(trailPoint.x, trailPoint.y);
-      bloom.lineTo(trailBodyPoint.x, trailBodyPoint.y);
-      bloom.stroke({ color: beamPalette.core, width: Math.max(7, profile.bloomWidth * 0.46), alpha: 0.1 * beamAlpha, cap: 'round' });
-      core.moveTo(trailPoint.x, trailPoint.y);
-      core.lineTo(trailBodyPoint.x, trailBodyPoint.y);
-      core.stroke({ color: beamPalette.core, width: Math.max(2, profile.coreWidth * 0.38), alpha: 0.34 * beamAlpha, cap: 'round' });
-      const hotTrailT = Math.max(trail.startT, trailBodyT - 0.035);
-      const hotTrailPoint = projectilePathSample(start, end, hotTrailT, profile.arcBend, profile.pathWobble, profile.pathWaves).point;
-      core.moveTo(hotTrailPoint.x, hotTrailPoint.y);
-      core.lineTo(trailBodyPoint.x, trailBodyPoint.y);
-      core.stroke({ color: beamPalette.hot, width: 1.5, alpha: 0.72 * beamAlpha, cap: 'round' });
+      for (const segment of trailSegments) {
+        const segmentStart = projectilePathSample(start, end, segment.startT, profile.arcBend, profile.pathWobble, profile.pathWaves).point;
+        const segmentEnd = projectilePathSample(start, end, segment.endT, profile.arcBend, profile.pathWobble, profile.pathWaves).point;
+        const strength = segment.strength * beamAlpha;
+
+        bloom.moveTo(segmentStart.x, segmentStart.y);
+        bloom.lineTo(segmentEnd.x, segmentEnd.y);
+        bloom.stroke({
+          color: beamPalette.core,
+          width: Math.max(8, profile.bloomWidth * 0.54) * (0.3 + segment.strength * 0.7),
+          alpha: 0.14 * strength,
+          cap: 'round',
+        });
+
+        core.moveTo(segmentStart.x, segmentStart.y);
+        core.lineTo(segmentEnd.x, segmentEnd.y);
+        core.stroke({
+          color: beamPalette.core,
+          width: Math.max(2.4, profile.coreWidth * 0.46) * (0.24 + segment.strength * 0.76),
+          alpha: 0.46 * strength,
+          cap: 'round',
+        });
+
+        if (segment.strength > 0.48) {
+          const hotStrength = (segment.strength - 0.48) / 0.52;
+          core.moveTo(segmentStart.x, segmentStart.y);
+          core.lineTo(segmentEnd.x, segmentEnd.y);
+          core.stroke({
+            color: beamPalette.hot,
+            width: 0.8 + hotStrength * 1.15,
+            alpha: 0.58 * hotStrength * beamAlpha,
+            cap: 'round',
+          });
+        }
+      }
       drawGlowCircle(bloom, headPoint.x, headPoint.y, Math.max(6, profile.headGlowRadius * 0.48), beamPalette.core, 0.08 * beamAlpha);
       if (profile.vectorHeadAlpha > 0) {
         drawBeamHead(core, headPoint, angle, effectNormal, beamPalette, profile);

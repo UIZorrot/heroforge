@@ -24,6 +24,12 @@ export type FastProjectilePlan = {
   impactRadius: number;
 };
 
+export type ProjectileTrailSegment = {
+  startT: number;
+  endT: number;
+  strength: number;
+};
+
 export type ProjectileVfxTextureKey = 'sparkA' | 'sparkB' | 'sparkC' | 'sparkD' | 'sparkE';
 export type ProjectileVfxSequenceTextureKey =
   | 'projectileBeam'
@@ -804,11 +810,13 @@ export function createFastProjectilePlan(distance: number, profile: ProjectileVf
   const normalized = clamp(distance, 220, 720);
   const launchDelayMs = Math.round(clamp(62 * (profile.launchDelayScale ?? 1), 30, 84));
   const flightDurationMs = Math.round(clamp((142 + normalized * 0.13) * profile.speedScale, 175, 235));
+  const trailMaterialScale = clamp(profile.trailFraction / 0.14, 0.72, 1.18);
+  const trailLengthPx = clamp((86 + normalized * 0.06) * trailMaterialScale, 82, 142);
 
   return {
     launchDelayMs,
     flightDurationMs,
-    trailFraction: clamp(profile.trailFraction, 0.07, 0.14),
+    trailFraction: clamp(trailLengthPx / Math.max(180, distance), 0.2, 0.46),
     trailFadeMs: Math.round(clamp(profile.trailFadeMs, 96, 180)),
     impactDelayMs: launchDelayMs + flightDurationMs,
     particleCount: Math.round(clamp((10 + normalized / 42) * profile.particleDensity, 10, 34)),
@@ -829,6 +837,28 @@ export function projectileTrailBodyJunction(headT: number, plan: FastProjectileP
   const trail = projectileTrailWindow(headT, plan);
   const bodyFootprint = Math.min(0.06, plan.trailFraction * 0.5);
   return clamp(trail.endT - bodyFootprint, trail.startT, trail.endT);
+}
+
+export function projectileTrailSegments(
+  headT: number,
+  plan: FastProjectilePlan,
+  segmentCount = 8,
+): ProjectileTrailSegment[] {
+  const trail = projectileTrailWindow(headT, plan);
+  const bodyJunction = projectileTrailBodyJunction(headT, plan);
+  const span = bodyJunction - trail.startT;
+  const count = clamp(Math.floor(segmentCount), 3, 12);
+  if (span <= 0.001) return [];
+
+  return Array.from({ length: count }, (_, index) => {
+    const startRatio = index / count;
+    const endRatio = (index + 1) / count;
+    return {
+      startT: trail.startT + span * startRatio,
+      endT: trail.startT + span * endRatio,
+      strength: Math.pow(endRatio, 1.55),
+    };
+  });
 }
 
 export function projectileHeadProgress(timeProgress: number) {

@@ -12,18 +12,20 @@ import {
   projectileHeadProgress,
   projectilePathSample,
   projectileTrailBodyJunction,
+  projectileTrailSegments,
   projectileTrailWindow,
   projectileParticleAlpha,
   projectileAimBasis,
 } from './battleVfxParticlePlan';
 
 describe('battle VFX particle plan', () => {
-  it('keeps projectile timing fast and the visible trail short', () => {
+  it('keeps projectile timing fast and gives the trail a bounded visible length', () => {
     const plan = createFastProjectilePlan(520);
 
     expect(plan.flightDurationMs).toBeGreaterThanOrEqual(175);
     expect(plan.flightDurationMs).toBeLessThanOrEqual(235);
-    expect(plan.trailFraction).toBeLessThanOrEqual(0.14);
+    expect(plan.trailFraction).toBeGreaterThanOrEqual(0.2);
+    expect(plan.trailFraction).toBeLessThanOrEqual(0.46);
     expect(plan.trailFadeMs).toBeLessThanOrEqual(180);
     expect(plan.launchDelayMs).toBeGreaterThanOrEqual(30);
     expect(plan.launchDelayMs).toBeLessThanOrEqual(84);
@@ -35,8 +37,8 @@ describe('battle VFX particle plan', () => {
     const window = projectileTrailWindow(0.72, plan);
 
     expect(window.endT).toBeCloseTo(0.72, 4);
-    expect(window.startT).toBeGreaterThan(0.54);
-    expect(window.endT - window.startT).toBeLessThanOrEqual(0.14);
+    expect(window.startT).toBeGreaterThan(0.25);
+    expect(window.endT - window.startT).toBeLessThanOrEqual(0.46);
   });
 
   it('ends the luminous trail behind the projectile body instead of drawing a second head', () => {
@@ -47,6 +49,17 @@ describe('battle VFX particle plan', () => {
     expect(junction).toBeGreaterThanOrEqual(window.startT);
     expect(junction).toBeLessThan(window.endT);
     expect(window.endT - junction).toBeCloseTo(0.06, 6);
+  });
+
+  it('builds a smooth tapered trail that grows brighter toward the projectile body', () => {
+    const plan = createFastProjectilePlan(520);
+    const segments = projectileTrailSegments(0.72, plan, 8);
+
+    expect(segments).toHaveLength(8);
+    expect(segments[0]?.startT).toBeLessThan(segments[7]?.endT ?? 0);
+    expect(segments[0]?.strength).toBeLessThan(segments[3]?.strength ?? 0);
+    expect(segments[3]?.strength).toBeLessThan(segments[7]?.strength ?? 0);
+    expect(segments[7]?.strength).toBe(1);
   });
 
   it('accelerates the projectile into impact instead of slowing near the target', () => {
@@ -226,7 +239,7 @@ describe('battle VFX particle plan', () => {
     for (const plan of [fire, frost, steel]) {
       expect(plan.flightDurationMs).toBeGreaterThanOrEqual(175);
       expect(plan.flightDurationMs).toBeLessThanOrEqual(235);
-      expect(plan.trailFraction).toBeLessThanOrEqual(0.14);
+      expect(plan.trailFraction).toBeLessThanOrEqual(0.46);
       expect(plan.trailFadeMs).toBeLessThanOrEqual(180);
     }
     expect(fire.particleCount).toBeGreaterThan(steel.particleCount);
