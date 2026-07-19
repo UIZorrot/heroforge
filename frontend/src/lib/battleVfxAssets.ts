@@ -1,20 +1,4 @@
 import projectileBeamUrl from '../assets/battle/vfx-parts/projectile-beam.png';
-import projectileBeamFireUrl from '../assets/battle/vfx-parts/projectile-beam-fire.png';
-import projectileBeamBloodUrl from '../assets/battle/vfx-parts/projectile-beam-blood.png';
-import projectileBeamFrostUrl from '../assets/battle/vfx-parts/projectile-beam-frost.png';
-import projectileBeamVoidUrl from '../assets/battle/vfx-parts/projectile-beam-void.png';
-import projectileBeamCurseUrl from '../assets/battle/vfx-parts/projectile-beam-curse.png';
-import projectileBeamHolyUrl from '../assets/battle/vfx-parts/projectile-beam-holy.png';
-import projectileBeamNatureUrl from '../assets/battle/vfx-parts/projectile-beam-nature.png';
-import projectileBeamWaterUrl from '../assets/battle/vfx-parts/projectile-beam-water.png';
-import projectileBeamStormUrl from '../assets/battle/vfx-parts/projectile-beam-storm.png';
-import projectileBeamMagicUrl from '../assets/battle/vfx-parts/projectile-beam-magic.png';
-import projectileBeamSteelUrl from '../assets/battle/vfx-parts/projectile-beam-steel.png';
-import projectileBeamGoldUrl from '../assets/battle/vfx-parts/projectile-beam-gold.png';
-import projectileFireUrl from '../assets/battle/vfx-parts/projectile-fire.png';
-import projectileFreezeUrl from '../assets/battle/vfx-parts/projectile-freeze.png';
-import projectileLightUrl from '../assets/battle/vfx-parts/projectile-light.png';
-import projectileBloodUrl from '../assets/battle/vfx-parts/projectile-blood.png';
 import impactBurstUrl from '../assets/battle/vfx-parts/impact-burst.png';
 import impactBurstFireUrl from '../assets/battle/vfx-parts/impact-burst-fire.png';
 import impactBurstBloodUrl from '../assets/battle/vfx-parts/impact-burst-blood.png';
@@ -60,6 +44,31 @@ export type BattleVfxTextureAsset = {
   src: string;
 };
 
+const projectileSheetModules = import.meta.glob<string>(
+  '../assets/battle/vfx-parts/projectile-beam-*.png',
+  { eager: true, import: 'default', query: '?url' }
+);
+
+export const projectileVfxAssetFiles = [
+  ['projectileBlood', 'projectile-beam-blood.png'],
+  ['projectileFire', 'projectile-beam-fire.png'],
+  ['projectileFrost', 'projectile-beam-frost.png'],
+  ['projectileHoly', 'projectile-beam-holy.png'],
+  ['projectileMagic', 'projectile-beam-magic.png'],
+  ['projectileNature', 'projectile-beam-nature.png'],
+  ['projectileArrow', 'projectile-beam-arrow.png'],
+  ['projectileLighting', 'projectile-beam-lighting.png'],
+  ['projectileVoid', 'projectile-beam-void.png'],
+  ['projectileWater', 'projectile-beam-water.png'],
+  ['projectileBullet', 'projectile-beam-bullet.png'],
+  ['projectileRock', 'projectile-beam-rock.png'],
+] as const;
+
+function projectileSheetUrl(fileName: string) {
+  const path = `../assets/battle/vfx-parts/${fileName}`;
+  return projectileSheetModules[path] ?? projectileBeamUrl;
+}
+
 export const projectileBeamSequence = {
   assetId: 'projectileBeam',
   columns: 4,
@@ -101,22 +110,11 @@ export function blackBackedVfxAlphaForLuminance(luminance: number) {
 
 export const battleVfxTextureAssets = [
   { id: 'projectileBeam', role: 'projectile-beam', src: projectileBeamUrl },
-  { id: 'beamFire', role: 'projectile-beam', src: projectileBeamFireUrl },
-  { id: 'beamBlood', role: 'projectile-beam', src: projectileBeamBloodUrl },
-  { id: 'beamFrost', role: 'projectile-beam', src: projectileBeamFrostUrl },
-  { id: 'beamVoid', role: 'projectile-beam', src: projectileBeamVoidUrl },
-  { id: 'beamCurse', role: 'projectile-beam', src: projectileBeamCurseUrl },
-  { id: 'beamHoly', role: 'projectile-beam', src: projectileBeamHolyUrl },
-  { id: 'beamNature', role: 'projectile-beam', src: projectileBeamNatureUrl },
-  { id: 'beamWater', role: 'projectile-beam', src: projectileBeamWaterUrl },
-  { id: 'beamStorm', role: 'projectile-beam', src: projectileBeamStormUrl },
-  { id: 'beamMagic', role: 'projectile-beam', src: projectileBeamMagicUrl },
-  { id: 'beamSteel', role: 'projectile-beam', src: projectileBeamSteelUrl },
-  { id: 'beamGold', role: 'projectile-beam', src: projectileBeamGoldUrl },
-  { id: 'projectileFire', role: 'projectile-sequence', src: projectileFireUrl },
-  { id: 'projectileFrost', role: 'projectile-sequence', src: projectileFreezeUrl },
-  { id: 'projectileLight', role: 'projectile-sequence', src: projectileLightUrl },
-  { id: 'projectileBlood', role: 'projectile-sequence', src: projectileBloodUrl },
+  ...projectileVfxAssetFiles.map(([id, fileName]) => ({
+    id,
+    role: 'projectile-sequence' as const,
+    src: projectileSheetUrl(fileName),
+  })),
   { id: 'impactBurst', role: 'impact-burst', src: impactBurstUrl },
   { id: 'impactFire', role: 'impact-burst', src: impactBurstFireUrl },
   { id: 'impactBlood', role: 'impact-burst', src: impactBurstBloodUrl },

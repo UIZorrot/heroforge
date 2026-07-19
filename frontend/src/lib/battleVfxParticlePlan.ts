@@ -1,4 +1,10 @@
-import { resolveBattleVfxDescriptor, resolveBattleVfxFamily, type BattleVfxFamily } from './battleVfxCatalog';
+import {
+  normalizeBattleProjectileTypeEffect,
+  resolveBattleVfxDescriptor,
+  resolveBattleVfxFamily,
+  type BattleVfxFamily,
+  type BattleVfxProjectileTypeEffect,
+} from './battleVfxCatalog';
 
 export type VfxPoint = { x: number; y: number };
 export type RectLike = { left: number; top: number; width: number; height: number };
@@ -17,8 +23,20 @@ export type FastProjectilePlan = {
 };
 
 export type ProjectileVfxTextureKey = 'sparkA' | 'sparkB' | 'sparkC' | 'sparkD' | 'sparkE';
-export type ProjectileVfxBeamTextureKey = 'beamFire' | 'beamBlood' | 'beamFrost' | 'beamVoid' | 'beamCurse' | 'beamHoly' | 'beamSteel' | 'beamGold' | 'beamNature' | 'beamWater' | 'beamStorm' | 'beamMagic';
-export type ProjectileVfxSequenceTextureKey = 'projectileBeam' | 'projectileFire' | 'projectileFrost' | 'projectileLight' | 'projectileBlood';
+export type ProjectileVfxSequenceTextureKey =
+  | 'projectileBeam'
+  | 'projectileBlood'
+  | 'projectileFire'
+  | 'projectileFrost'
+  | 'projectileHoly'
+  | 'projectileMagic'
+  | 'projectileNature'
+  | 'projectileArrow'
+  | 'projectileLighting'
+  | 'projectileVoid'
+  | 'projectileWater'
+  | 'projectileBullet'
+  | 'projectileRock';
 export type ProjectileVfxImpactTextureKey = 'impactFire' | 'impactBlood' | 'impactFrost' | 'impactVoid' | 'impactCurse' | 'impactHoly' | 'impactSteel' | 'impactGold' | 'impactNature' | 'impactWater' | 'impactStorm' | 'impactMagic';
 export type ProjectileVfxInstantTextureKey = 'instantFire' | 'instantBlood' | 'instantFrost' | 'instantVoid' | 'instantCurse' | 'instantHoly' | 'instantSteel' | 'instantGold' | 'instantNature' | 'instantWater' | 'instantStorm' | 'instantMagic';
 export type BuffBorderTextureKey = 'buffBorderFire' | 'buffBorderBlood' | 'buffBorderFrost' | 'buffBorderVoid' | 'buffBorderCurse' | 'buffBorderHoly' | 'buffBorderSteel' | 'buffBorderGold' | 'buffBorderNature' | 'buffBorderWater' | 'buffBorderStorm' | 'buffBorderMagic';
@@ -44,10 +62,7 @@ export type ProjectileVfxProfile = {
   coreWidth: number;
   bloomWidth: number;
   headShape: 'beam';
-  beamTexture: 'dedicated-projectile';
-  beamTextureKey: ProjectileVfxBeamTextureKey;
-  beamAnimation?: 'projectile-beam-sequence';
-  beamSequenceKey?: ProjectileVfxSequenceTextureKey;
+  beamSequenceKey: ProjectileVfxSequenceTextureKey;
   beamSequenceMode?: 'fixed-frame';
   beamSequenceScale?: number;
   beamSequenceBloomScale?: number;
@@ -128,9 +143,6 @@ const PROJECTILE_PROFILES: Record<ProjectileVfxProfile['id'], ProjectileVfxProfi
     coreWidth: 9,
     bloomWidth: 27,
     headShape: 'beam',
-    beamTexture: 'dedicated-projectile',
-    beamTextureKey: 'beamFire',
-    beamAnimation: 'projectile-beam-sequence',
     beamSequenceKey: 'projectileFire',
     beamSequenceMode: 'fixed-frame',
     beamSequenceScale: 0.5,
@@ -174,9 +186,6 @@ const PROJECTILE_PROFILES: Record<ProjectileVfxProfile['id'], ProjectileVfxProfi
     coreWidth: 9,
     bloomWidth: 24,
     headShape: 'beam',
-    beamTexture: 'dedicated-projectile',
-    beamTextureKey: 'beamBlood',
-    beamAnimation: 'projectile-beam-sequence',
     beamSequenceKey: 'projectileBlood',
     beamSequenceMode: 'fixed-frame',
     beamSequenceScale: 0.51,
@@ -221,9 +230,6 @@ const PROJECTILE_PROFILES: Record<ProjectileVfxProfile['id'], ProjectileVfxProfi
     coreWidth: 7,
     bloomWidth: 21,
     headShape: 'beam',
-    beamTexture: 'dedicated-projectile',
-    beamTextureKey: 'beamFrost',
-    beamAnimation: 'projectile-beam-sequence',
     beamSequenceKey: 'projectileFrost',
     beamSequenceMode: 'fixed-frame',
     beamSequenceScale: 0.49,
@@ -267,8 +273,7 @@ const PROJECTILE_PROFILES: Record<ProjectileVfxProfile['id'], ProjectileVfxProfi
     coreWidth: 8,
     bloomWidth: 30,
     headShape: 'beam',
-    beamTexture: 'dedicated-projectile',
-    beamTextureKey: 'beamVoid',
+    beamSequenceKey: 'projectileVoid',
     impactTextureKey: 'impactVoid',
     impactAnchor: IMPACT_BURST_ANCHOR,
     impactRingAnchor: IMPACT_RING_ANCHOR,
@@ -307,8 +312,7 @@ const PROJECTILE_PROFILES: Record<ProjectileVfxProfile['id'], ProjectileVfxProfi
     coreWidth: 7,
     bloomWidth: 26,
     headShape: 'beam',
-    beamTexture: 'dedicated-projectile',
-    beamTextureKey: 'beamCurse',
+    beamSequenceKey: 'projectileBeam',
     impactTextureKey: 'impactCurse',
     impactAnchor: IMPACT_BURST_ANCHOR,
     impactRingAnchor: IMPACT_RING_ANCHOR,
@@ -347,8 +351,7 @@ const PROJECTILE_PROFILES: Record<ProjectileVfxProfile['id'], ProjectileVfxProfi
     coreWidth: 6,
     bloomWidth: 22,
     headShape: 'beam',
-    beamTexture: 'dedicated-projectile',
-    beamTextureKey: 'beamNature',
+    beamSequenceKey: 'projectileNature',
     impactTextureKey: 'impactNature',
     impactAnchor: IMPACT_BURST_ANCHOR,
     impactRingAnchor: IMPACT_RING_ANCHOR,
@@ -387,8 +390,7 @@ const PROJECTILE_PROFILES: Record<ProjectileVfxProfile['id'], ProjectileVfxProfi
     coreWidth: 6,
     bloomWidth: 25,
     headShape: 'beam',
-    beamTexture: 'dedicated-projectile',
-    beamTextureKey: 'beamWater',
+    beamSequenceKey: 'projectileWater',
     impactTextureKey: 'impactWater',
     impactAnchor: IMPACT_BURST_ANCHOR,
     impactRingAnchor: IMPACT_RING_ANCHOR,
@@ -427,8 +429,7 @@ const PROJECTILE_PROFILES: Record<ProjectileVfxProfile['id'], ProjectileVfxProfi
     coreWidth: 5,
     bloomWidth: 18,
     headShape: 'beam',
-    beamTexture: 'dedicated-projectile',
-    beamTextureKey: 'beamStorm',
+    beamSequenceKey: 'projectileLighting',
     impactTextureKey: 'impactStorm',
     impactAnchor: IMPACT_BURST_ANCHOR,
     impactRingAnchor: IMPACT_RING_ANCHOR,
@@ -467,8 +468,7 @@ const PROJECTILE_PROFILES: Record<ProjectileVfxProfile['id'], ProjectileVfxProfi
     coreWidth: 7,
     bloomWidth: 28,
     headShape: 'beam',
-    beamTexture: 'dedicated-projectile',
-    beamTextureKey: 'beamMagic',
+    beamSequenceKey: 'projectileMagic',
     impactTextureKey: 'impactMagic',
     impactAnchor: IMPACT_BURST_ANCHOR,
     impactRingAnchor: IMPACT_RING_ANCHOR,
@@ -507,10 +507,7 @@ const PROJECTILE_PROFILES: Record<ProjectileVfxProfile['id'], ProjectileVfxProfi
     coreWidth: 8,
     bloomWidth: 24,
     headShape: 'beam',
-    beamTexture: 'dedicated-projectile',
-    beamTextureKey: 'beamHoly',
-    beamAnimation: 'projectile-beam-sequence',
-    beamSequenceKey: 'projectileLight',
+    beamSequenceKey: 'projectileHoly',
     beamSequenceMode: 'fixed-frame',
     beamSequenceScale: 0.49,
     beamSequenceBloomScale: 0.57,
@@ -556,8 +553,7 @@ const PROJECTILE_PROFILES: Record<ProjectileVfxProfile['id'], ProjectileVfxProfi
     coreWidth: 4,
     bloomWidth: 13,
     headShape: 'beam',
-    beamTexture: 'dedicated-projectile',
-    beamTextureKey: 'beamSteel',
+    beamSequenceKey: 'projectileArrow',
     impactTextureKey: 'impactSteel',
     impactAnchor: IMPACT_BURST_ANCHOR,
     impactRingAnchor: IMPACT_RING_ANCHOR,
@@ -596,8 +592,7 @@ const PROJECTILE_PROFILES: Record<ProjectileVfxProfile['id'], ProjectileVfxProfi
     coreWidth: 2.8,
     bloomWidth: 10,
     headShape: 'beam',
-    beamTexture: 'dedicated-projectile',
-    beamTextureKey: 'beamSteel',
+    beamSequenceKey: 'projectileBullet',
     impactTextureKey: 'impactSteel',
     impactAnchor: IMPACT_BURST_ANCHOR,
     impactRingAnchor: IMPACT_RING_ANCHOR,
@@ -636,9 +631,6 @@ const PROJECTILE_PROFILES: Record<ProjectileVfxProfile['id'], ProjectileVfxProfi
     coreWidth: 7,
     bloomWidth: 23,
     headShape: 'beam',
-    beamTexture: 'dedicated-projectile',
-    beamTextureKey: 'beamGold',
-    beamAnimation: 'projectile-beam-sequence',
     beamSequenceKey: 'projectileBeam',
     beamSequenceMode: 'fixed-frame',
     beamSequenceScale: 0.48,
@@ -661,6 +653,21 @@ const PROJECTILE_PROFILES: Record<ProjectileVfxProfile['id'], ProjectileVfxProfi
     impactScale: 0.98,
     shardCount: 32,
   },
+};
+
+const PROJECTILE_PROFILE_BY_TYPE: Record<BattleVfxProjectileTypeEffect, ProjectileVfxProfile> = {
+  blood: PROJECTILE_PROFILES.blood,
+  fire: PROJECTILE_PROFILES.fire,
+  frost: PROJECTILE_PROFILES.frost,
+  holy: PROJECTILE_PROFILES.holy,
+  magic: PROJECTILE_PROFILES.magic,
+  nature: PROJECTILE_PROFILES.nature,
+  arrow: PROJECTILE_PROFILES.steel,
+  lighting: PROJECTILE_PROFILES.storm,
+  void: PROJECTILE_PROFILES.void,
+  water: PROJECTILE_PROFILES.water,
+  bullet: PROJECTILE_PROFILES.bullet,
+  rock: { ...PROJECTILE_PROFILES.gold, beamSequenceKey: 'projectileRock' },
 };
 
 function clamp(value: number, min: number, max: number) {
@@ -705,6 +712,9 @@ export function targetHitPointInHost(unitRect: RectLike, hostRect: HostRectLike,
 
 export function createProjectileVfxProfile(event: ProjectileProfileEvent = {}): ProjectileVfxProfile {
   const descriptor = resolveBattleVfxDescriptor(event);
+  if (descriptor.typeCatalog === 'proj') {
+    return PROJECTILE_PROFILE_BY_TYPE[normalizeBattleProjectileTypeEffect(descriptor.typeEffect)];
+  }
   const family = descriptor.family !== 'neutral'
     ? descriptor.family
     : resolveBattleVfxFamily(event.attackType, event.buffName, event.skillName, event.skillRole, event.rangeMode);

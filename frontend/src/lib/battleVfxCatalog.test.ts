@@ -5,6 +5,7 @@ import {
   canonicalBattleBuffTypeEffects,
   canonicalBattleInstantTypeEffects,
   canonicalBattleProjectileTypeEffects,
+  normalizeBattleProjectileTypeEffect,
   resolveBattleVfxDescriptor,
   resolveBattleVfxFamily,
 } from './battleVfxCatalog';
@@ -47,18 +48,18 @@ describe('battle VFX catalog', () => {
 
   it('defines separate projectile, instant, and buff visual effect catalogs', () => {
     expect(canonicalBattleProjectileTypeEffects).toEqual([
-      'flesh',
-      'magic',
-      'thunder',
-      'arrow',
-      'gun',
+      'blood',
       'fire',
-      'poison',
       'frost',
-      'dark',
-      'light',
+      'holy',
+      'magic',
       'nature',
+      'arrow',
+      'lighting',
+      'void',
       'water',
+      'bullet',
+      'rock',
     ]);
     expect(canonicalBattleInstantTypeEffects).toEqual([
       'slash',
@@ -127,13 +128,24 @@ describe('battle VFX catalog', () => {
       actionType: 'skill',
       attackType: 'nature',
       typeCatalog: 'proj',
-      typeEffect: 'light',
+      typeEffect: 'holy',
       damage: 120,
     })).toMatchObject({
       mode: 'projectile',
       family: 'light',
       tone: 'light',
     });
+  });
+
+  it('normalizes legacy projectile metadata into the canonical asset tokens', () => {
+    expect(normalizeBattleProjectileTypeEffect('flesh')).toBe('blood');
+    expect(normalizeBattleProjectileTypeEffect('light')).toBe('holy');
+    expect(normalizeBattleProjectileTypeEffect('gun')).toBe('bullet');
+    expect(normalizeBattleProjectileTypeEffect('gunsmoke ranger')).toBe('bullet');
+    expect(normalizeBattleProjectileTypeEffect('thunder')).toBe('lighting');
+    expect(normalizeBattleProjectileTypeEffect('dark')).toBe('void');
+    expect(normalizeBattleProjectileTypeEffect('poison')).toBe('nature');
+    expect(normalizeBattleProjectileTypeEffect('earth')).toBe('rock');
   });
 
   it('uses canonical buff names for support and status visuals independently from hit shape', () => {

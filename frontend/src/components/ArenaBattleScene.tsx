@@ -28,7 +28,6 @@ import {
   targetHitPointInHost,
   type FastProjectilePlan,
   type BuffBorderTextureKey,
-  type ProjectileVfxBeamTextureKey,
   type ProjectileVfxImpactTextureKey,
   type ProjectileVfxInstantTextureKey,
   type ProjectileVfxProfile,
@@ -648,7 +647,6 @@ type BattleVfxTextures = {
   smokeC: Texture;
   smokeD: Texture;
   smokes: Texture[];
-  beams: Record<ProjectileVfxBeamTextureKey, Texture>;
   impacts: Record<ProjectileVfxImpactTextureKey, Texture>;
   instants: Record<ProjectileVfxInstantTextureKey, Texture>;
   buffBorders: Record<BuffBorderTextureKey, Texture>;
@@ -777,14 +775,31 @@ function createBattleVfxTextures(loadedTextures: Record<string, Texture>): Battl
   const smokeB = loadedTextures.smokeB;
   const smokeC = loadedTextures.smokeC;
   const smokeD = loadedTextures.smokeD;
+  const projectileFrameCache = new Map<Texture, Texture[]>();
+  const projectileFrames = (key: ProjectileVfxSequenceTextureKey) => {
+    const texture = loadedTextures[key] ?? loadedTextures.projectileBeam;
+    const cached = projectileFrameCache.get(texture);
+    if (cached) return cached;
+    const frames = createProjectileBeamSequenceTextures(texture);
+    projectileFrameCache.set(texture, frames);
+    return frames;
+  };
   return {
-    projectileBeamFrames: createProjectileBeamSequenceTextures(loadedTextures.projectileBeam),
+    projectileBeamFrames: projectileFrames('projectileBeam'),
     projectileSequenceFrames: {
-      projectileBeam: createProjectileBeamSequenceTextures(loadedTextures.projectileBeam),
-      projectileFire: createProjectileBeamSequenceTextures(loadedTextures.projectileFire),
-      projectileFrost: createProjectileBeamSequenceTextures(loadedTextures.projectileFrost),
-      projectileLight: createProjectileBeamSequenceTextures(loadedTextures.projectileLight),
-      projectileBlood: createProjectileBeamSequenceTextures(loadedTextures.projectileBlood),
+      projectileBeam: projectileFrames('projectileBeam'),
+      projectileBlood: projectileFrames('projectileBlood'),
+      projectileFire: projectileFrames('projectileFire'),
+      projectileFrost: projectileFrames('projectileFrost'),
+      projectileHoly: projectileFrames('projectileHoly'),
+      projectileMagic: projectileFrames('projectileMagic'),
+      projectileNature: projectileFrames('projectileNature'),
+      projectileArrow: projectileFrames('projectileArrow'),
+      projectileLighting: projectileFrames('projectileLighting'),
+      projectileVoid: projectileFrames('projectileVoid'),
+      projectileWater: projectileFrames('projectileWater'),
+      projectileBullet: projectileFrames('projectileBullet'),
+      projectileRock: projectileFrames('projectileRock'),
     },
     sparkA,
     sparkB,
@@ -797,20 +812,6 @@ function createBattleVfxTextures(loadedTextures: Record<string, Texture>): Battl
     smokeC,
     smokeD,
     smokes: [smokeA, smokeB, smokeC, smokeD],
-    beams: {
-      beamFire: loadedTextures.beamFire,
-      beamBlood: loadedTextures.beamBlood,
-      beamFrost: loadedTextures.beamFrost,
-      beamVoid: loadedTextures.beamVoid,
-      beamCurse: loadedTextures.beamCurse,
-      beamHoly: loadedTextures.beamHoly,
-      beamSteel: loadedTextures.beamSteel,
-      beamGold: loadedTextures.beamGold,
-      beamNature: loadedTextures.beamNature,
-      beamWater: loadedTextures.beamWater,
-      beamStorm: loadedTextures.beamStorm,
-      beamMagic: loadedTextures.beamMagic,
-    },
     impacts: {
       impactFire: loadedTextures.impactFire,
       impactBlood: loadedTextures.impactBlood,
@@ -861,10 +862,6 @@ function createBattleVfxTextures(loadedTextures: Record<string, Texture>): Battl
 
 function vfxTexture(textures: BattleVfxTextures, key: ProjectileVfxTextureKey) {
   return textures[key];
-}
-
-function projectileBeamTexture(textures: BattleVfxTextures, key: ProjectileVfxBeamTextureKey) {
-  return textures.beams[key];
 }
 
 function impactBurstTexture(textures: BattleVfxTextures, key: ProjectileVfxImpactTextureKey) {
@@ -1396,12 +1393,10 @@ function renderPixiProjectileEmitter({
   const effectDx = aim.dir.x * dist;
   const effectDy = aim.dir.y * dist;
   const effectNormal = aim.normal;
-  const beamSequenceKey = profile.beamSequenceKey ?? 'projectileBeam';
+  const beamSequenceKey = profile.beamSequenceKey;
   const beamSequenceFrames = textures.projectileSequenceFrames[beamSequenceKey] ?? textures.projectileBeamFrames;
-  const useBeamSequence = profile.beamAnimation === 'projectile-beam-sequence' && beamSequenceFrames.length > 0;
-  const initialBeamTexture = useBeamSequence
-    ? beamSequenceFrames[0]
-    : projectileBeamTexture(textures, profile.beamTextureKey);
+  const useBeamSequence = beamSequenceFrames.length > 0;
+  const initialBeamTexture = beamSequenceFrames[0] ?? textures.projectileBeamFrames[0];
   let currentBeamFrameIndex = -1;
   const plan = createFastProjectilePlan(dist, profile);
   const core = add(new Graphics(), 6);

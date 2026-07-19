@@ -3,6 +3,8 @@ import time
 from dataclasses import dataclass
 from typing import Any, Dict, List, Literal, Protocol
 
+from vfx_contract import normalize_projectile_type_effect
+
 
 CANONICAL_BUFF_NAMES = (
     "stun",
@@ -34,7 +36,6 @@ BUFF_ALIASES = {
 }
 SUPPORT_SKILL_ROLES = {"buff", "support", "heal", "defense", "utility"}
 
-PROJECTILE_TYPE_EFFECTS = {"flesh", "magic", "thunder", "arrow", "gun", "fire", "poison", "frost", "dark", "light", "nature", "water"}
 INSTANT_TYPE_EFFECTS = {"slash", "magic", "thunder", "strike", "explode", "fire", "poison", "frost", "dark", "light", "nature", "water", "claw", "pierce", "blunt", "bullet_hit"}
 BUFF_TYPE_EFFECTS = set(CANONICAL_BUFF_NAMES)
 
@@ -65,6 +66,8 @@ def _legacy_type_effect(effect_type: Any, type_catalog: str | None = None) -> st
             return "claw"
     if catalog == "proj" and token == "weapon":
         return "arrow"
+    if catalog == "proj":
+        return normalize_projectile_type_effect(token)
     return token
 
 
@@ -79,7 +82,8 @@ def _visual_type_contract(source: Dict[str, Any] | None, fallback_type: Any = No
         catalog = "instant"
     if catalog not in {"proj", "instant"}:
         catalog = _legacy_type_catalog(legacy_type)
-    effect = _visual_token(source.get("type_effect", source.get("typeEffect")), "") or _legacy_type_effect(legacy_type, catalog)
+    raw_effect = _visual_token(source.get("type_effect", source.get("typeEffect")), "") or _legacy_type_effect(legacy_type, catalog)
+    effect = normalize_projectile_type_effect(raw_effect, legacy_type) if catalog == "proj" else raw_effect
     buff_effect = _visual_token(source.get("buff_type_effect", source.get("buffTypeEffect")), "")
     return {
         "type_catalog": catalog,

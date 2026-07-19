@@ -1,3 +1,5 @@
+import { normalizeBattleProjectileTypeEffect } from './battleVfxCatalog';
+
 export type Rarity = 'common' | 'rare' | 'epic' | 'mythic';
 export type CardType = 'warrior' | 'mage' | 'rogue' | 'tank' | 'support';
 
@@ -120,6 +122,7 @@ function normalizeTypeCatalog(value: unknown, fallbackType: string): string {
 function normalizeSkill(raw: Record<string, unknown> | undefined): Skill {
   const legacyType = toStringValue(raw?.TYPE, 'attack');
   const typeCatalog = normalizeTypeCatalog(raw?.type_catalog ?? raw?.typeCatalog, legacyType);
+  const rawTypeEffect = normalizeToken(raw?.type_effect ?? raw?.typeEffect, inferTypeEffect(legacyType, typeCatalog));
   return {
     name: toStringValue(raw?.name, 'Untitled Skill'),
     description: toStringValue(raw?.description, ''),
@@ -127,7 +130,7 @@ function normalizeSkill(raw: Record<string, unknown> | undefined): Skill {
     TARGET: toStringValue(raw?.TARGET, 'Enemy'),
     TARGET_NUM: toStringValue(raw?.TARGET_NUM, '1'),
     type_catalog: typeCatalog,
-    type_effect: normalizeToken(raw?.type_effect ?? raw?.typeEffect, inferTypeEffect(legacyType, typeCatalog)),
+    type_effect: typeCatalog === 'proj' ? normalizeBattleProjectileTypeEffect(rawTypeEffect) : rawTypeEffect,
     buff_type_effect: normalizeToken(raw?.buff_type_effect ?? raw?.buffTypeEffect, ''),
     RANGE: toStringValue(raw?.RANGE, 'enemy'),
     IS_PASSIVE: normalizeBooleanString(raw?.IS_PASSIVE),
@@ -151,6 +154,7 @@ function normalizeSkill(raw: Record<string, unknown> | undefined): Skill {
 function normalizeState(raw: Record<string, unknown> | undefined): CharacterState {
   const legacyType = toStringValue(raw?.TYPE, 'flesh');
   const typeCatalog = normalizeTypeCatalog(raw?.type_catalog ?? raw?.typeCatalog, legacyType);
+  const rawTypeEffect = normalizeToken(raw?.type_effect ?? raw?.typeEffect, inferTypeEffect(legacyType, typeCatalog));
   return {
     HP: toStringValue(raw?.HP, '0'),
     MP: toStringValue(raw?.MP, '0'),
@@ -164,7 +168,7 @@ function normalizeState(raw: Record<string, unknown> | undefined): CharacterStat
     AC: toStringValue(raw?.AC, '0'),
     TYPE: legacyType,
     type_catalog: typeCatalog,
-    type_effect: normalizeToken(raw?.type_effect ?? raw?.typeEffect, inferTypeEffect(legacyType, typeCatalog)),
+    type_effect: typeCatalog === 'proj' ? normalizeBattleProjectileTypeEffect(rawTypeEffect) : rawTypeEffect,
   };
 }
 

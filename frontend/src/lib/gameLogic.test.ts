@@ -75,7 +75,7 @@ describe('game logic data normalization', () => {
     });
 
     expect(hero.state.type_catalog).toBe('proj');
-    expect(hero.state.type_effect).toBe('gun');
+    expect(hero.state.type_effect).toBe('bullet');
     expect(hero.skill.s1.type_catalog).toBe('instant');
     expect(hero.skill.s1.type_effect).toBe('slash');
     expect(hero.skill.s2.type_catalog).toBe('instant');

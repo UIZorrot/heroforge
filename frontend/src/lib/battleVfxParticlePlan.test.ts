@@ -121,7 +121,7 @@ describe('battle VFX particle plan', () => {
     const steel = createProjectileVfxProfile({ actionType: 'attack', attackType: 'slash' });
 
     expect(new Set([fire.id, frost.id, voidBolt.id, steel.id]).size).toBe(4);
-    expect(new Set([fire.beamTextureKey, frost.beamTextureKey, voidBolt.beamTextureKey, steel.beamTextureKey]).size).toBe(4);
+    expect(new Set([fire.beamSequenceKey, frost.beamSequenceKey, voidBolt.beamSequenceKey, steel.beamSequenceKey]).size).toBe(4);
     expect(new Set([fire.impactTextureKey, frost.impactTextureKey, voidBolt.impactTextureKey, steel.impactTextureKey]).size).toBe(4);
     expect(frost.textureMix).not.toEqual(fire.textureMix);
     expect(voidBolt.textureMix).not.toEqual(fire.textureMix);
@@ -143,7 +143,7 @@ describe('battle VFX particle plan', () => {
     });
 
     expect(frostProjectile.id).toBe('frost');
-    expect(frostProjectile.beamTextureKey).toBe('beamFrost');
+    expect(frostProjectile.beamSequenceKey).toBe('projectileFrost');
     expect(clawInstant.id).toBe('blood');
     expect(clawInstant.instantTextureKey).toBe('instantBlood');
   });
@@ -215,12 +215,12 @@ describe('battle VFX particle plan', () => {
   });
 
   it('uses blood magic resources and a heavier organic silhouette for flesh projectiles', () => {
-    const flesh = createProjectileVfxProfile({ typeCatalog: 'proj', typeEffect: 'flesh' });
+    const flesh = createProjectileVfxProfile({ typeCatalog: 'proj', typeEffect: 'blood' });
     const weapon = createProjectileVfxProfile({ typeCatalog: 'proj', typeEffect: 'arrow' });
-    const gun = createProjectileVfxProfile({ typeCatalog: 'proj', typeEffect: 'gun' });
+    const gun = createProjectileVfxProfile({ typeCatalog: 'proj', typeEffect: 'bullet' });
 
     expect(flesh.id).toBe('blood');
-    expect(flesh.beamTextureKey).toBe('beamBlood');
+    expect(flesh.beamSequenceKey).toBe('projectileBlood');
     expect(flesh.impactTextureKey).toBe('impactBlood');
     expect(flesh.instantTextureKey).toBe('instantBlood');
     expect(flesh.coreWidth).toBeGreaterThan(weapon.coreWidth);
@@ -232,12 +232,12 @@ describe('battle VFX particle plan', () => {
   });
 
   it('varies projectile silhouettes by type beyond family color', () => {
-    const effects = ['flesh', 'arrow', 'gun', 'fire', 'frost', 'thunder', 'magic', 'water', 'dark', 'light', 'nature'];
+    const effects = ['blood', 'fire', 'frost', 'holy', 'magic', 'nature', 'arrow', 'lighting', 'void', 'water', 'bullet', 'rock'];
     const signatures = effects.map((typeEffect) => {
       const profile = createProjectileVfxProfile({ typeCatalog: 'proj', typeEffect });
       return [
         profile.id,
-        profile.beamTextureKey,
+        profile.beamSequenceKey,
         profile.coreWidth,
         profile.bloomWidth,
         profile.beamThicknessScale,
@@ -259,8 +259,7 @@ describe('battle VFX particle plan', () => {
 
     for (const profile of profiles) {
       expect(profile.headShape).toBe('beam');
-      expect(profile.beamTexture).toBe('dedicated-projectile');
-      expect(profile.beamTextureKey).toMatch(/^beam[A-Z]/);
+      expect(profile.beamSequenceKey).toMatch(/^projectile[A-Z]/);
       expect(profile.beamThicknessScale).toBeLessThanOrEqual(0.82);
       expect(profile.vectorTrailAlpha).toBe(0);
       expect(profile.vectorHeadAlpha).toBe(0);
@@ -274,11 +273,10 @@ describe('battle VFX particle plan', () => {
   it('uses family-specific projectile sequence frames for authored projectile spritesheets', () => {
     const fire = createProjectileVfxProfile({ typeCatalog: 'proj', typeEffect: 'fire' });
     const frost = createProjectileVfxProfile({ typeCatalog: 'proj', typeEffect: 'frost' });
-    const light = createProjectileVfxProfile({ typeCatalog: 'proj', typeEffect: 'light' });
-    const blood = createProjectileVfxProfile({ typeCatalog: 'proj', typeEffect: 'flesh' });
+    const light = createProjectileVfxProfile({ typeCatalog: 'proj', typeEffect: 'holy' });
+    const blood = createProjectileVfxProfile({ typeCatalog: 'proj', typeEffect: 'blood' });
     const defaultGold = createProjectileVfxProfile();
 
-    expect(fire.beamAnimation).toBe('projectile-beam-sequence');
     expect(fire.beamSequenceKey).toBe('projectileFire');
     expect(fire.beamSequenceMode).toBe('fixed-frame');
     expect(fire.beamSequenceScale).toBeGreaterThanOrEqual(0.4);
@@ -287,30 +285,26 @@ describe('battle VFX particle plan', () => {
     expect(fire.beamSequenceFrameRange).toEqual([1, 3]);
     expect(fire.impactDirectionalCut ?? true).toBe(true);
     expect(fire.impactFlashTexture ?? true).toBe(true);
-    expect(frost.beamAnimation).toBe('projectile-beam-sequence');
     expect(frost.beamSequenceKey).toBe('projectileFrost');
     expect(frost.beamSequenceScale).toBeLessThanOrEqual(0.52);
     expect(frost.beamSequenceBloomScale).toBeLessThanOrEqual(0.6);
     expect(frost.beamSequenceFrameRange).toEqual([2, 10]);
-    expect(light.beamAnimation).toBe('projectile-beam-sequence');
-    expect(light.beamSequenceKey).toBe('projectileLight');
+    expect(light.beamSequenceKey).toBe('projectileHoly');
     expect(light.beamSequenceScale).toBeLessThanOrEqual(0.52);
     expect(light.beamSequenceBloomScale).toBeLessThanOrEqual(0.6);
     expect(light.beamSequenceBloomAlpha).toBe(0);
     expect(light.beamSequenceFrameRange).toEqual([2, 9]);
     expect(light.impactDirectionalCut).toBe(false);
     expect(light.impactFlashTexture).toBe(false);
-    expect(blood.beamAnimation).toBe('projectile-beam-sequence');
     expect(blood.beamSequenceKey).toBe('projectileBlood');
     expect(blood.beamSequenceScale).toBeLessThanOrEqual(0.53);
     expect(blood.beamSequenceBloomScale).toBeLessThanOrEqual(0.61);
     expect(blood.beamSequenceBloomAlpha).toBe(0);
     expect(blood.beamSequenceFrameRange).toEqual([2, 10]);
-    expect(defaultGold.beamAnimation).toBe('projectile-beam-sequence');
     expect(defaultGold.beamSequenceKey).toBe('projectileBeam');
     expect(defaultGold.beamSequenceMode).toBe('fixed-frame');
     expect(defaultGold.beamSequenceFrameRange).toEqual([2, 15]);
-    expect(createProjectileVfxProfile({ typeCatalog: 'proj', typeEffect: 'gun' }).beamAnimation).toBeUndefined();
+    expect(createProjectileVfxProfile({ typeCatalog: 'proj', typeEffect: 'bullet' }).beamSequenceKey).toBe('projectileBullet');
   });
 
   it('keeps projectile smoke tails narrow and drives motion with live emitter particles', () => {

@@ -2,6 +2,8 @@ import math
 import random
 from typing import Dict, Any
 
+from vfx_contract import normalize_projectile_type_effect
+
 
 STAT_COSTS = {
     "HP": 1,
@@ -39,6 +41,8 @@ def _legacy_type_effect(effect_type: Any, type_catalog: str | None = None) -> st
             return "claw"
     if catalog == "proj" and token == "weapon":
         return "arrow"
+    if catalog == "proj":
+        return normalize_projectile_type_effect(token)
     return token
 
 
@@ -54,9 +58,10 @@ def _visual_type_contract(source: Dict[str, Any] | None, fallback_type: Any = No
         catalog = _legacy_type_catalog(legacy_type)
 
     buff_effect = _visual_token(source.get("buff_type_effect", source.get("buffTypeEffect")), "")
+    raw_effect = _visual_token(source.get("type_effect", source.get("typeEffect")), "") or _legacy_type_effect(legacy_type, catalog)
     return {
         "type_catalog": catalog,
-        "type_effect": _visual_token(source.get("type_effect", source.get("typeEffect")), "") or _legacy_type_effect(legacy_type, catalog),
+        "type_effect": normalize_projectile_type_effect(raw_effect, legacy_type) if catalog == "proj" else raw_effect,
         "buff_type_effect": buff_effect or None,
     }
 

@@ -14,18 +14,18 @@ export const canonicalBattleAttackTypes = [
 ] as const;
 
 export const canonicalBattleProjectileTypeEffects = [
-  'flesh',
-  'magic',
-  'thunder',
-  'arrow',
-  'gun',
+  'blood',
   'fire',
-  'poison',
   'frost',
-  'dark',
-  'light',
+  'holy',
+  'magic',
   'nature',
+  'arrow',
+  'lighting',
+  'void',
   'water',
+  'bullet',
+  'rock',
 ] as const;
 
 export const canonicalBattleInstantTypeEffects = [
@@ -94,6 +94,7 @@ export type BattleVfxFamily =
   | 'vulnerable'
   | 'wound'
   | 'curse'
+  | 'rock'
   | 'neutral';
 
 export type BattleVfxTone =
@@ -144,7 +145,7 @@ export type BattleVfxDescriptor = {
 
 const FAMILY_ALIASES: Array<[BattleVfxFamily, string[]]> = [
   ['frost', ['frost', 'forst', 'frozen', 'freeze', 'ice', 'snow', 'cold']],
-  ['thunder', ['thunder', 'lightning', 'storm', 'bolt', 'shock']],
+  ['thunder', ['thunder', 'lighting', 'lightning', 'storm', 'bolt', 'shock']],
   ['water', ['water', 'tide', 'wave', 'mist']],
   ['nature', ['nature', 'thorn', 'beast', 'root', 'leaf', 'vine']],
   ['poison', ['poison', 'venom', 'toxin']],
@@ -160,6 +161,7 @@ const FAMILY_ALIASES: Array<[BattleVfxFamily, string[]]> = [
   ['gun', ['gun', 'shot', 'bullet']],
   ['weapon', ['weapon', 'slash', 'blade', 'sword', 'steel']],
   ['flesh', ['flesh', 'flash', 'claw', 'bite', 'fang', 'blood', 'hemomancy']],
+  ['rock', ['rock', 'stone', 'earth', 'boulder']],
   ['stun', ['stun', 'stunned', 'daze']],
   ['bless', ['bless', 'blessing']],
   ['heal', ['heal', 'regen', 'restore', 'recover']],
@@ -198,6 +200,54 @@ function normalizedEffectToken(value?: string | null) {
   return normalizedText(value).replace(/\s+/g, '_').replace(/-/g, '_') || undefined;
 }
 
+const PROJECTILE_TYPE_EFFECT_ALIASES: Record<string, BattleVfxProjectileTypeEffect> = {
+  blood: 'blood',
+  flesh: 'blood',
+  bleed: 'blood',
+  fire: 'fire',
+  flame: 'fire',
+  frost: 'frost',
+  freeze: 'frost',
+  ice: 'frost',
+  holy: 'holy',
+  light: 'holy',
+  radiant: 'holy',
+  magic: 'magic',
+  arcane: 'magic',
+  nature: 'nature',
+  poison: 'nature',
+  venom: 'nature',
+  arrow: 'arrow',
+  weapon: 'arrow',
+  bow: 'arrow',
+  lighting: 'lighting',
+  lightning: 'lighting',
+  thunder: 'lighting',
+  storm: 'lighting',
+  void: 'void',
+  dark: 'void',
+  shadow: 'void',
+  water: 'water',
+  tide: 'water',
+  wave: 'water',
+  bullet: 'bullet',
+  gun: 'bullet',
+  gunsmoke: 'bullet',
+  shot: 'bullet',
+  rock: 'rock',
+  stone: 'rock',
+  earth: 'rock',
+};
+
+export function normalizeBattleProjectileTypeEffect(value?: string | null): BattleVfxProjectileTypeEffect {
+  const token = normalizedEffectToken(value) ?? 'magic';
+  if (PROJECTILE_TYPE_EFFECT_ALIASES[token]) return PROJECTILE_TYPE_EFFECT_ALIASES[token];
+  for (const word of token.split('_')) {
+    if (PROJECTILE_TYPE_EFFECT_ALIASES[word]) return PROJECTILE_TYPE_EFFECT_ALIASES[word];
+  }
+  return 'magic';
+}
+
 function eventTypeCatalog(event: BattleVfxEventInput = {}) {
   return normalizedTypeCatalog(event.typeCatalog ?? event.type_catalog);
 }
@@ -220,11 +270,15 @@ function visualEffectFamily(effect?: string): BattleVfxFamily {
       return 'weapon';
     case 'claw':
       return 'flesh';
+    case 'blood':
+      return 'wound';
     case 'bullet_hit':
+    case 'bullet':
       return 'gun';
     case 'explode':
       return 'fire';
     case 'thunder':
+    case 'lighting':
       return 'thunder';
     case 'magic':
       return 'magic';
@@ -235,8 +289,10 @@ function visualEffectFamily(effect?: string): BattleVfxFamily {
     case 'frost':
       return 'frost';
     case 'dark':
+    case 'void':
       return 'dark';
     case 'light':
+    case 'holy':
       return 'light';
     case 'nature':
       return 'nature';
@@ -246,6 +302,8 @@ function visualEffectFamily(effect?: string): BattleVfxFamily {
       return 'gun';
     case 'flesh':
       return 'flesh';
+    case 'rock':
+      return 'rock';
     case 'stun':
       return 'stun';
     case 'frozen':
@@ -329,6 +387,8 @@ export function battleVfxToneForFamily(family: BattleVfxFamily): BattleVfxTone {
       return 'steel';
     case 'flesh':
       return 'wound';
+    case 'rock':
+      return 'gold';
     default:
       return 'gold';
   }

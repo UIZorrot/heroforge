@@ -5,6 +5,7 @@ import {
   projectileBeamSequence,
   projectileBeamSequenceFrameIndex,
   projectileBeamSequenceFrameRect,
+  projectileVfxAssetFiles,
 } from './battleVfxAssets';
 
 describe('battle VFX texture assets', () => {
@@ -26,37 +27,39 @@ describe('battle VFX texture assets', () => {
     expect(battleVfxTextureAssets.every((asset) => !asset.src.includes('vfx-combat-atlas'))).toBe(true);
   });
 
-  it('provides independent projectile beam textures for major effect families', () => {
-    const projectileBeamIds = battleVfxTextureAssets
-      .filter((asset) => asset.role === 'projectile-beam')
-      .map((asset) => asset.id);
-
-    expect(projectileBeamIds).toEqual(expect.arrayContaining([
-      'beamFire',
-      'beamFrost',
-      'beamVoid',
-      'beamCurse',
-      'beamHoly',
-      'beamNature',
-      'beamWater',
-      'beamStorm',
-      'beamMagic',
-      'beamSteel',
-    ]));
-    expect(new Set(projectileBeamIds).size).toBe(projectileBeamIds.length);
-  });
-
-  it('provides family-specific 4x4 projectile spritesheet sequences', () => {
+  it('registers the exact canonical projectile spritesheet filenames', () => {
     const projectileSequenceIds = battleVfxTextureAssets
       .filter((asset) => asset.role === 'projectile-sequence')
       .map((asset) => asset.id);
 
-    expect(projectileSequenceIds).toEqual(expect.arrayContaining([
+    expect(projectileVfxAssetFiles).toEqual([
+      ['projectileBlood', 'projectile-beam-blood.png'],
+      ['projectileFire', 'projectile-beam-fire.png'],
+      ['projectileFrost', 'projectile-beam-frost.png'],
+      ['projectileHoly', 'projectile-beam-holy.png'],
+      ['projectileMagic', 'projectile-beam-magic.png'],
+      ['projectileNature', 'projectile-beam-nature.png'],
+      ['projectileArrow', 'projectile-beam-arrow.png'],
+      ['projectileLighting', 'projectile-beam-lighting.png'],
+      ['projectileVoid', 'projectile-beam-void.png'],
+      ['projectileWater', 'projectile-beam-water.png'],
+      ['projectileBullet', 'projectile-beam-bullet.png'],
+      ['projectileRock', 'projectile-beam-rock.png'],
+    ]);
+    expect(projectileSequenceIds).toEqual([
+      'projectileBlood',
       'projectileFire',
       'projectileFrost',
-      'projectileLight',
-      'projectileBlood',
-    ]));
+      'projectileHoly',
+      'projectileMagic',
+      'projectileNature',
+      'projectileArrow',
+      'projectileLighting',
+      'projectileVoid',
+      'projectileWater',
+      'projectileBullet',
+      'projectileRock',
+    ]);
     expect(new Set(projectileSequenceIds).size).toBe(projectileSequenceIds.length);
   });
 
