@@ -63,7 +63,6 @@ export function VfxTestPage() {
   const [effect, setEffect] = useState(vfxTestOptions.projectile[0]?.value ?? '');
   const [sequence, setSequence] = useState(1);
   const [amount, setAmount] = useState(360);
-  const [angleOffsetDeg, setAngleOffsetDeg] = useState(0);
   const [crit, setCrit] = useState(false);
 
   const options = vfxTestOptions[category];
@@ -76,8 +75,8 @@ export function VfxTestPage() {
   }, [defaultBoard]);
 
   const event = useMemo(
-    () => createVfxTestEvent(category, selectedEffect, sequence, { amount, crit, angleOffsetDeg }),
-    [amount, angleOffsetDeg, category, crit, selectedEffect, sequence]
+    () => createVfxTestEvent(category, selectedEffect, sequence, { amount, crit }),
+    [amount, category, crit, selectedEffect, sequence]
   );
   const result = useMemo(() => createVfxTestResult(board, event), [board, event]);
 
@@ -206,28 +205,6 @@ export function VfxTestPage() {
                 aria-label="VFX event amount"
               />
             </div>
-
-            {category === 'projectile' ? (
-              <div className="border-t border-white/8 pt-5">
-                <div className="mb-3 flex items-center justify-between">
-                  <div className="text-[10px] font-semibold uppercase tracking-[0.24em] text-stone-600">Angle</div>
-                  <div className="text-sm font-light text-stone-300">{angleOffsetDeg} deg</div>
-                </div>
-                <input
-                  type="range"
-                  min="-35"
-                  max="35"
-                  step="1"
-                  value={angleOffsetDeg}
-                  onChange={(event) => {
-                    setAngleOffsetDeg(Number(event.target.value));
-                    setSequence((value) => value + 1);
-                  }}
-                  className="w-full accent-[#d8b06c]"
-                  aria-label="Projectile VFX angle offset"
-                />
-              </div>
-            ) : null}
 
             <div className="flex gap-2">
               <button

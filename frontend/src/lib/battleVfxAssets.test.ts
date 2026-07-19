@@ -5,6 +5,7 @@ import {
   projectileBeamSequence,
   projectileBeamSequenceFrameIndex,
   projectileBeamSequenceFrameRect,
+  projectileFrameCenterAnchorYFromRgba,
   projectileFrameTipAnchorFromRgba,
   projectileVfxAssetFiles,
 } from './battleVfxAssets';
@@ -100,6 +101,22 @@ describe('battle VFX texture assets', () => {
 
     expect(projectileFrameTipAnchorFromRgba(pixels, 10, 6)).toBeCloseTo(0.9, 6);
     expect(projectileFrameTipAnchorFromRgba(new Uint8ClampedArray(10 * 6 * 4), 10, 6)).toBe(0.9);
+  });
+
+  it('anchors every sequence frame to its own bright vertical center', () => {
+    const pixels = new Uint8ClampedArray(10 * 10 * 4);
+    for (let y = 6; y <= 8; y += 1) {
+      for (let x = 2; x <= 8; x += 1) {
+        const pixel = (y * 10 + x) * 4;
+        pixels[pixel] = 220;
+        pixels[pixel + 1] = 160;
+        pixels[pixel + 2] = 80;
+        pixels[pixel + 3] = 255;
+      }
+    }
+
+    expect(projectileFrameCenterAnchorYFromRgba(pixels, 10, 10)).toBeGreaterThan(0.6);
+    expect(projectileFrameCenterAnchorYFromRgba(new Uint8ClampedArray(10 * 10 * 4), 10, 10)).toBe(0.5);
   });
 
   it('maps projectile flight progress to spritesheet frames', () => {

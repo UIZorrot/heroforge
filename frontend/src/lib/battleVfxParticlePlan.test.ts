@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   centerPointInHost,
   createFastProjectilePlan,
+  createImpactVfxPlan,
   createBuffBorderVfxPlan,
   createProjectileVfxProfile,
   PROJECTILE_BODY_LENGTH_SCALE,
@@ -24,8 +25,8 @@ describe('battle VFX particle plan', () => {
 
     expect(plan.flightDurationMs).toBeGreaterThanOrEqual(175);
     expect(plan.flightDurationMs).toBeLessThanOrEqual(235);
-    expect(plan.trailFraction).toBeGreaterThanOrEqual(0.2);
-    expect(plan.trailFraction).toBeLessThanOrEqual(0.46);
+    expect(plan.trailFraction).toBeGreaterThanOrEqual(0.3);
+    expect(plan.trailFraction).toBeLessThanOrEqual(0.62);
     expect(plan.trailFadeMs).toBeLessThanOrEqual(180);
     expect(plan.launchDelayMs).toBeGreaterThanOrEqual(30);
     expect(plan.launchDelayMs).toBeLessThanOrEqual(84);
@@ -38,7 +39,7 @@ describe('battle VFX particle plan', () => {
 
     expect(window.endT).toBeCloseTo(0.72, 4);
     expect(window.startT).toBeGreaterThan(0.25);
-    expect(window.endT - window.startT).toBeLessThanOrEqual(0.46);
+    expect(window.endT - window.startT).toBeLessThanOrEqual(0.62);
   });
 
   it('ends the luminous trail behind the projectile body instead of drawing a second head', () => {
@@ -48,7 +49,7 @@ describe('battle VFX particle plan', () => {
 
     expect(junction).toBeGreaterThanOrEqual(window.startT);
     expect(junction).toBeLessThan(window.endT);
-    expect(window.endT - junction).toBeCloseTo(0.06, 6);
+    expect(window.endT - junction).toBeCloseTo(plan.bodyFootprintFraction, 6);
   });
 
   it('builds a smooth tapered trail that grows brighter toward the projectile body', () => {
@@ -87,8 +88,8 @@ describe('battle VFX particle plan', () => {
   });
 
   it('uses only sustained flight frames and excludes dissolve frames at impact', () => {
-    expect(projectileFlightFrameIndex(0)).toBe(2);
-    expect(projectileFlightFrameIndex(0.5)).toBe(7);
+    expect(projectileFlightFrameIndex(0)).toBe(4);
+    expect(projectileFlightFrameIndex(0.5)).toBe(8);
     expect(projectileFlightFrameIndex(1)).toBe(11);
     expect(projectileFlightFrameIndex(1, [0, 15])).toBe(11);
   });
@@ -171,7 +172,7 @@ describe('battle VFX particle plan', () => {
     const fire = createProjectileVfxProfile({ attackType: 'fire', skillName: 'Ember Lance' });
     const frost = createProjectileVfxProfile({ attackType: 'frost', skillName: 'Frozen Spear' });
     const voidBolt = createProjectileVfxProfile({ attackType: 'dark', skillName: 'Soul Siphon' });
-    const steel = createProjectileVfxProfile({ actionType: 'attack', attackType: 'slash' });
+    const steel = createProjectileVfxProfile({ actionType: 'attack', attackType: 'strike' });
 
     expect(new Set([fire.id, frost.id, voidBolt.id, steel.id]).size).toBe(4);
     expect(new Set([fire.beamSequenceKey, frost.beamSequenceKey, voidBolt.beamSequenceKey, steel.beamSequenceKey]).size).toBe(4);
@@ -234,17 +235,43 @@ describe('battle VFX particle plan', () => {
   it('keeps styled projectile profiles fast while varying silhouette and impact weight', () => {
     const fire = createFastProjectilePlan(520, createProjectileVfxProfile({ attackType: 'fire' }));
     const frost = createFastProjectilePlan(520, createProjectileVfxProfile({ attackType: 'frost' }));
-    const steel = createFastProjectilePlan(520, createProjectileVfxProfile({ actionType: 'attack', attackType: 'slash' }));
+    const steel = createFastProjectilePlan(520, createProjectileVfxProfile({ actionType: 'attack', attackType: 'strike' }));
 
     for (const plan of [fire, frost, steel]) {
       expect(plan.flightDurationMs).toBeGreaterThanOrEqual(175);
       expect(plan.flightDurationMs).toBeLessThanOrEqual(235);
-      expect(plan.trailFraction).toBeLessThanOrEqual(0.46);
+      expect(plan.trailFraction).toBeLessThanOrEqual(0.62);
       expect(plan.trailFadeMs).toBeLessThanOrEqual(180);
     }
     expect(fire.particleCount).toBeGreaterThan(steel.particleCount);
-    expect(frost.impactRadius).not.toBe(fire.impactRadius);
     expect(steel.trailFraction).toBeLessThan(fire.trailFraction);
+  });
+
+  it('plans impact independently from projectile distance, path, and body scaling', () => {
+    const event = { typeCatalog: 'proj', typeEffect: 'fire', isCrit: false };
+    const nearProjectile = createFastProjectilePlan(220, createProjectileVfxProfile(event));
+    const farProjectile = createFastProjectilePlan(720, createProjectileVfxProfile(event));
+    const impact = createImpactVfxPlan(event);
+
+    expect(impact.radius).toBe(createImpactVfxPlan({ ...event }).radius);
+    expect(impact.textureKey).toBe('impactFire');
+    expect(impact.textureAnchor).toEqual({ x: 0.5, y: 0.5 });
+    expect(impact.ringAnchor).toEqual({ x: 0.5, y: 0.5 });
+    expect(nearProjectile).not.toHaveProperty('impactRadius');
+    expect(farProjectile).not.toHaveProperty('impactRadius');
+    expect(impact).not.toHaveProperty('angle');
+    expect(impact).not.toHaveProperty('scaleX');
+    expect(impact).not.toHaveProperty('scaleY');
+  });
+
+  it('lets critical hits increase impact weight without changing the impact asset or anchors', () => {
+    const normal = createImpactVfxPlan({ typeCatalog: 'proj', typeEffect: 'frost', isCrit: false });
+    const critical = createImpactVfxPlan({ typeCatalog: 'proj', typeEffect: 'frost', isCrit: true });
+
+    expect(critical.radius).toBeGreaterThan(normal.radius);
+    expect(critical.particleCount).toBeGreaterThan(normal.particleCount);
+    expect(critical.textureKey).toBe(normal.textureKey);
+    expect(critical.textureAnchor).toEqual(normal.textureAnchor);
   });
 
   it('maps every canonical attack type into a projectile visual profile', () => {
@@ -313,7 +340,7 @@ describe('battle VFX particle plan', () => {
     for (const profile of profiles) {
       expect(profile.beamSequenceScale).toBeGreaterThanOrEqual(0.3);
       expect(profile.beamSequenceScale).toBeLessThanOrEqual(0.44);
-      expect(profile.beamSequenceFrameRange?.[0]).toBeGreaterThanOrEqual(2);
+      expect(profile.beamSequenceFrameRange?.[0]).toBeGreaterThanOrEqual(4);
       expect(profile.beamSequenceFrameRange?.[1]).toBeLessThanOrEqual(11);
       expect(profile.impactStyle).toBeTruthy();
     }
@@ -351,22 +378,22 @@ describe('battle VFX particle plan', () => {
     expect(fire.beamSequenceKey).toBe('projectileFire');
     expect(fire.beamSequenceScale).toBeGreaterThanOrEqual(0.3);
     expect(fire.beamSequenceScale).toBeLessThanOrEqual(0.44);
-    expect(fire.beamSequenceFrameRange).toEqual([2, 11]);
+    expect(fire.beamSequenceFrameRange).toEqual([4, 11]);
     expect(fire.impactDirectionalCut ?? true).toBe(true);
     expect(fire.impactFlashTexture ?? true).toBe(true);
     expect(frost.beamSequenceKey).toBe('projectileFrost');
     expect(frost.beamSequenceScale).toBeLessThanOrEqual(0.44);
-    expect(frost.beamSequenceFrameRange).toEqual([2, 11]);
+    expect(frost.beamSequenceFrameRange).toEqual([4, 11]);
     expect(light.beamSequenceKey).toBe('projectileHoly');
     expect(light.beamSequenceScale).toBeLessThanOrEqual(0.44);
-    expect(light.beamSequenceFrameRange).toEqual([2, 11]);
+    expect(light.beamSequenceFrameRange).toEqual([4, 11]);
     expect(light.impactDirectionalCut).toBe(false);
     expect(light.impactFlashTexture).toBe(false);
     expect(blood.beamSequenceKey).toBe('projectileBlood');
     expect(blood.beamSequenceScale).toBeLessThanOrEqual(0.44);
-    expect(blood.beamSequenceFrameRange).toEqual([2, 11]);
+    expect(blood.beamSequenceFrameRange).toEqual([4, 11]);
     expect(defaultGold.beamSequenceKey).toBe('projectileBeam');
-    expect(defaultGold.beamSequenceFrameRange).toEqual([2, 11]);
+    expect(defaultGold.beamSequenceFrameRange).toEqual([4, 11]);
     expect(createProjectileVfxProfile({ typeCatalog: 'proj', typeEffect: 'bullet' }).beamSequenceKey).toBe('projectileBullet');
   });
 
@@ -411,7 +438,7 @@ describe('battle VFX particle plan', () => {
     }
   });
 
-  it('uses dedicated family instant textures instead of generic vector-only slashes', () => {
+  it('uses dedicated family instant textures instead of generic vector-only cuts', () => {
     const profiles = [
       createProjectileVfxProfile({ attackType: 'fire' }),
       createProjectileVfxProfile({ attackType: 'frost' }),

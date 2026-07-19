@@ -19,7 +19,6 @@ export type VfxTestOption = {
 export type VfxTestEventOptions = {
   crit?: boolean;
   amount?: number;
-  angleOffsetDeg?: number;
 };
 
 export const vfxTestCategories: Array<{ value: VfxTestCategory; label: string }> = [
@@ -187,7 +186,6 @@ export function createVfxTestEvent(
     buffTypeEffect: null,
     skillRole: 'damage',
     rangeMode: 'ranged',
-    vfxAngleOffsetDeg: options.angleOffsetDeg ?? 0,
     isCrit: Boolean(options.crit),
     damage: options.crit ? Math.floor(amount * 1.45) : amount,
     hpB: Math.max(1, 1800 - (options.crit ? Math.floor(amount * 1.45) : amount)),

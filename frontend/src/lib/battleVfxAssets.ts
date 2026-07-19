@@ -126,6 +126,32 @@ export function projectileFrameTipAnchorFromRgba(
   return 0.9;
 }
 
+export function projectileFrameCenterAnchorYFromRgba(
+  rgba: ArrayLike<number>,
+  width: number,
+  height: number,
+) {
+  const safeWidth = Math.max(1, Math.floor(width));
+  const safeHeight = Math.max(1, Math.floor(height));
+  let weightedY = 0;
+  let totalWeight = 0;
+
+  for (let y = 0; y < safeHeight; y += 2) {
+    for (let x = 0; x < safeWidth; x += 2) {
+      const pixel = (y * safeWidth + x) * 4;
+      const luminance = Math.max(rgba[pixel] ?? 0, rgba[pixel + 1] ?? 0, rgba[pixel + 2] ?? 0);
+      const alpha = rgba[pixel + 3] ?? 0;
+      if (luminance < 36 || alpha < 48) continue;
+      const weight = Math.pow(luminance / 255, 2) * (alpha / 255);
+      weightedY += (y + 0.5) * weight;
+      totalWeight += weight;
+    }
+  }
+
+  if (totalWeight <= 0) return 0.5;
+  return clamp(weightedY / totalWeight / safeHeight, 0.3, 0.7);
+}
+
 export function blackBackedVfxAlphaForLuminance(luminance: number) {
   const value = clamp(Number.isFinite(luminance) ? luminance : 0, 0, 255);
   if (value <= 8) return 0;

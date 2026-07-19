@@ -14,7 +14,7 @@ describe('vfxTestHarness', () => {
   });
 
   it('creates a projectile event that uses the projectile visual contract', () => {
-    const event = createVfxTestEvent('projectile', 'frost', 7, { crit: true, angleOffsetDeg: -12 });
+    const event = createVfxTestEvent('projectile', 'frost', 7, { crit: true });
 
     expect(event.actionType).toBe('skill');
     expect(event.attacker).toBe('A1');
@@ -23,7 +23,7 @@ describe('vfxTestHarness', () => {
     expect(event.typeEffect).toBe('frost');
     expect(event.rangeMode).toBe('ranged');
     expect(event.isCrit).toBe(true);
-    expect(event.vfxAngleOffsetDeg).toBe(-12);
+    expect(event.vfxAngleOffsetDeg).toBeUndefined();
     expect(event.timestamp).toBe(7);
   });
 

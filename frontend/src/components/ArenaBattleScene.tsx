@@ -10,12 +10,14 @@ import {
   battleVfxTextureAssets,
   projectileBeamSequence,
   projectileBeamSequenceFrameRect,
+  projectileFrameCenterAnchorYFromRgba,
   projectileFrameTipAnchorFromRgba,
 } from '../lib/battleVfxAssets';
 import { resolveBattleVfxDescriptor, type BattleVfxMode, type BattleVfxTone } from '../lib/battleVfxCatalog';
 import type { BattleBoardState, BattleBoardUnit, BattleEvent, BattleResult } from '../lib/battleTypes';
 import {
   createFastProjectilePlan,
+  createImpactVfxPlan,
   createBuffBorderVfxPlan,
   createProjectileVfxProfile,
   projectileAimBasis,
@@ -29,7 +31,7 @@ import {
   pointInHost,
   rectInHost,
   targetHitPointInHost,
-  type FastProjectilePlan,
+  type ImpactVfxPlan,
   type BuffBorderTextureKey,
   type ProjectileVfxImpactTextureKey,
   type ProjectileVfxInstantTextureKey,
@@ -636,7 +638,7 @@ type PixiPoint = { x: number; y: number };
 type PixiRect = { x: number; y: number; width: number; height: number };
 type PixiPalette = { core: number; hot: number; dark: number; text: number };
 type PixiAdd = <T extends Container | Graphics | Text | Sprite>(node: T, zIndex?: number) => T;
-type ProjectileSequenceFrame = { texture: Texture; tipAnchorX: number };
+type ProjectileSequenceFrame = { texture: Texture; tipAnchorX: number; centerAnchorY: number };
 type BattleVfxTextures = {
   projectileBeamFrames: ProjectileSequenceFrame[];
   projectileSequenceFrames: Record<ProjectileVfxSequenceTextureKey, ProjectileSequenceFrame[]>;
@@ -715,10 +717,9 @@ function drawBeamHead(graphics: Graphics, point: PixiPoint, angle: number, norma
 
 function drawImpactSignature(
   graphics: Graphics,
-  style: NonNullable<ProjectileVfxProfile['impactStyle']>,
+  style: ImpactVfxPlan['style'],
   palette: PixiPalette,
   radius: number,
-  angle: number,
 ) {
   const ray = (from: number, to: number, rotation: number, width = 1.5, alpha = 0.78) => {
     graphics.moveTo(Math.cos(rotation) * from, Math.sin(rotation) * from);
@@ -727,14 +728,15 @@ function drawImpactSignature(
   };
 
   if (style === 'pierce') {
-    ray(-radius * 0.28, radius * 0.54, angle, 2.2, 0.92);
-    ray(-radius * 0.08, radius * 0.28, angle + Math.PI / 2, 1.2, 0.58);
+    for (let spoke = 0; spoke < 4; spoke += 1) {
+      ray(radius * 0.06, radius * (spoke % 2 ? 0.34 : 0.52), spoke * Math.PI / 2, spoke % 2 ? 1.2 : 2.2, spoke % 2 ? 0.58 : 0.92);
+    }
     return;
   }
 
   if (style === 'shock') {
     for (let branch = 0; branch < 7; branch += 1) {
-      const rotation = angle + branch * Math.PI * 2 / 7;
+      const rotation = branch * Math.PI * 2 / 7;
       const middle = radius * (0.2 + (branch % 3) * 0.035);
       graphics.moveTo(Math.cos(rotation) * 4, Math.sin(rotation) * 4);
       graphics.lineTo(
@@ -748,9 +750,9 @@ function drawImpactSignature(
   }
 
   if (style === 'splash') {
-    graphics.ellipse(0, 0, radius * 0.52, radius * 0.23);
+    graphics.circle(0, 0, radius * 0.42);
     graphics.stroke({ color: palette.hot, width: 2, alpha: 0.64 });
-    graphics.ellipse(0, 0, radius * 0.34, radius * 0.14);
+    graphics.circle(0, 0, radius * 0.24);
     graphics.stroke({ color: palette.core, width: 1.4, alpha: 0.58 });
     for (let drop = 0; drop < 6; drop += 1) {
       ray(radius * 0.18, radius * (0.38 + (drop % 2) * 0.08), -Math.PI * 0.82 + drop * Math.PI * 0.13, 1.3, 0.62);
@@ -764,14 +766,14 @@ function drawImpactSignature(
     graphics.circle(0, 0, radius * 0.28);
     graphics.stroke({ color: palette.hot, width: 1.4, alpha: 0.78 });
     for (let spoke = 0; spoke < 6; spoke += 1) {
-      ray(radius * 0.32, radius * 0.56, angle + spoke * Math.PI / 3, 1.2, 0.54);
+      ray(radius * 0.32, radius * 0.56, spoke * Math.PI / 3, 1.2, 0.54);
     }
     return;
   }
 
   const count = style === 'crush' ? 10 : style === 'shatter' ? 12 : 8;
   for (let spoke = 0; spoke < count; spoke += 1) {
-    const rotation = angle + spoke * Math.PI * 2 / count;
+    const rotation = spoke * Math.PI * 2 / count;
     const inner = style === 'crush' ? radius * 0.12 : radius * 0.08;
     const outer = radius * (0.38 + (spoke % 3) * 0.08);
     ray(inner, outer, rotation, style === 'crush' ? 2.4 : 1.5, style === 'burst' ? 0.68 : 0.78);
@@ -785,12 +787,15 @@ function createProjectileBeamSequenceTextures(texture: Texture) {
   return Array.from({ length: projectileBeamSequence.frameCount }, (_, index) => {
     const rect = projectileBeamSequenceFrameRect(sourceTexture.width, sourceTexture.height, index);
     let tipAnchorX = 0.9;
+    let centerAnchorY = 0.5;
     if (context) {
       try {
         const pixels = context.getImageData(rect.x, rect.y, rect.width, rect.height).data;
         tipAnchorX = projectileFrameTipAnchorFromRgba(pixels, rect.width, rect.height);
+        centerAnchorY = projectileFrameCenterAnchorYFromRgba(pixels, rect.width, rect.height);
       } catch {
         tipAnchorX = 0.9;
+        centerAnchorY = 0.5;
       }
     }
     return {
@@ -799,6 +804,7 @@ function createProjectileBeamSequenceTextures(texture: Texture) {
         frame: new Rectangle(rect.x, rect.y, rect.width, rect.height),
       }),
       tipAnchorX,
+      centerAnchorY,
     };
   });
 }
@@ -975,18 +981,15 @@ function renderPixiImpact(
   event: BattleEvent,
   delay = 0,
   textures?: BattleVfxTextures,
-  projectilePlan?: FastProjectilePlan,
-  profile?: ProjectileVfxProfile,
-  showDirectionalCut = true,
-  impactAngle = 0,
+  impactPlan: ImpactVfxPlan = createImpactVfxPlan(event),
 ) {
   const burst = add(new Graphics(), 8);
   const shock = add(new Graphics(), 7);
   const shards = add(new Container(), 9);
   burst.blendMode = shock.blendMode = shards.blendMode = 'add';
   burst.filters = [new BlurFilter({ strength: 3 })];
-  const impactRadius = projectilePlan?.impactRadius ?? (event.isCrit ? 88 : 68);
-  const impactStyle = profile?.impactStyle ?? 'burst';
+  const impactRadius = impactPlan.radius;
+  const impactStyle = impactPlan.style;
   const impactMotion = {
     burst: { textureAlpha: 0.66, textureStart: 0.2, textureEnd: 0.62, duration: 0.3, ringAlpha: 0.42, ringEnd: 0.58, particles: 1 },
     collapse: { textureAlpha: 0.58, textureStart: 0.58, textureEnd: 0.2, duration: 0.28, ringAlpha: 0.34, ringEnd: 0.4, particles: 0.82 },
@@ -1000,7 +1003,7 @@ function renderPixiImpact(
   signature.x = point.x;
   signature.y = point.y;
   signature.blendMode = 'add';
-  drawImpactSignature(signature, impactStyle, palette, impactRadius, impactAngle);
+  drawImpactSignature(signature, impactStyle, palette, impactRadius);
   const signatureState = {
     alpha: impactStyle === 'pierce' ? 0.9 : 0.76,
     scale: impactStyle === 'collapse' ? 1.06 : 0.64,
@@ -1028,21 +1031,16 @@ function renderPixiImpact(
   }));
 
   if (textures) {
-    const showImpactFlashTexture = profile?.impactFlashTexture ?? true;
-    const flashTexture = showImpactFlashTexture ? (profile ? impactBurstTexture(textures, profile.impactTextureKey) : textures.impact) : null;
-    const ringAnchor = profile?.impactRingAnchor ?? { x: 0.5, y: 0.5 };
+    const flashTexture = impactPlan.showFlashTexture ? impactBurstTexture(textures, impactPlan.textureKey) : null;
     const flash = flashTexture ? add(new Sprite(flashTexture), 8) : null;
-    const cut = showDirectionalCut ? add(new Sprite(textures.slash), 9) : null;
-    const cutState = { alpha: 0.44, scaleX: 0.13, scaleY: 0.034, rotation: -0.62 + Math.random() * 0.18 };
     const ringSprite = add(new Sprite(textures.ring), 8);
     const ringSpriteState = { alpha: impactMotion.ringAlpha, scale: 0.2, rotation: Math.random() * Math.PI };
     if (flash) {
-      const flashAnchor = profile?.impactAnchor ?? { x: 0.5, y: 0.5 };
-      const flashScale = profile?.impactFlashScale ?? 0.72;
+      const flashScale = impactPlan.flashScale;
       const flashState = { alpha: 0, scale: 0.1, rotation: Math.random() * Math.PI };
-      flash.anchor.set(flashAnchor.x, flashAnchor.y);
+      flash.anchor.set(impactPlan.textureAnchor.x, impactPlan.textureAnchor.y);
       flash.blendMode = 'add';
-      flash.tint = profile ? 0xffffff : palette.hot;
+      flash.tint = 0xffffff;
       flash.x = point.x;
       flash.y = point.y;
       flash.alpha = 0;
@@ -1064,42 +1062,13 @@ function renderPixiImpact(
         onComplete: () => flash.destroy(),
       }));
     }
-    if (cut) {
-      cut.anchor.set(0.72, 0.58);
-      cut.blendMode = 'add';
-      cut.tint = palette.hot;
-      cut.x = point.x;
-      cut.y = point.y;
-      cut.alpha = 0;
-      cut.scale.set(cutState.scaleX, cutState.scaleY);
-    }
-    ringSprite.anchor.set(ringAnchor.x, ringAnchor.y);
+    ringSprite.anchor.set(impactPlan.ringAnchor.x, impactPlan.ringAnchor.y);
     ringSprite.blendMode = 'add';
     ringSprite.tint = palette.core;
     ringSprite.x = point.x;
     ringSprite.y = point.y;
     ringSprite.alpha = 0;
     ringSprite.scale.set(ringSpriteState.scale);
-    if (cut) {
-      tweens.push(gsap.fromTo(cutState, {
-        alpha: 0.76,
-        scaleX: (event.isCrit ? 0.38 : 0.3) * (profile?.slashScaleX ?? 1),
-        scaleY: 0.08 * (profile?.slashScaleY ?? 1),
-      }, {
-        alpha: 0,
-        scaleX: event.isCrit ? 0.54 : 0.42,
-        scaleY: 0.035,
-        duration: 0.2,
-        delay,
-        ease: 'power4.out',
-        onUpdate: () => {
-          cut.alpha = cutState.alpha;
-          cut.rotation = cutState.rotation;
-          cut.scale.set(cutState.scaleX, cutState.scaleY);
-        },
-        onComplete: () => cut.destroy(),
-      }));
-    }
     tweens.push(gsap.fromTo(ringSpriteState, { alpha: event.isCrit ? Math.min(0.66, impactMotion.ringAlpha + 0.14) : impactMotion.ringAlpha, scale: impactStyle === 'collapse' ? impactMotion.ringEnd : 0.16 }, {
       alpha: 0,
       scale: impactStyle === 'collapse' ? 0.14 : impactMotion.ringEnd * (event.isCrit ? 1.14 : 1),
@@ -1150,7 +1119,7 @@ function renderPixiImpact(
     onComplete: () => shock.destroy(),
   }));
 
-  const baseShardCount = Math.round((profile?.shardCount ?? 30) * impactMotion.particles);
+  const baseShardCount = Math.round(impactPlan.particleCount * impactMotion.particles);
   const shardCount = event.isCrit ? Math.round(baseShardCount * 1.22) : baseShardCount;
   for (let i = 0; i < shardCount; i += 1) {
     const angle = (Math.PI * 2 * i) / shardCount + (Math.random() - 0.5) * 0.28;
@@ -1322,7 +1291,7 @@ function renderPixiInstant(add: PixiAdd, tweens: gsap.core.Tween[], point: PixiP
     }
   }
 
-  renderPixiImpact(add, tweens, point, palette, event, 0.02, textures, undefined, profile, false);
+  renderPixiImpact(add, tweens, point, palette, event, 0.02, textures, createImpactVfxPlan(event));
   tweens.push(gsap.delayedCall(0.72, () => layer.destroy({ children: true })));
 }
 
@@ -1497,10 +1466,7 @@ function renderPixiProjectileEmitter({
   onImpact?: () => void;
 }) {
   const beamPalette = palette;
-  const rawAngleOffsetDeg = event.vfxAngleOffsetDeg ?? event.vfx_angle_offset_deg ?? 0;
-  const angleOffsetDeg = Number.isFinite(Number(rawAngleOffsetDeg)) ? Number(rawAngleOffsetDeg) : 0;
   const aim = projectileAimBasis(start, end);
-  const angleOffsetRad = angleOffsetDeg * Math.PI / 180;
   const effectDx = aim.dir.x * dist;
   const effectDy = aim.dir.y * dist;
   const effectNormal = aim.normal;
@@ -1548,7 +1514,7 @@ function renderPixiProjectileEmitter({
   beam.blendMode = useBeamSequence ? projectileBeamSequence.blendMode : 'add';
   bloom.filters = [new BlurFilter({ strength: 3 })];
   source.filters = [new BlurFilter({ strength: 2 })];
-  beam.anchor.set(initialBeamFrame.tipAnchorX, 0.5);
+  beam.anchor.set(initialBeamFrame.tipAnchorX, initialBeamFrame.centerAnchorY);
   beam.alpha = 0;
   beam.tint = 0xffffff;
   beam.scale.set(0.01);
@@ -1561,6 +1527,7 @@ function renderPixiProjectileEmitter({
     const frame = beamSequenceFrames[frameIndex] ?? initialBeamFrame;
     beam.texture = frame.texture;
     beam.anchor.x = frame.tipAnchorX;
+    beam.anchor.y = frame.centerAnchorY;
   };
 
   const createParticle = (container: ParticleContainer<Particle>, texture: Texture, point: PixiPoint, velocity: PixiPoint, lifeMs: number, scale: number, alpha: number, delayMs = 0) => {
@@ -1702,8 +1669,7 @@ function renderPixiProjectileEmitter({
     core.clear();
     bloom.clear();
     onImpact?.();
-    const impactPath = projectilePathSample(start, end, 1, profile.arcBend, profile.pathWobble, profile.pathWaves);
-    renderPixiImpact(add, tweens, end, palette, event, 0, textures, plan, profile, false, impactPath.angle + angleOffsetRad);
+    renderPixiImpact(add, tweens, end, palette, event, 0, textures, createImpactVfxPlan(event));
   };
 
   for (let i = 0; i < 8; i += 1) {
@@ -1735,7 +1701,7 @@ function renderPixiProjectileEmitter({
     const headT = projectileHeadProgress(travelT);
     const path = projectilePathSample(start, end, headT, profile.arcBend, profile.pathWobble, profile.pathWaves);
     const headPoint = path.point;
-    const angle = path.angle + angleOffsetRad;
+    const angle = path.angle;
     const trailSegments = projectileTrailSegments(headT, plan);
 
     if (elapsedMs >= plan.launchDelayMs && !launchBurstDone) {
@@ -2152,7 +2118,7 @@ function BattleEffectLayer({ board, event, disabled }: { board: BattleBoardState
         },
       });
     } else if (mode === 'projectile' && !selfTarget) {
-      renderPixiImpact(add, tweensRef.current, end, palette, event, 0, undefined, createFastProjectilePlan(dist, profile), profile);
+      renderPixiImpact(add, tweensRef.current, end, palette, event, 0, undefined, createImpactVfxPlan(event));
     } else {
       renderPixiInstant(add, tweensRef.current, end, palette, event, textures, profile);
     }
