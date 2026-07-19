@@ -61,6 +61,12 @@ describe('battle VFX texture assets', () => {
       'projectileRock',
     ]);
     expect(new Set(projectileSequenceIds).size).toBe(projectileSequenceIds.length);
+
+    const fallbackAsset = battleVfxTextureAssets.find((asset) => asset.id === 'projectileBeam');
+    const projectileAssets = battleVfxTextureAssets.filter((asset) => asset.role === 'projectile-sequence');
+    expect(fallbackAsset).toBeDefined();
+    expect(projectileAssets).toHaveLength(projectileVfxAssetFiles.length);
+    expect(projectileAssets.every((asset) => asset.src !== fallbackAsset?.src)).toBe(true);
   });
 
   it('describes projectile-beam.png as a 4x4 black-backed spritesheet sequence', () => {
