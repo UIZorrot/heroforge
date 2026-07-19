@@ -8,6 +8,7 @@ import {
   projectileBodyEnvelope,
   projectileFlightFrameIndex,
   projectileHeadProgress,
+  projectilePathSample,
   projectileTrailWindow,
   projectileParticleAlpha,
   projectileAimBasis,
@@ -21,8 +22,9 @@ describe('battle VFX particle plan', () => {
     expect(plan.flightDurationMs).toBeLessThanOrEqual(235);
     expect(plan.trailFraction).toBeLessThanOrEqual(0.14);
     expect(plan.trailFadeMs).toBeLessThanOrEqual(180);
-    expect(plan.beamLingerMs).toBe(0);
-    expect(plan.impactDelayMs).toBe(plan.flightDurationMs);
+    expect(plan.launchDelayMs).toBeGreaterThanOrEqual(30);
+    expect(plan.launchDelayMs).toBeLessThanOrEqual(84);
+    expect(plan.impactDelayMs).toBe(plan.launchDelayMs + plan.flightDurationMs);
   });
 
   it('only draws a short trail window immediately behind the projectile head', () => {
@@ -59,6 +61,21 @@ describe('battle VFX particle plan', () => {
     expect(projectileFlightFrameIndex(0.5)).toBe(7);
     expect(projectileFlightFrameIndex(1)).toBe(11);
     expect(projectileFlightFrameIndex(1, [0, 15])).toBe(11);
+  });
+
+  it('curves authored projectiles while preserving exact source and target contact points', () => {
+    const start = { x: 10, y: 20 };
+    const end = { x: 410, y: 220 };
+    const launch = projectilePathSample(start, end, 0, 0.06, 4, 1.5);
+    const middle = projectilePathSample(start, end, 0.5, 0.06, 4, 1.5);
+    const impact = projectilePathSample(start, end, 1, 0.06, 4, 1.5);
+
+    expect(launch.point).toEqual(start);
+    expect(impact.point.x).toBeCloseTo(end.x, 6);
+    expect(impact.point.y).toBeCloseTo(end.y, 6);
+    expect(middle.point.y).not.toBeCloseTo(120, 2);
+    expect(middle.depthEnvelope).toBeCloseTo(1, 6);
+    expect(launch.angle).not.toBe(impact.angle);
   });
 
   it('can rotate the projectile visual basis without changing the card-to-card path', () => {
@@ -261,14 +278,20 @@ describe('battle VFX particle plan', () => {
 
   it('keeps every canonical projectile at a fixed, distance-independent body size', () => {
     const effects = ['blood', 'fire', 'frost', 'holy', 'magic', 'nature', 'arrow', 'lighting', 'void', 'water', 'bullet', 'rock'];
+    const profiles = effects.map((typeEffect) => createProjectileVfxProfile({ typeCatalog: 'proj', typeEffect }));
 
-    for (const typeEffect of effects) {
-      const profile = createProjectileVfxProfile({ typeCatalog: 'proj', typeEffect });
+    for (const profile of profiles) {
       expect(profile.beamSequenceScale).toBeGreaterThanOrEqual(0.3);
       expect(profile.beamSequenceScale).toBeLessThanOrEqual(0.44);
       expect(profile.beamSequenceFrameRange?.[0]).toBeGreaterThanOrEqual(2);
       expect(profile.beamSequenceFrameRange?.[1]).toBeLessThanOrEqual(11);
+      expect(profile.impactStyle).toBeTruthy();
     }
+
+    expect(new Set(profiles.map((profile) => profile.impactStyle)).size).toBe(7);
+    expect(createProjectileVfxProfile({ typeCatalog: 'proj', typeEffect: 'lighting' }).impactStyle).toBe('shock');
+    expect(createProjectileVfxProfile({ typeCatalog: 'proj', typeEffect: 'bullet' }).impactStyle).toBe('pierce');
+    expect(createProjectileVfxProfile({ typeCatalog: 'proj', typeEffect: 'rock' }).impactStyle).toBe('crush');
   });
 
   it('uses beam silhouettes instead of arrowhead projectile geometry', () => {

@@ -22,6 +22,7 @@ import {
   projectileFlightFrameIndex,
   projectileHeadProgress,
   projectileParticleAlpha,
+  projectilePathSample,
   projectileTrailWindow,
   pointInHost,
   rectInHost,
@@ -675,23 +676,6 @@ function pixiPalette(tone: BattleVfxTone): PixiPalette {
   return palettes[tone];
 }
 
-function linePoint(a: PixiPoint, b: PixiPoint, t: number): PixiPoint {
-  return {
-    x: a.x + (b.x - a.x) * t,
-    y: a.y + (b.y - a.y) * t,
-  };
-}
-
-function drawLineSegment(graphics: Graphics, a: PixiPoint, b: PixiPoint, startT: number, endT: number, color: number, width: number, alpha: number) {
-  const from = Math.max(0, Math.min(1, startT));
-  const to = Math.max(from + 0.001, Math.min(1, endT));
-  const first = linePoint(a, b, from);
-  graphics.moveTo(first.x, first.y);
-  const last = linePoint(a, b, to);
-  graphics.lineTo(last.x, last.y);
-  graphics.stroke({ color, width, alpha, cap: 'round', join: 'round' });
-}
-
 function drawGlowCircle(graphics: Graphics, x: number, y: number, radius: number, color: number, alpha: number) {
   graphics.circle(x, y, radius);
   graphics.fill({ color, alpha });
@@ -723,6 +707,71 @@ function drawBeamHead(graphics: Graphics, point: PixiPoint, angle: number, norma
       cap: 'round',
       join: 'round',
     });
+  }
+}
+
+function drawImpactSignature(
+  graphics: Graphics,
+  style: NonNullable<ProjectileVfxProfile['impactStyle']>,
+  palette: PixiPalette,
+  radius: number,
+  angle: number,
+) {
+  const ray = (from: number, to: number, rotation: number, width = 1.5, alpha = 0.78) => {
+    graphics.moveTo(Math.cos(rotation) * from, Math.sin(rotation) * from);
+    graphics.lineTo(Math.cos(rotation) * to, Math.sin(rotation) * to);
+    graphics.stroke({ color: palette.hot, width, alpha, cap: 'round' });
+  };
+
+  if (style === 'pierce') {
+    ray(-radius * 0.28, radius * 0.54, angle, 2.2, 0.92);
+    ray(-radius * 0.08, radius * 0.28, angle + Math.PI / 2, 1.2, 0.58);
+    return;
+  }
+
+  if (style === 'shock') {
+    for (let branch = 0; branch < 7; branch += 1) {
+      const rotation = angle + branch * Math.PI * 2 / 7;
+      const middle = radius * (0.2 + (branch % 3) * 0.035);
+      graphics.moveTo(Math.cos(rotation) * 4, Math.sin(rotation) * 4);
+      graphics.lineTo(
+        Math.cos(rotation) * middle + Math.cos(rotation + Math.PI / 2) * (branch % 2 ? 5 : -5),
+        Math.sin(rotation) * middle + Math.sin(rotation + Math.PI / 2) * (branch % 2 ? 5 : -5),
+      );
+      graphics.lineTo(Math.cos(rotation) * radius * 0.62, Math.sin(rotation) * radius * 0.62);
+      graphics.stroke({ color: branch % 2 ? palette.core : palette.hot, width: branch % 2 ? 1.2 : 2, alpha: 0.82, cap: 'round' });
+    }
+    return;
+  }
+
+  if (style === 'splash') {
+    graphics.ellipse(0, 0, radius * 0.52, radius * 0.23);
+    graphics.stroke({ color: palette.hot, width: 2, alpha: 0.64 });
+    graphics.ellipse(0, 0, radius * 0.34, radius * 0.14);
+    graphics.stroke({ color: palette.core, width: 1.4, alpha: 0.58 });
+    for (let drop = 0; drop < 6; drop += 1) {
+      ray(radius * 0.18, radius * (0.38 + (drop % 2) * 0.08), -Math.PI * 0.82 + drop * Math.PI * 0.13, 1.3, 0.62);
+    }
+    return;
+  }
+
+  if (style === 'collapse') {
+    graphics.circle(0, 0, radius * 0.52);
+    graphics.stroke({ color: palette.core, width: 2.2, alpha: 0.66 });
+    graphics.circle(0, 0, radius * 0.28);
+    graphics.stroke({ color: palette.hot, width: 1.4, alpha: 0.78 });
+    for (let spoke = 0; spoke < 6; spoke += 1) {
+      ray(radius * 0.32, radius * 0.56, angle + spoke * Math.PI / 3, 1.2, 0.54);
+    }
+    return;
+  }
+
+  const count = style === 'crush' ? 10 : style === 'shatter' ? 12 : 8;
+  for (let spoke = 0; spoke < count; spoke += 1) {
+    const rotation = angle + spoke * Math.PI * 2 / count;
+    const inner = style === 'crush' ? radius * 0.12 : radius * 0.08;
+    const outer = radius * (0.38 + (spoke % 3) * 0.08);
+    ray(inner, outer, rotation, style === 'crush' ? 2.4 : 1.5, style === 'burst' ? 0.68 : 0.78);
   }
 }
 
@@ -911,7 +960,8 @@ function renderPixiImpact(
   textures?: BattleVfxTextures,
   projectilePlan?: FastProjectilePlan,
   profile?: ProjectileVfxProfile,
-  showDirectionalCut = true
+  showDirectionalCut = true,
+  impactAngle = 0,
 ) {
   const burst = add(new Graphics(), 8);
   const shock = add(new Graphics(), 7);
@@ -919,6 +969,46 @@ function renderPixiImpact(
   burst.blendMode = shock.blendMode = shards.blendMode = 'add';
   burst.filters = [new BlurFilter({ strength: 3 })];
   const impactRadius = projectilePlan?.impactRadius ?? (event.isCrit ? 88 : 68);
+  const impactStyle = profile?.impactStyle ?? 'burst';
+  const impactMotion = {
+    burst: { textureAlpha: 0.66, textureStart: 0.2, textureEnd: 0.62, duration: 0.3, ringAlpha: 0.42, ringEnd: 0.58, particles: 1 },
+    collapse: { textureAlpha: 0.58, textureStart: 0.58, textureEnd: 0.2, duration: 0.28, ringAlpha: 0.34, ringEnd: 0.4, particles: 0.82 },
+    shatter: { textureAlpha: 0.64, textureStart: 0.18, textureEnd: 0.5, duration: 0.24, ringAlpha: 0.24, ringEnd: 0.44, particles: 1.18 },
+    pierce: { textureAlpha: 0.42, textureStart: 0.12, textureEnd: 0.32, duration: 0.18, ringAlpha: 0.18, ringEnd: 0.3, particles: 0.46 },
+    shock: { textureAlpha: 0.6, textureStart: 0.12, textureEnd: 0.4, duration: 0.2, ringAlpha: 0.5, ringEnd: 0.48, particles: 0.74 },
+    splash: { textureAlpha: 0.5, textureStart: 0.2, textureEnd: 0.56, duration: 0.32, ringAlpha: 0.32, ringEnd: 0.64, particles: 0.88 },
+    crush: { textureAlpha: 0.7, textureStart: 0.2, textureEnd: 0.58, duration: 0.3, ringAlpha: 0.28, ringEnd: 0.5, particles: 1.32 },
+  }[impactStyle];
+  const signature = add(new Graphics(), 10);
+  signature.x = point.x;
+  signature.y = point.y;
+  signature.blendMode = 'add';
+  drawImpactSignature(signature, impactStyle, palette, impactRadius, impactAngle);
+  const signatureState = {
+    alpha: impactStyle === 'pierce' ? 0.9 : 0.76,
+    scale: impactStyle === 'collapse' ? 1.06 : 0.64,
+    rotation: 0,
+  };
+  signature.alpha = signatureState.alpha;
+  signature.scale.set(signatureState.scale);
+  signature.rotation = signatureState.rotation;
+  tweens.push(gsap.fromTo(signatureState, {
+    alpha: signatureState.alpha,
+    scale: signatureState.scale,
+  }, {
+    alpha: 0,
+    scale: impactStyle === 'collapse' ? 0.48 : 1.08,
+    rotation: impactStyle === 'collapse' ? -0.12 : 0.06,
+    duration: impactMotion.duration + 0.08,
+    delay,
+    ease: 'power4.out',
+    onUpdate: () => {
+      signature.alpha = signatureState.alpha;
+      signature.scale.set(signatureState.scale);
+      signature.rotation = signatureState.rotation;
+    },
+    onComplete: () => signature.destroy(),
+  }));
 
   if (textures) {
     const showImpactFlashTexture = profile?.impactFlashTexture ?? true;
@@ -928,7 +1018,7 @@ function renderPixiImpact(
     const cut = showDirectionalCut ? add(new Sprite(textures.slash), 9) : null;
     const cutState = { alpha: 0.44, scaleX: 0.13, scaleY: 0.034, rotation: -0.62 + Math.random() * 0.18 };
     const ringSprite = add(new Sprite(textures.ring), 8);
-    const ringSpriteState = { alpha: 0.46, scale: 0.28, rotation: Math.random() * Math.PI };
+    const ringSpriteState = { alpha: impactMotion.ringAlpha, scale: 0.2, rotation: Math.random() * Math.PI };
     if (flash) {
       const flashAnchor = profile?.impactAnchor ?? { x: 0.5, y: 0.5 };
       const flashScale = profile?.impactFlashScale ?? 0.72;
@@ -940,10 +1030,10 @@ function renderPixiImpact(
       flash.y = point.y;
       flash.alpha = 0;
       flash.scale.set(flashScale * 0.16);
-      tweens.push(gsap.fromTo(flashState, { alpha: event.isCrit ? 1 : 0.96, scale: flashScale * 0.34 }, {
+      tweens.push(gsap.fromTo(flashState, { alpha: event.isCrit ? Math.min(0.86, impactMotion.textureAlpha + 0.14) : impactMotion.textureAlpha, scale: flashScale * impactMotion.textureStart }, {
         alpha: 0,
-        scale: flashScale * (event.isCrit ? 1.06 : 0.86),
-        duration: event.isCrit ? 0.42 : 0.36,
+        scale: flashScale * impactMotion.textureEnd * (event.isCrit ? 1.14 : 1),
+        duration: impactMotion.duration * (event.isCrit ? 1.18 : 1),
         delay,
         ease: 'power4.out',
         onStart: () => {
@@ -993,10 +1083,10 @@ function renderPixiImpact(
         onComplete: () => cut.destroy(),
       }));
     }
-    tweens.push(gsap.fromTo(ringSpriteState, { alpha: event.isCrit ? 0.72 : 0.52, scale: 0.22 }, {
+    tweens.push(gsap.fromTo(ringSpriteState, { alpha: event.isCrit ? Math.min(0.66, impactMotion.ringAlpha + 0.14) : impactMotion.ringAlpha, scale: impactStyle === 'collapse' ? impactMotion.ringEnd : 0.16 }, {
       alpha: 0,
-      scale: event.isCrit ? 0.72 : 0.58,
-      duration: event.isCrit ? 0.48 : 0.36,
+      scale: impactStyle === 'collapse' ? 0.14 : impactMotion.ringEnd * (event.isCrit ? 1.14 : 1),
+      duration: impactMotion.duration + 0.06,
       delay,
       ease: 'power4.out',
       onUpdate: () => {
@@ -1008,16 +1098,16 @@ function renderPixiImpact(
     }));
   }
 
-  tweens.push(gsap.fromTo(burst, { alpha: 0, scale: 0.4 }, {
+  tweens.push(gsap.fromTo(burst, { alpha: 0, scale: impactStyle === 'collapse' ? 1 : 0.42 }, {
     alpha: 0,
-    scale: 1.18,
-    duration: 0.28,
+    scale: impactStyle === 'collapse' ? 0.62 : 1.02,
+    duration: impactMotion.duration,
     delay,
     ease: 'power4.out',
     onStart: () => {
       burst.clear();
-      drawGlowCircle(burst, point.x, point.y, impactRadius * 0.54, palette.hot, event.isCrit ? 0.62 : 0.44);
-      drawGlowCircle(burst, point.x, point.y, impactRadius, palette.core, event.isCrit ? 0.2 : 0.13);
+      drawGlowCircle(burst, point.x, point.y, impactRadius * 0.46, palette.hot, event.isCrit ? 0.46 : 0.3);
+      drawGlowCircle(burst, point.x, point.y, impactRadius * 0.84, palette.core, event.isCrit ? 0.16 : 0.1);
     },
     onUpdate: () => {
       burst.x = point.x * (1 - burst.scale.x);
@@ -1026,24 +1116,25 @@ function renderPixiImpact(
     onComplete: () => burst.destroy(),
   }));
 
-  const ring = { r: 18, alpha: 0.95 };
+  const ring = { r: impactStyle === 'collapse' ? impactRadius * 0.78 : 12, alpha: impactMotion.ringAlpha + 0.22 };
   tweens.push(gsap.to(ring, {
-    r: event.isCrit ? impactRadius * 1.18 : impactRadius,
+    r: impactStyle === 'collapse' ? 8 : (event.isCrit ? impactRadius * 0.96 : impactRadius * 0.82),
     alpha: 0,
-    duration: event.isCrit ? 0.44 : 0.34,
+    duration: impactMotion.duration + 0.04,
     delay,
     ease: 'power4.out',
     onUpdate: () => {
       shock.clear();
       shock.circle(point.x, point.y, ring.r);
-      shock.stroke({ color: palette.hot, width: event.isCrit ? 4 : 3, alpha: ring.alpha });
+      shock.stroke({ color: palette.hot, width: event.isCrit ? 3 : 2, alpha: ring.alpha });
       shock.circle(point.x, point.y, ring.r * 0.62);
       shock.stroke({ color: palette.core, width: 2, alpha: ring.alpha * 0.6 });
     },
     onComplete: () => shock.destroy(),
   }));
 
-  const shardCount = event.isCrit ? Math.round((profile?.shardCount ?? 38) * 1.35) : (profile?.shardCount ?? 38);
+  const baseShardCount = Math.round((profile?.shardCount ?? 30) * impactMotion.particles);
+  const shardCount = event.isCrit ? Math.round(baseShardCount * 1.22) : baseShardCount;
   for (let i = 0; i < shardCount; i += 1) {
     const angle = (Math.PI * 2 * i) / shardCount + (Math.random() - 0.5) * 0.28;
     const length = 16 + Math.random() * (event.isCrit ? 72 : 48);
@@ -1373,6 +1464,7 @@ function renderPixiProjectileEmitter({
   textures,
   profile,
   registerCleanup,
+  onImpact,
 }: {
   add: PixiAdd;
   app: Application;
@@ -1385,11 +1477,13 @@ function renderPixiProjectileEmitter({
   textures: BattleVfxTextures;
   profile: ProjectileVfxProfile;
   registerCleanup: (cleanup: TickerCleanup) => void;
+  onImpact?: () => void;
 }) {
   const beamPalette = palette;
   const rawAngleOffsetDeg = event.vfxAngleOffsetDeg ?? event.vfx_angle_offset_deg ?? 0;
   const angleOffsetDeg = Number.isFinite(Number(rawAngleOffsetDeg)) ? Number(rawAngleOffsetDeg) : 0;
-  const aim = projectileAimBasis(start, end, angleOffsetDeg);
+  const aim = projectileAimBasis(start, end);
+  const angleOffsetRad = angleOffsetDeg * Math.PI / 180;
   const effectDx = aim.dir.x * dist;
   const effectDy = aim.dir.y * dist;
   const effectNormal = aim.normal;
@@ -1423,27 +1517,17 @@ function renderPixiProjectileEmitter({
     },
     texture: textures.smokeA,
   }), 6);
-  const shardLayer = add(new ParticleContainer<Particle>({
-    dynamicProperties: {
-      position: true,
-      rotation: true,
-      vertex: true,
-      uvs: true,
-      color: true,
-    },
-    texture: textures.sparkB,
-  }), 8);
   const activeParticles: LiveVfxParticle[] = [];
   const allParticles: Particle[] = [];
-  const sourceState = { alpha: 1, radius: 10 };
-  const totalMs = plan.flightDurationMs + 320;
+  const totalMs = plan.impactDelayMs + 360;
   let elapsedMs = 0;
   let emitterBudget = plan.emitterParticleCount;
   let emitterAccumulator = 0;
+  let launchBurstDone = false;
   let impactDone = false;
   let disposed = false;
 
-  core.blendMode = bloom.blendMode = source.blendMode = particleLayer.blendMode = smokeLayer.blendMode = shardLayer.blendMode = 'add';
+  core.blendMode = bloom.blendMode = source.blendMode = particleLayer.blendMode = smokeLayer.blendMode = 'add';
   beam.blendMode = useBeamSequence ? projectileBeamSequence.blendMode : 'add';
   bloom.filters = [new BlurFilter({ strength: 3 })];
   source.filters = [new BlurFilter({ strength: 2 })];
@@ -1490,35 +1574,12 @@ function renderPixiProjectileEmitter({
     });
   };
 
-  for (let i = 0; i < plan.particleCount; i += 1) {
-    const pathT = 0.06 + Math.random() * 0.72;
-    const p = linePoint(start, end, pathT);
-    const side = Math.random() > 0.5 ? 1 : -1;
-    const textureKey = profile.textureMix[i % profile.textureMix.length];
-    createParticle(
-      particleLayer,
-      vfxTexture(textures, textureKey),
-      {
-        x: p.x - effectDx * 0.02 * Math.random(),
-        y: p.y - effectDy * 0.02 * Math.random(),
-      },
-      {
-        x: effectNormal.x * side * (0.035 + Math.random() * 0.065) * profile.scatter - effectDx * 0.00008,
-        y: effectNormal.y * side * (0.035 + Math.random() * 0.065) * profile.scatter - effectDy * 0.00008,
-      },
-      95 + Math.random() * 80,
-      (0.018 + Math.random() * 0.022) * profile.particleScale,
-      0.46 + Math.random() * 0.26,
-      (pathT * plan.flightDurationMs) * 0.72
-    );
-  }
-
   const emitFlightParticle = (headT: number, headPoint: PixiPoint) => {
     if (emitterBudget <= 0) return;
     emitterBudget -= 1;
     const side = Math.random() > 0.5 ? 1 : -1;
     const backT = Math.max(0, headT - Math.random() * plan.trailFraction * 0.72);
-    const p = linePoint(start, end, backT);
+    const p = projectilePathSample(start, end, backT, profile.arcBend, profile.pathWobble, profile.pathWaves).point;
     const textureKey = profile.textureMix[(emitterBudget + Math.floor(Math.random() * profile.textureMix.length)) % profile.textureMix.length];
     const lateral = (Math.random() - 0.5) * profile.emitterJitter * 18;
     const backDrift = 0.012 + Math.random() * 0.026;
@@ -1554,14 +1615,50 @@ function renderPixiProjectileEmitter({
         0.72 + Math.random() * 0.2
       );
     }
+    if (Math.random() < (profile.wakeAlpha ?? 0.5) * 0.34) {
+      const smokeTexture = textures.smokes[(emitterBudget + Math.floor(Math.random() * textures.smokes.length)) % textures.smokes.length];
+      createParticle(
+        smokeLayer,
+        smokeTexture,
+        {
+          x: p.x + effectNormal.x * lateral * 0.35,
+          y: p.y + effectNormal.y * lateral * 0.35,
+        },
+        {
+          x: -effectDx * 0.00008 + effectNormal.x * (Math.random() - 0.5) * 0.028,
+          y: -effectDy * 0.00008 + effectNormal.y * (Math.random() - 0.5) * 0.028,
+        },
+        130 + Math.random() * 90,
+        (profile.tailSmokeScale + Math.random() * 0.025) * profile.particleScale,
+        (0.06 + Math.random() * 0.08) * (profile.wakeAlpha ?? 0.5),
+      );
+    }
   };
 
-  tweens.push(gsap.to(sourceState, {
-    alpha: 0,
-    radius: 34,
-    duration: 0.16,
-    ease: 'power4.out',
-  }));
+  const spawnLaunchBurst = () => {
+    if (launchBurstDone) return;
+    launchBurstDone = true;
+    const count = Math.round(6 + profile.particleDensity * 5);
+    for (let i = 0; i < count; i += 1) {
+      const side = Math.random() - 0.5;
+      const textureKey = profile.textureMix[i % profile.textureMix.length];
+      createParticle(
+        particleLayer,
+        vfxTexture(textures, textureKey),
+        {
+          x: start.x + aim.dir.x * (2 + Math.random() * 8),
+          y: start.y + aim.dir.y * (2 + Math.random() * 8),
+        },
+        {
+          x: -aim.dir.x * (0.05 + Math.random() * 0.08) + aim.normal.x * side * 0.16,
+          y: -aim.dir.y * (0.05 + Math.random() * 0.08) + aim.normal.y * side * 0.16,
+        },
+        90 + Math.random() * 90,
+        (0.016 + Math.random() * 0.028) * profile.particleScale,
+        0.58 + Math.random() * 0.34,
+      );
+    }
+  };
 
   const cleanup = () => {
     if (disposed) return;
@@ -1570,11 +1667,9 @@ function renderPixiProjectileEmitter({
     allParticles.forEach((particle) => {
       if (particleLayer.particleChildren.includes(particle)) particleLayer.removeParticle(particle);
       if (smokeLayer.particleChildren.includes(particle)) smokeLayer.removeParticle(particle);
-      if (shardLayer.particleChildren.includes(particle)) shardLayer.removeParticle(particle);
     });
     particleLayer.destroy();
     smokeLayer.destroy();
-    shardLayer.destroy();
     core.destroy();
     bloom.destroy();
     source.destroy();
@@ -1588,27 +1683,9 @@ function renderPixiProjectileEmitter({
     beam.visible = false;
     core.clear();
     bloom.clear();
-    renderPixiImpact(add, tweens, end, palette, event, 0, textures, plan, profile, false);
-    for (let i = 0; i < profile.shardCount; i += 1) {
-      const angle = (Math.PI * 2 * i) / profile.shardCount + (Math.random() - 0.5) * 0.18;
-      const speed = (0.08 + Math.random() * 0.18) * profile.scatter;
-      const textureKey = profile.textureMix[(i + 1) % profile.textureMix.length];
-      createParticle(
-        shardLayer,
-        vfxTexture(textures, textureKey),
-        {
-          x: end.x + Math.cos(angle) * (4 + Math.random() * 8),
-          y: end.y + Math.sin(angle) * (4 + Math.random() * 8),
-        },
-        {
-          x: Math.cos(angle) * speed,
-          y: Math.sin(angle) * speed,
-        },
-        180 + Math.random() * 130,
-        (0.022 + Math.random() * 0.034) * profile.particleScale,
-        0.72 + Math.random() * 0.22
-      );
-    }
+    onImpact?.();
+    const impactPath = projectilePathSample(start, end, 1, profile.arcBend, profile.pathWobble, profile.pathWaves);
+    renderPixiImpact(add, tweens, end, palette, event, 0, textures, plan, profile, false, impactPath.angle + angleOffsetRad);
   };
 
   for (let i = 0; i < 8; i += 1) {
@@ -1628,37 +1705,61 @@ function renderPixiProjectileEmitter({
       150 + Math.random() * 130,
       (profile.tailSmokeScale + Math.random() * 0.035) * profile.particleScale,
       0.14 + Math.random() * 0.12,
-      Math.random() * plan.flightDurationMs * 0.35
+      plan.launchDelayMs * 0.45 + Math.random() * plan.flightDurationMs * 0.18
     );
   }
 
   function update() {
     const deltaMs = app.ticker.deltaMS;
     elapsedMs += deltaMs;
-    const travelT = Math.min(1, elapsedMs / plan.flightDurationMs);
+    const flightElapsedMs = Math.max(0, elapsedMs - plan.launchDelayMs);
+    const travelT = Math.min(1, flightElapsedMs / plan.flightDurationMs);
     const headT = projectileHeadProgress(travelT);
-    const headPoint = linePoint(start, end, headT);
-    const angle = aim.angle;
+    const path = projectilePathSample(start, end, headT, profile.arcBend, profile.pathWobble, profile.pathWaves);
+    const headPoint = path.point;
+    const angle = path.angle + angleOffsetRad;
     const trail = projectileTrailWindow(headT, plan);
+    const trailPoint = projectilePathSample(start, end, trail.startT, profile.arcBend, profile.pathWobble, profile.pathWaves).point;
 
-    if (elapsedMs >= plan.flightDurationMs && !impactDone) {
+    if (elapsedMs >= plan.launchDelayMs && !launchBurstDone) {
+      spawnLaunchBurst();
+    }
+
+    if (elapsedMs >= plan.impactDelayMs && !impactDone) {
       spawnImpact();
     }
 
     source.clear();
-    drawGlowCircle(source, start.x, start.y, 8 + sourceState.radius, beamPalette.core, sourceState.alpha * 0.18);
-    drawGlowCircle(source, start.x, start.y, 7, beamPalette.hot, sourceState.alpha * 0.5);
+    const chargeT = Math.min(1, elapsedMs / Math.max(1, plan.launchDelayMs));
+    const releaseT = Math.max(0, Math.min(1, (elapsedMs - plan.launchDelayMs) / 110));
+    const sourceAlpha = elapsedMs < plan.launchDelayMs ? 0.28 + chargeT * 0.72 : 1 - releaseT;
+    const chargeRadius = 9 + chargeT * 10 + releaseT * 16;
+    drawGlowCircle(source, start.x, start.y, chargeRadius, beamPalette.core, sourceAlpha * 0.12);
+    drawGlowCircle(source, start.x, start.y, Math.max(3, 7 - releaseT * 3), beamPalette.hot, sourceAlpha * 0.68);
+    source.circle(start.x, start.y, 12 + chargeT * 7 + releaseT * 9);
+    source.stroke({ color: beamPalette.core, width: 1.5, alpha: sourceAlpha * 0.58 });
+    source.moveTo(start.x - aim.normal.x * 8 - aim.dir.x * 7, start.y - aim.normal.y * 8 - aim.dir.y * 7);
+    source.lineTo(start.x + aim.dir.x * (12 + chargeT * 13), start.y + aim.dir.y * (12 + chargeT * 13));
+    source.stroke({ color: beamPalette.hot, width: 1.2, alpha: sourceAlpha * 0.54, cap: 'round' });
 
     core.clear();
     bloom.clear();
-    if (!impactDone && elapsedMs < plan.flightDurationMs) {
+    if (!impactDone && elapsedMs >= plan.launchDelayMs && elapsedMs < plan.impactDelayMs) {
       updateBeamSequenceTexture(travelT);
       const beamAlpha = Math.min(1, travelT / 0.08);
       const body = projectileBodyEnvelope(headT);
-      const bodyScale = (profile.beamSequenceScale ?? 0.42) * body.scale;
-      drawLineSegment(bloom, start, end, trail.startT, trail.endT, beamPalette.core, Math.max(7, profile.bloomWidth * 0.46), 0.1 * beamAlpha);
-      drawLineSegment(core, start, end, trail.startT, trail.endT, beamPalette.core, Math.max(2, profile.coreWidth * 0.38), 0.34 * beamAlpha);
-      drawLineSegment(core, start, end, Math.max(trail.startT, trail.endT - 0.045), trail.endT, beamPalette.hot, 1.5, 0.72 * beamAlpha);
+      const bodyScale = (profile.beamSequenceScale ?? 0.42) * body.scale * (1 + (profile.depthScale ?? 0.05) * path.depthEnvelope);
+      bloom.moveTo(trailPoint.x, trailPoint.y);
+      bloom.lineTo(headPoint.x, headPoint.y);
+      bloom.stroke({ color: beamPalette.core, width: Math.max(7, profile.bloomWidth * 0.46), alpha: 0.1 * beamAlpha, cap: 'round' });
+      core.moveTo(trailPoint.x, trailPoint.y);
+      core.lineTo(headPoint.x, headPoint.y);
+      core.stroke({ color: beamPalette.core, width: Math.max(2, profile.coreWidth * 0.38), alpha: 0.34 * beamAlpha, cap: 'round' });
+      const hotTrailT = Math.max(trail.startT, trail.endT - 0.045);
+      const hotTrailPoint = projectilePathSample(start, end, hotTrailT, profile.arcBend, profile.pathWobble, profile.pathWaves).point;
+      core.moveTo(hotTrailPoint.x, hotTrailPoint.y);
+      core.lineTo(headPoint.x, headPoint.y);
+      core.stroke({ color: beamPalette.hot, width: 1.5, alpha: 0.72 * beamAlpha, cap: 'round' });
       drawGlowCircle(bloom, headPoint.x, headPoint.y, Math.max(6, profile.headGlowRadius * 0.48), beamPalette.core, 0.08 * beamAlpha);
       if (profile.vectorHeadAlpha > 0) {
         drawBeamHead(core, headPoint, angle, effectNormal, beamPalette, profile);
@@ -1700,7 +1801,6 @@ function renderPixiProjectileEmitter({
         activeParticles.splice(i, 1);
         if (particleLayer.particleChildren.includes(live.particle)) particleLayer.removeParticle(live.particle);
         if (smokeLayer.particleChildren.includes(live.particle)) smokeLayer.removeParticle(live.particle);
-        if (shardLayer.particleChildren.includes(live.particle)) shardLayer.removeParticle(live.particle);
       }
     }
 
@@ -1953,20 +2053,22 @@ function BattleEffectLayer({ board, event, disabled }: { board: BattleBoardState
       return node;
     };
 
-    const pulse = add(new Graphics(), 1);
-    pulse.blendMode = 'add';
-    pulse.filters = [new BlurFilter({ strength: 4 })];
-    drawGlowCircle(pulse, start.x, start.y, 20, palette.core, 0.5);
-    tweensRef.current.push(gsap.to(pulse, {
-      alpha: 0,
-      duration: 0.52,
-      ease: 'power3.out',
-      onUpdate: () => {
-        pulse.clear();
-        drawGlowCircle(pulse, start.x, start.y, 24 + (1 - pulse.alpha) * 80, palette.core, pulse.alpha * 0.5);
-      },
-      onComplete: () => pulse.destroy(),
-    }));
+    if (mode !== 'projectile') {
+      const pulse = add(new Graphics(), 1);
+      pulse.blendMode = 'add';
+      pulse.filters = [new BlurFilter({ strength: 4 })];
+      drawGlowCircle(pulse, start.x, start.y, 20, palette.core, 0.5);
+      tweensRef.current.push(gsap.to(pulse, {
+        alpha: 0,
+        duration: 0.52,
+        ease: 'power3.out',
+        onUpdate: () => {
+          pulse.clear();
+          drawGlowCircle(pulse, start.x, start.y, 24 + (1 - pulse.alpha) * 80, palette.core, pulse.alpha * 0.5);
+        },
+        onComplete: () => pulse.destroy(),
+      }));
+    }
 
     if (mode === 'buff') {
       renderPixiBuff(add, tweensRef.current, end, targetBox, palette, event, textures);
@@ -1974,6 +2076,8 @@ function BattleEffectLayer({ board, event, disabled }: { board: BattleBoardState
     }
 
     if (mode === 'projectile' && !selfTarget && textures) {
+      const targetElement = findBattleUnitElement(host.parentElement ?? host, event.defender);
+      const impactDirection = dx >= 0 ? 1 : -1;
       renderPixiProjectileEmitter({
         add,
         app,
@@ -1987,6 +2091,19 @@ function BattleEffectLayer({ board, event, disabled }: { board: BattleBoardState
         profile,
         registerCleanup: (cleanup) => {
           tickerCleanupRef.current.push(cleanup);
+        },
+        onImpact: () => {
+          if (!targetElement || typeof targetElement.animate !== 'function') return;
+          const strength = profile.impactStyle === 'crush' ? 6 : profile.impactStyle === 'pierce' ? 2.5 : 4;
+          targetElement.animate([
+            { translate: '0 0', filter: 'brightness(1)' },
+            { offset: 0.2, translate: `${impactDirection * strength}px 0`, filter: 'brightness(1.34)' },
+            { offset: 0.48, translate: `${impactDirection * -strength * 0.42}px 0`, filter: 'brightness(1.12)' },
+            { translate: '0 0', filter: 'brightness(1)' },
+          ], {
+            duration: profile.impactStyle === 'crush' ? 210 : 160,
+            easing: 'cubic-bezier(0.22, 1, 0.36, 1)',
+          });
         },
       });
     } else if (mode === 'projectile' && !selfTarget) {
