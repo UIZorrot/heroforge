@@ -108,7 +108,7 @@ STARTER_CARDS: List[Dict[str, Any]] = [
         4520,
         {"HP": 1880, "MP": 980, "ATK": 322, "DEF": 28, "CC": 21, "SPEED": 96, "CA": 18, "PI": 12, "EV": 8, "AC": 8, "TYPE": "arcane mage", "type_catalog": "proj", "type_effect": "magic"},
         _skill("Arcane Comet", "Launches a violet comet that blooms on contact.", role="attack", effect_type="magic", type_catalog="proj", type_effect="magic", target="Enemy", range_mode="enemy", dmg=124, mp_cost=30),
-        _skill("Frost Prism", "Locks the target in a sudden burst of ice.", role="attack", effect_type="frost", type_catalog="instant", type_effect="frost", target="Enemy", range_mode="enemy", dmg=62, mp_cost=42, buff_name="frozen", buff_time=2, buff_ev=-10, buff_type_effect="frozen"),
+        _skill("Frost Prism", "Locks the target in a sudden burst of ice.", role="attack", effect_type="frost", type_catalog="instant", type_effect="frost", target="Enemy", range_mode="enemy", dmg=62, mp_cost=42, buff_name="frozen", buff_time=2, buff_ev=10, buff_type_effect="frozen"),
         "A glass-cannon mage for testing magic missiles and frost control impact.",
     ),
     _card(
@@ -117,7 +117,7 @@ STARTER_CARDS: List[Dict[str, Any]] = [
         5100,
         {"HP": 3020, "MP": 640, "ATK": 338, "DEF": 58, "CC": 19, "SPEED": 88, "CA": 16, "PI": 16, "EV": 8, "AC": 8, "TYPE": "witchblade", "type_catalog": "instant", "type_effect": "fire"},
         _skill("Witchflame Cut", "Carves the target with a short-lived blade of fire.", role="attack", effect_type="fire", type_catalog="instant", type_effect="fire", target="Enemy", range_mode="melee", dmg=96, mp_cost=26),
-        _skill("Corrupting Sigil", "Brands the enemy and lowers their defenses.", role="attack", effect_type="dark", type_catalog="instant", type_effect="dark", target="Enemy", range_mode="enemy", dmg=44, mp_cost=36, buff_name="curse", buff_time=3, buff_def=-12, buff_type_effect="curse"),
+        _skill("Corrupting Sigil", "Brands the enemy and lowers their defenses.", role="attack", effect_type="dark", type_catalog="instant", type_effect="dark", target="Enemy", range_mode="enemy", dmg=44, mp_cost=36, buff_name="curse", buff_time=3, buff_def=12, buff_type_effect="curse"),
         "A front-line spellblade built to test fire slashes and curse debuffs.",
     ),
     _card(
@@ -135,7 +135,7 @@ STARTER_CARDS: List[Dict[str, Any]] = [
         3860,
         {"HP": 2040, "MP": 620, "ATK": 262, "DEF": 36, "CC": 20, "SPEED": 116, "CA": 14, "PI": 13, "EV": 8, "AC": 8, "TYPE": "nature archer", "type_catalog": "proj", "type_effect": "nature"},
         _skill("Briar Arrow", "Sends a thorned arrow that leaves a bleeding wound.", role="attack", effect_type="nature", type_catalog="proj", type_effect="nature", target="Enemy", range_mode="enemy", dmg=72, mp_cost=24, buff_name="wound", buff_time=2, buff_dmg=42, buff_type_effect="wound"),
-        _skill("Venom Root", "Poisons and weakens the target with crawling roots.", role="attack", effect_type="poison", type_catalog="instant", type_effect="poison", target="Enemy", range_mode="enemy", dmg=38, mp_cost=32, buff_name="weakness", buff_time=2, buff_dmg=-28, buff_type_effect="weakness"),
+        _skill("Venom Root", "Poisons and weakens the target with crawling roots.", role="attack", effect_type="poison", type_catalog="instant", type_effect="poison", target="Enemy", range_mode="enemy", dmg=38, mp_cost=32, buff_name="curse", buff_time=2, buff_dmg=28, buff_type_effect="curse"),
         "A tempo archer for testing green projectiles, poison marks, and wound feedback.",
     ),
     _card(
@@ -144,7 +144,7 @@ STARTER_CARDS: List[Dict[str, Any]] = [
         4160,
         {"HP": 2320, "MP": 940, "ATK": 286, "DEF": 40, "CC": 17, "SPEED": 74, "CA": 15, "PI": 16, "EV": 8, "AC": 8, "TYPE": "void warlock", "type_catalog": "proj", "type_effect": "void"},
         _skill("Null Lance", "Throws a black lance that collapses into the target.", role="attack", effect_type="void", type_catalog="proj", type_effect="void", target="Enemy", range_mode="enemy", dmg=108, mp_cost=28),
-        _skill("Grave Hex", "Places a long curse that erodes enemy resistance.", role="attack", effect_type="curse", type_catalog="instant", type_effect="dark", target="Enemy", range_mode="enemy", dmg=50, mp_cost=38, buff_name="curse", buff_time=3, buff_def=-14, buff_type_effect="curse"),
+        _skill("Grave Hex", "Places a long curse that erodes enemy resistance.", role="attack", effect_type="curse", type_catalog="instant", type_effect="dark", target="Enemy", range_mode="enemy", dmg=50, mp_cost=38, buff_name="curse", buff_time=3, buff_def=14, buff_type_effect="curse"),
         "A curse specialist for testing void missiles and dark debuff persistence.",
     ),
     _card(
@@ -153,7 +153,7 @@ STARTER_CARDS: List[Dict[str, Any]] = [
         4720,
         {"HP": 3480, "MP": 420, "ATK": 356, "DEF": 66, "CC": 22, "SPEED": 72, "CA": 20, "PI": 18, "EV": 6, "AC": 8, "TYPE": "bloodtusk chieftain", "type_catalog": "instant", "type_effect": "claw"},
         _skill("Rending Claw", "Tears through armor and leaves a visible wound.", role="attack", effect_type="flesh", type_catalog="instant", type_effect="claw", target="Enemy", range_mode="melee", dmg=88, mp_cost=24, buff_name="wound", buff_time=2, buff_dmg=54, buff_type_effect="wound"),
-        _skill("Blood Banner", "Raises a brutal banner that empowers the next attacks.", role="buff", effect_type="buff", type_catalog="instant", type_effect="fire", target="Self", range_mode="self", mp_cost=30, buff_name="bless", buff_time=3, buff_dmg=48, buff_type_effect="bless"),
+        _skill("Blood Banner", "Raises a brutal banner that empowers the next attacks.", role="buff", effect_type="buff", type_catalog="instant", type_effect="fire", target="Self", range_mode="self", mp_cost=30, buff_name="pray", buff_time=3, buff_dmg=48, buff_type_effect="pray"),
         "A bruiser used to test heavy flesh impacts, wounds, and party offense buffs.",
     ),
     _card(

@@ -49,9 +49,11 @@ settings = get_settings()
 app = Flask(__name__)
 CORS(app, resources={r"/api/*": {"origins": "*"}})
 
+_database_init_error = None
 try:
     initialize_schema()
-except Exception:
+except Exception as exc:
+    _database_init_error = exc
     logging.exception("Database schema initialization skipped or failed")
 
 class GeminiModelAdapter:
@@ -144,15 +146,15 @@ choose 2 from 3 options for the character:
 [Buff]:
 Debuffs (negative effects):
 (stun): Stuns the enemy for one turn
-(frozen): Decreases enemy accuracy by X
+(frozen): Decreases enemy speed, accuracy and evasion
 (poison): Deals X damage to the enemy at the start of each turn
-(corrupt): Reduces enemy armor by X
+(wound): Deals X bleeding damage to the enemy at the start of each turn
+(burn): Deals X fire damage to the enemy at the start of each turn
+(curse): Reduces enemy attack and defense by X
 
 Buffs (positive effects):
-(bless): Increases X attack
-(heal): Restores X HP or MP (immediate or per turn)
-(haste): Increases X crit rate and accuracy
-(pray): Increases X attribute
+(heal): Restores X HP at the start of each turn
+(pray): Increases attack, defense and speed by X
 
 All statuses must specify how many turns they last, except for stun (which lasts 1 turn).
 Choose 2 out of 3 skills based on the character’s traits and design them.
@@ -194,7 +196,7 @@ output the data in JSON format exactly like this:
         "IS_STUN": "<True or False>",
         "MP_COST_RATE": <1, 2, or 3>,
         "BUFF_TIME": "<Duration of Buff/Debuff>",
-        "BUFF_NAME": "<stun, frozen, poison, wound, curse, bless, heal, haste, pray, weakness, vulnerable>"
+        "BUFF_NAME": "<stun, frozen, poison, wound, burn, curse, heal, pray>"
     },
     "s2": { ...same structure as s1... }
 }
@@ -250,7 +252,7 @@ The skill object must include:
 "RANGE": "<melee|ranged|self|ally|enemy>",
 "IS_STUN": <true or false>,
 "BUFF_TIME": <turn count, 0 if the effect does not exist>,
-"BUFF_NAME": "<stun, frozen, poison, wound, curse, bless, heal, haste, pray, weakness, vulnerable>",
+"BUFF_NAME": "<stun, frozen, poison, wound, burn, curse, heal, pray>",
 "DMG": <0 or 1>,
 "BUFF_HP": <0 or 1>,
 "BUFF_MP": <0 or 1>,
@@ -294,7 +296,7 @@ Output JSON exactly in this format:
       "RANGE": "<melee|ranged|self|ally|enemy>",
       "IS_STUN": <true or false>,
       "BUFF_TIME": <0 or a turn count>,
-      "BUFF_NAME": "<stun, frozen, poison, wound, curse, bless, heal, haste, pray, weakness, vulnerable>",
+      "BUFF_NAME": "<stun, frozen, poison, wound, burn, curse, heal, pray>",
       "DMG": <0 or 1>,
       "BUFF_HP": <0 or 1>,
       "BUFF_MP": <0 or 1>,
@@ -1745,7 +1747,13 @@ def ladder_me():
 
 @app.route("/api/health", methods=["GET"])
 def health():
-    return jsonify({"ok": True})
+    try:
+        with get_connection() as conn:
+            conn.execute("SELECT 1")
+        return jsonify({"ok": True, "database": "ready"})
+    except Exception:
+        logging.exception("Health check database connection failed")
+        return jsonify({"ok": False, "database": "unavailable"}), 503
 
 
 @app.route("/api/forge", methods=["POST"])
@@ -2987,6 +2995,8 @@ def list_my_battles():
     return jsonify({"data": normalize_rows(rows)})
 
 if __name__ == "__main__":
+    if _database_init_error is not None:
+        raise SystemExit("Database initialization failed. Check backend/.env and the Supabase connection URL.")
     port = settings.port
     debug_enabled = os.getenv("FLASK_DEBUG", "0").strip().lower() in {"1", "true", "yes"}
     print(f"Server starting on http://127.0.0.1:{port}")

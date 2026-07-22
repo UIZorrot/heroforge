@@ -40,16 +40,16 @@ describe('vfxTestHarness', () => {
   });
 
   it('creates a buff event that targets the caster card border', () => {
-    const event = createVfxTestEvent('buff', 'vulnerable', 11);
-    const board = createVfxTestBoard('buff', 'vulnerable');
+    const event = createVfxTestEvent('buff', 'burn', 11);
+    const board = createVfxTestBoard('buff', 'burn');
 
     expect(event.actionType).toBe('skill');
     expect(event.attacker).toBe('A1');
     expect(event.defender).toBe('A1');
     expect(event.skillRole).toBe('buff');
-    expect(event.buffName).toBe('vulnerable');
-    expect(event.buffTypeEffect).toBe('vulnerable');
-    expect(board.bottom[0]?.buffs).toEqual([{ name: 'vulnerable', duration: 3, value: 1 }]);
+    expect(event.buffName).toBe('burn');
+    expect(event.buffTypeEffect).toBe('burn');
+    expect(board.bottom[0]?.buffs).toEqual([{ name: 'burn', duration: 3, value: 2 }]);
   });
 
   it('wraps the board and event in a replayable battle result', () => {

@@ -488,7 +488,7 @@ def _skill_numeric_value(field: str, skill: Dict[str, Any], state: Dict[str, str
         if buff_name == "heal":
             rate = random.uniform(0.10, 0.24)
             return max(0, int((hp if target != "enemy" else mp or hp) * rate))
-        if buff_name == "wound":
+        if buff_name in {"wound", "burn"}:
             rate = random.uniform(0.08, 0.20)
             return max(0, int(atk * rate))
         return max(0, int(atk * random.uniform(0.05, 0.14)))
@@ -500,10 +500,10 @@ def _skill_numeric_value(field: str, skill: Dict[str, Any], state: Dict[str, str
         return max(0, int(mp * random.uniform(0.04, 0.10)))
 
     if field == "BUFF_DMG":
-        if buff_name == "weakness":
+        if buff_name == "curse":
             rate = random.uniform(0.08, 0.20)
             return max(0, int(atk * rate))
-        if buff_name == "bless":
+        if buff_name == "pray":
             rate = random.uniform(0.08, 0.22)
             return max(0, int(atk * rate))
         return max(0, int(atk * random.uniform(0.05, 0.16)))

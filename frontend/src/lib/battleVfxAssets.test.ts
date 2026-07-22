@@ -8,6 +8,10 @@ import {
   projectileFrameCenterAnchorYFromRgba,
   projectileFrameTipAnchorFromRgba,
   projectileVfxAssetFiles,
+  instantHitSequence,
+  instantHitSequenceAssetFiles,
+  instantHitSequenceFrameIndex,
+  instantHitSequenceFrameRect,
 } from './battleVfxAssets';
 
 describe('battle VFX texture assets', () => {
@@ -16,9 +20,9 @@ describe('battle VFX texture assets', () => {
 
     expect(roles).toEqual(expect.arrayContaining([
       'projectile-beam',
+      'instant-hit-sequence',
       'impact-burst',
       'instant-glyph',
-      'buff-border',
       'slash-streak',
       'ring',
       'spark',
@@ -27,6 +31,42 @@ describe('battle VFX texture assets', () => {
     expect(battleVfxTextureAssets.length).toBeGreaterThanOrEqual(10);
     expect(battleVfxTextureAssets.every((asset) => asset.src.endsWith('.png'))).toBe(true);
     expect(battleVfxTextureAssets.every((asset) => !asset.src.includes('vfx-combat-atlas'))).toBe(true);
+  });
+
+  it('registers the 4x4 instant hit sequence pack and maps every supported effect', () => {
+    expect(instantHitSequence).toEqual({
+      columns: 4,
+      rows: 4,
+      frameCount: 16,
+      frameDurationMs: 18,
+      durationMs: 288,
+      blendMode: 'screen',
+    });
+    expect(Object.keys(instantHitSequenceAssetFiles)).toHaveLength(15);
+    expect(Object.values(instantHitSequenceAssetFiles)).toEqual(expect.arrayContaining([
+      'instant-bullet-hit.png',
+      'pierce.png',
+      'strike.png',
+      'smash.png',
+      'fire-instantFire.png',
+      'thunder-instantStorm.png',
+    ]));
+    const instantSequenceAssets = battleVfxTextureAssets.filter((asset) => asset.role === 'instant-hit-sequence');
+    const projectileFallback = battleVfxTextureAssets.find((asset) => asset.id === 'projectileBeam');
+    expect(instantSequenceAssets).toHaveLength(15);
+    expect(instantSequenceAssets.every((asset) => asset.src.endsWith('.png'))).toBe(true);
+    expect(instantSequenceAssets.every((asset) => asset.src !== projectileFallback?.src)).toBe(true);
+    expect(new Set(instantSequenceAssets.map((asset) => asset.src)).size).toBe(15);
+  });
+
+  it('maps instant hit progress to 4x4 frames with non-uniform edge-safe rectangles', () => {
+    expect(instantHitSequenceFrameIndex(-1)).toBe(0);
+    expect(instantHitSequenceFrameIndex(0.5)).toBe(8);
+    expect(instantHitSequenceFrameIndex(0.999)).toBe(15);
+    expect(instantHitSequenceFrameIndex(1)).toBe(15);
+    expect(instantHitSequenceFrameRect(1254, 1254, 0)).toEqual({ x: 0, y: 0, width: 314, height: 314 });
+    expect(instantHitSequenceFrameRect(1254, 1254, 5)).toEqual({ x: 314, y: 314, width: 313, height: 313 });
+    expect(instantHitSequenceFrameRect(1254, 1254, 15)).toEqual({ x: 941, y: 941, width: 313, height: 313 });
   });
 
   it('registers the exact canonical projectile spritesheet filenames', () => {
@@ -177,24 +217,5 @@ describe('battle VFX texture assets', () => {
       'instantGold',
     ]));
     expect(new Set(instantIds).size).toBe(instantIds.length);
-  });
-
-  it('provides border-focused resources for persistent buff VFX', () => {
-    const buffBorderIds = battleVfxTextureAssets
-      .filter((asset) => asset.role === 'buff-border')
-      .map((asset) => asset.id);
-
-    expect(buffBorderIds).toEqual(expect.arrayContaining([
-      'buffBorderFire',
-      'buffBorderFrost',
-      'buffBorderVoid',
-      'buffBorderHoly',
-      'buffBorderNature',
-      'buffBorderWater',
-      'buffBorderStorm',
-      'buffBorderMagic',
-      'buffBorderSteel',
-    ]));
-    expect(new Set(buffBorderIds).size).toBe(buffBorderIds.length);
   });
 });

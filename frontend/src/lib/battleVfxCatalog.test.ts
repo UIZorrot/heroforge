@@ -62,7 +62,6 @@ describe('battle VFX catalog', () => {
       'rock',
     ]);
     expect(canonicalBattleInstantTypeEffects).toEqual([
-      'slash',
       'magic',
       'thunder',
       'strike',
@@ -84,13 +83,10 @@ describe('battle VFX catalog', () => {
       'frozen',
       'poison',
       'wound',
+      'burn',
       'curse',
-      'bless',
       'heal',
-      'haste',
       'pray',
-      'weakness',
-      'vulnerable',
     ]);
   });
 
@@ -153,21 +149,21 @@ describe('battle VFX catalog', () => {
       actionType: 'skill',
       skillRole: 'buff',
       typeCatalog: 'instant',
-      typeEffect: 'slash',
-      buffName: 'bless',
+      typeEffect: 'strike',
+      buffName: 'pray',
       damage: 0,
     })).toMatchObject({
       mode: 'buff',
       typeCatalog: 'instant',
-      typeEffect: 'slash',
-      family: 'bless',
+      typeEffect: 'strike',
+      family: 'pray',
       tone: 'heal',
     });
 
     expect(resolveBattleVfxDescriptor({
       actionType: 'dot_damage',
       typeCatalog: 'instant',
-      typeEffect: 'slash',
+      typeEffect: 'strike',
       buffName: 'wound',
       damage: 60,
     })).toMatchObject({
@@ -183,13 +179,10 @@ describe('battle VFX catalog', () => {
       'frozen',
       'poison',
       'wound',
+      'burn',
       'curse',
-      'bless',
       'heal',
-      'haste',
       'pray',
-      'weakness',
-      'vulnerable',
     ]);
 
     const modes = Object.fromEntries(
@@ -204,13 +197,10 @@ describe('battle VFX catalog', () => {
       frozen: 'buff',
       poison: 'buff',
       wound: 'buff',
+      burn: 'buff',
       curse: 'buff',
-      bless: 'buff',
       heal: 'buff',
-      haste: 'buff',
       pray: 'buff',
-      weakness: 'buff',
-      vulnerable: 'buff',
     });
   });
 
@@ -245,7 +235,7 @@ describe('battle VFX catalog', () => {
     expect(resolveBattleVfxFamily('ice prison')).toBe('frost');
     expect(resolveBattleVfxFamily('lightning bolt')).toBe('thunder');
     expect(resolveBattleVfxFamily('corruption')).toBe('corrupt');
-    expect(resolveBattleVfxFamily('vulnerable')).toBe('vulnerable');
+    expect(resolveBattleVfxFamily('vulnerable')).toBe('curse');
   });
 
   it('treats flesh as blood magic instead of steel weaponry', () => {

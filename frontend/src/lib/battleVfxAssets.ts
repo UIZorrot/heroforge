@@ -36,7 +36,7 @@ import smoke02Url from '../assets/battle/vfx-parts/smoke-02.png';
 import smoke03Url from '../assets/battle/vfx-parts/smoke-03.png';
 import smoke04Url from '../assets/battle/vfx-parts/smoke-04.png';
 
-export type BattleVfxAssetRole = 'projectile-beam' | 'projectile-sequence' | 'impact-burst' | 'instant-glyph' | 'buff-border' | 'slash-streak' | 'ring' | 'spark' | 'smoke';
+export type BattleVfxAssetRole = 'projectile-beam' | 'projectile-sequence' | 'instant-hit-sequence' | 'impact-burst' | 'instant-glyph' | 'slash-streak' | 'ring' | 'spark' | 'smoke';
 
 export type BattleVfxTextureAsset = {
   id: string;
@@ -46,6 +46,11 @@ export type BattleVfxTextureAsset = {
 
 const projectileSheetModules = import.meta.glob<string>(
   '../assets/battle/vfx-parts/projectile-beam-*.png',
+  { eager: true, import: 'default', query: '?url' }
+);
+
+const instantHitSheetModules = import.meta.glob<string>(
+  '../assets/battle/vfx-parts/vfx_instant_hit_pack_16f/*.png',
   { eager: true, import: 'default', query: '?url' }
 );
 
@@ -67,6 +72,82 @@ export const projectileVfxAssetFiles = [
 function projectileSheetUrl(fileName: string) {
   const path = `../assets/battle/vfx-parts/${fileName}`;
   return projectileSheetModules[path] ?? projectileBeamUrl;
+}
+
+export type InstantHitSequenceKey =
+  | 'bulletHit'
+  | 'claw'
+  | 'dark'
+  | 'explode'
+  | 'fire'
+  | 'frost'
+  | 'light'
+  | 'magic'
+  | 'nature'
+  | 'pierce'
+  | 'poison'
+  | 'smash'
+  | 'strike'
+  | 'thunder'
+  | 'water';
+
+export const instantHitSequenceAssetFiles = {
+  bulletHit: 'instant-bullet-hit.png',
+  claw: 'claw.png',
+  dark: 'dark-instantVoid.png',
+  explode: 'explode-instantFire.png',
+  fire: 'fire-instantFire.png',
+  frost: 'frost-instantFrost.png',
+  light: 'light-instantHoly.png',
+  magic: 'magic-instantMagic.png',
+  nature: 'nature-instantNature.png',
+  pierce: 'pierce.png',
+  poison: 'poison-instantNature.png',
+  smash: 'smash.png',
+  strike: 'strike.png',
+  thunder: 'thunder-instantStorm.png',
+  water: 'water-instantWater.png',
+} as const satisfies Record<InstantHitSequenceKey, string>;
+
+export const instantHitSequence = {
+  columns: 4,
+  rows: 4,
+  frameCount: 16,
+  frameDurationMs: 18,
+  durationMs: 288,
+  blendMode: 'screen',
+} as const;
+
+function instantHitSheetUrl(fileName: string) {
+  const path = `../assets/battle/vfx-parts/vfx_instant_hit_pack_16f/${fileName}`;
+  return instantHitSheetModules[path]
+    ?? instantHitSheetModules['../assets/battle/vfx-parts/vfx_instant_hit_pack_16f/strike.png']
+    ?? projectileBeamUrl;
+}
+
+export function instantHitSequenceAssetId(key: InstantHitSequenceKey) {
+  return `instantHit${key[0].toUpperCase()}${key.slice(1)}`;
+}
+
+export function instantHitSequenceFrameIndex(progress: number) {
+  const t = clamp(Number.isFinite(progress) ? progress : 0, 0, 1);
+  return Math.min(instantHitSequence.frameCount - 1, Math.floor(t * instantHitSequence.frameCount));
+}
+
+export function instantHitSequenceFrameRect(textureWidth: number, textureHeight: number, frameIndex: number) {
+  const frame = clamp(Math.floor(frameIndex), 0, instantHitSequence.frameCount - 1);
+  const column = frame % instantHitSequence.columns;
+  const row = Math.floor(frame / instantHitSequence.columns);
+  const x = Math.round(column * textureWidth / instantHitSequence.columns);
+  const y = Math.round(row * textureHeight / instantHitSequence.rows);
+  const right = Math.round((column + 1) * textureWidth / instantHitSequence.columns);
+  const bottom = Math.round((row + 1) * textureHeight / instantHitSequence.rows);
+  return {
+    x,
+    y,
+    width: right - x,
+    height: bottom - y,
+  };
 }
 
 export const projectileBeamSequence = {
@@ -126,6 +207,37 @@ export function projectileFrameTipAnchorFromRgba(
   return 0.9;
 }
 
+export function instantHitFrameAnchorFromRgba(
+  rgba: ArrayLike<number>,
+  width: number,
+  height: number,
+) {
+  const safeWidth = Math.max(1, Math.floor(width));
+  const safeHeight = Math.max(1, Math.floor(height));
+  let weightedX = 0;
+  let weightedY = 0;
+  let totalWeight = 0;
+
+  for (let y = 0; y < safeHeight; y += 2) {
+    for (let x = 0; x < safeWidth; x += 2) {
+      const pixel = (y * safeWidth + x) * 4;
+      const luminance = Math.max(rgba[pixel] ?? 0, rgba[pixel + 1] ?? 0, rgba[pixel + 2] ?? 0);
+      const alpha = rgba[pixel + 3] ?? 0;
+      if (luminance < 36 || alpha < 48) continue;
+      const weight = Math.pow(luminance / 255, 2) * (alpha / 255);
+      weightedX += (x + 0.5) * weight;
+      weightedY += (y + 0.5) * weight;
+      totalWeight += weight;
+    }
+  }
+
+  if (totalWeight <= 0) return { x: 0.5, y: 0.5 };
+  return {
+    x: clamp(weightedX / totalWeight / safeWidth, 0.35, 0.65),
+    y: clamp(weightedY / totalWeight / safeHeight, 0.35, 0.65),
+  };
+}
+
 export function projectileFrameCenterAnchorYFromRgba(
   rgba: ArrayLike<number>,
   width: number,
@@ -160,12 +272,29 @@ export function blackBackedVfxAlphaForLuminance(luminance: number) {
   return Math.pow(t, 0.62);
 }
 
+/**
+ * Instant-hit sheets only need their true-black backing removed; the visible
+ * content keeps full opacity so the photorealistic mid-dark body survives.
+ */
+export function instantHitVfxAlphaForLuminance(luminance: number) {
+  const value = clamp(Number.isFinite(luminance) ? luminance : 0, 0, 255);
+  if (value <= 10) return 0;
+  if (value >= 44) return 1;
+  const t = (value - 10) / 34;
+  return t * t * (3 - 2 * t);
+}
+
 export const battleVfxTextureAssets = [
   { id: 'projectileBeam', role: 'projectile-beam', src: projectileBeamUrl },
   ...projectileVfxAssetFiles.map(([id, fileName]) => ({
     id,
     role: 'projectile-sequence' as const,
     src: projectileSheetUrl(fileName),
+  })),
+  ...(Object.entries(instantHitSequenceAssetFiles) as [InstantHitSequenceKey, string][]).map(([key, fileName]) => ({
+    id: instantHitSequenceAssetId(key),
+    role: 'instant-hit-sequence' as const,
+    src: instantHitSheetUrl(fileName),
   })),
   { id: 'impactBurst', role: 'impact-burst', src: impactBurstUrl },
   { id: 'impactFire', role: 'impact-burst', src: impactBurstFireUrl },
@@ -192,18 +321,6 @@ export const battleVfxTextureAssets = [
   { id: 'instantMagic', role: 'instant-glyph', src: instantGlyphMagicUrl },
   { id: 'instantSteel', role: 'instant-glyph', src: instantGlyphSteelUrl },
   { id: 'instantGold', role: 'instant-glyph', src: instantGlyphGoldUrl },
-  { id: 'buffBorderFire', role: 'buff-border', src: instantGlyphFireUrl },
-  { id: 'buffBorderBlood', role: 'buff-border', src: instantGlyphBloodUrl },
-  { id: 'buffBorderFrost', role: 'buff-border', src: instantGlyphFrostUrl },
-  { id: 'buffBorderVoid', role: 'buff-border', src: instantGlyphVoidUrl },
-  { id: 'buffBorderCurse', role: 'buff-border', src: instantGlyphCurseUrl },
-  { id: 'buffBorderHoly', role: 'buff-border', src: instantGlyphHolyUrl },
-  { id: 'buffBorderNature', role: 'buff-border', src: instantGlyphNatureUrl },
-  { id: 'buffBorderWater', role: 'buff-border', src: instantGlyphWaterUrl },
-  { id: 'buffBorderStorm', role: 'buff-border', src: instantGlyphStormUrl },
-  { id: 'buffBorderMagic', role: 'buff-border', src: instantGlyphMagicUrl },
-  { id: 'buffBorderSteel', role: 'buff-border', src: instantGlyphSteelUrl },
-  { id: 'buffBorderGold', role: 'buff-border', src: instantGlyphGoldUrl },
   { id: 'slashStreak', role: 'slash-streak', src: slashStreakUrl },
   { id: 'ring', role: 'ring', src: ringUrl },
   { id: 'sparkA', role: 'spark', src: spark01Url },

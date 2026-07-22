@@ -1604,7 +1604,7 @@ def test_battle_session_program_fallback_preserves_valid_skill_target(monkeypatc
     hero_a["skill"]["s2"]["TARGET"] = "Self"
     hero_a["skill"]["s2"]["ROLE"] = "buff"
     hero_a["skill"]["s2"]["DMG"] = 0
-    hero_a["skill"]["s2"]["BUFF_NAME"] = "bless"
+    hero_a["skill"]["s2"]["BUFF_NAME"] = "pray"
     hero_a["skill"]["s2"]["BUFF_DMG"] = 12
     hero_a["skill"]["s2"]["BUFF_TIME"] = 2
     hero_a["skill"]["s2"]["MP_COST"] = 0
@@ -1626,7 +1626,7 @@ def test_battle_session_program_fallback_preserves_valid_skill_target(monkeypatc
     assert snapshot["lastAction"]["kind"] == "skill"
     assert snapshot["lastAction"]["skillSlot"] == "s2"
     assert snapshot["lastAction"]["targetTag"] == "A1"
-    assert any(buff["name"] == "bless" and buff["value"] == 12 for buff in session.team_a_units[0].buffs)
+    assert any(buff["name"] == "pray" and buff["value"] == 12 for buff in session.team_a_units[0].buffs)
 
 
 @pytest.mark.integration
@@ -1641,7 +1641,7 @@ def test_battle_session_self_buff_skill_does_not_damage_the_actor(monkeypatch):
     hero_a["skill"]["s2"]["TARGET"] = "Self"
     hero_a["skill"]["s2"]["ROLE"] = "buff"
     hero_a["skill"]["s2"]["DMG"] = 0
-    hero_a["skill"]["s2"]["BUFF_NAME"] = "bless"
+    hero_a["skill"]["s2"]["BUFF_NAME"] = "pray"
     hero_a["skill"]["s2"]["BUFF_DMG"] = 12
     hero_a["skill"]["s2"]["BUFF_TIME"] = 2
     hero_a["skill"]["s2"]["MP_COST"] = 0
@@ -1660,7 +1660,7 @@ def test_battle_session_self_buff_skill_does_not_damage_the_actor(monkeypatch):
 
     assert session.team_a_units[0].hp == session.team_a_units[0].max_hp
     assert session.team_b_units[0].hp == session.team_b_units[0].max_hp
-    assert any(buff["name"] == "bless" and buff["value"] == 12 for buff in session.team_a_units[0].buffs)
+    assert any(buff["name"] == "pray" and buff["value"] == 12 for buff in session.team_a_units[0].buffs)
     assert snapshot["lastAction"]["kind"] == "skill"
     assert session.events[-1]["damage"] == 0
     assert session.events[-1]["defender"] == "A1"
@@ -1679,41 +1679,46 @@ def test_canonical_buffs_have_visual_names_and_gameplay_effects():
         "frozen",
         "poison",
         "wound",
+        "burn",
         "curse",
-        "bless",
         "heal",
-        "haste",
         "pray",
-        "weakness",
-        "vulnerable",
     )
 
+    # Legacy negative statuses merge into curse (attack and defense down).
     unit.add_buff("weakness", 2, 7, logs)
+    assert unit.buffs[-1]["name"] == "curse"
     assert unit.atk == 73
+    assert unit.def_val == 33
 
+    # Legacy positive statuses merge into pray (attack, defense and speed up).
     unit.add_buff("bless", 2, 5, logs)
+    assert unit.buffs[-1]["name"] == "pray"
     assert unit.atk == 78
+    assert unit.def_val == 38
 
     unit.add_buff("curse", 2, 6, logs)
-    assert unit.def_val == 34
+    assert unit.atk == 72
+    assert unit.def_val == 32
 
     unit.add_buff("vulnerable", 2, 5, logs)
-    assert unit.def_val == 29
+    assert unit.atk == 67
+    assert unit.def_val == 27
 
     unit.add_buff("pray", 2, 4, logs)
-    assert unit.atk == 82
-    assert unit.def_val == 33
-    assert unit.spd == 34
+    assert unit.atk == 71
+    assert unit.def_val == 31
+    assert unit.spd == 39
 
     unit.add_buff("haste", 2, 8, logs)
-    assert unit.spd == 42
-    assert unit.ac == 33
-    assert unit.cc == 22
+    assert unit.spd == 47
+    assert unit.ac == 25
+    assert unit.cc == 18
 
     unit.add_buff("frozen", 2, 3, logs)
     assert unit.is_stunned is False
-    assert unit.spd == 27
-    assert unit.ac == 30
+    assert unit.spd == 32
+    assert unit.ac == 22
     assert unit.ev == 0
 
     unit.add_buff("stun", 1, 0, logs)
@@ -1723,10 +1728,12 @@ def test_canonical_buffs_have_visual_names_and_gameplay_effects():
     wounded_events = []
     wounded.add_buff("wound", 2, 9, [])
     wounded.add_buff("poison", 2, 4, [])
-    assert {buff["name"] for buff in wounded.buffs} == {"wound", "poison"}
+    wounded.add_buff("burn", 2, 3, [])
+    assert {buff["name"] for buff in wounded.buffs} == {"wound", "poison", "burn"}
     wounded.tick_buffs(1, lambda *args, **kwargs: wounded_events.append((args, kwargs)))
-    assert wounded.hp == wounded.max_hp - 13
-    assert wounded_events[0][0][2] == "dot_damage"
+    assert wounded.hp == wounded.max_hp - 16
+    assert [event[0][2] for event in wounded_events] == ["dot_damage", "dot_damage", "dot_damage"]
+    assert [event[0][7] for event in wounded_events] == ["wound", "poison", "burn"]
 
     healed = battle_logic.Battler(_board_hero("Healed", hp=120, atk=20), "A")
     healed.hp = 80
@@ -1845,4 +1852,5 @@ def test_legacy_auto_duel_self_buff_skill_does_not_damage_the_actor(monkeypatch)
     assert first_event["defender"] == "A"
     assert first_event["damage"] == 0
     assert first_event["hpA"] == result["maxHpA"]
-    assert any(buff["name"] == "bless" and buff["value"] == 12 for buff in first_event["buffsA"])
+    # Legacy bless resolves through the merged aliases and is stored as pray.
+    assert any(buff["name"] == "pray" and buff["value"] == 12 for buff in first_event["buffsA"])

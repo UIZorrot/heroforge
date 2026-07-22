@@ -11,28 +11,27 @@ CANONICAL_BUFF_NAMES = (
     "frozen",
     "poison",
     "wound",
+    "burn",
     "curse",
-    "bless",
     "heal",
-    "haste",
     "pray",
-    "weakness",
-    "vulnerable",
 )
 
+# Negative statuses merge into curse, positive ones into pray; burn is a fire DoT.
 BUFF_ALIASES = {
-    "weakness": "weakness",
-    "wound": "wound",
-    "curse": "curse",
     "stun": "stun",
-    "bless": "bless",
-    "heal": "heal",
     "frozen": "frozen",
     "poison": "poison",
+    "wound": "wound",
+    "burn": "burn",
+    "curse": "curse",
     "corrupt": "curse",
-    "haste": "haste",
+    "weakness": "curse",
+    "vulnerable": "curse",
+    "heal": "heal",
     "pray": "pray",
-    "vulnerable": "vulnerable",
+    "bless": "pray",
+    "haste": "pray",
 }
 SUPPORT_SKILL_ROLES = {"buff", "support", "heal", "defense", "utility"}
 
@@ -147,19 +146,19 @@ class Battler:
 
     @property
     def atk(self):
-        return max(1, self.base_atk - self.sum_buff("weakness") + self.sum_buff("bless") + self.sum_buff("pray"))
+        return max(1, self.base_atk - self.sum_buff("curse") + self.sum_buff("pray"))
 
     @property
     def def_val(self):
-        return max(0, self.base_def - self.sum_buff("curse") - self.sum_buff("vulnerable") + self.sum_buff("pray"))
+        return max(0, self.base_def - self.sum_buff("curse") + self.sum_buff("pray"))
 
     @property
     def spd(self):
-        return max(1, self.base_spd + self.sum_buff("haste") + self.sum_buff("pray") - self.sum_buff("frozen") * 5)
+        return max(1, self.base_spd + self.sum_buff("pray") - self.sum_buff("frozen") * 5)
 
     @property
     def cc(self):
-        return min(100, max(0, self.base_cc + self.sum_buff("haste") * 0.5))
+        return self.base_cc
 
     @property
     def ca(self):
@@ -167,7 +166,7 @@ class Battler:
 
     @property
     def ac(self):
-        return max(0, self.base_ac + self.sum_buff("haste") - self.sum_buff("frozen"))
+        return max(0, self.base_ac - self.sum_buff("frozen"))
 
     @property
     def ev(self):
@@ -189,34 +188,25 @@ class Battler:
         self.buffs.append({"name": normalized, "duration": duration, "value": value})
 
         label = normalized
-        if normalized == "stun":
-            label = "stun"
-        elif normalized == "wound":
+        if normalized == "wound":
             label = f"wound(-{value})"
         elif normalized == "poison":
             label = f"poison(-{value})"
+        elif normalized == "burn":
+            label = f"burn(-{value})"
         elif normalized == "curse":
             label = f"curse(-{value})"
-        elif normalized == "vulnerable":
-            label = f"vulnerable(-{value})"
-        elif normalized == "weakness":
-            label = f"weakness(-{value})"
-        elif normalized == "frozen":
-            label = "frozen"
-        elif normalized == "bless":
-            label = f"bless(+{value})"
         elif normalized == "heal":
             label = f"heal(+{value})"
-        elif normalized == "haste":
-            label = "haste"
         elif normalized == "pray":
-            label = "pray"
+            label = f"pray(+{value})"
 
         logs.append(f"{self.tag} gains [{label}] for {duration} turn(s)")
 
     def tick_buffs(self, round_num: int, push_event_fn):
         wound_damage = self.sum_buff("wound")
         poison_damage = self.sum_buff("poison")
+        burn_damage = self.sum_buff("burn")
         regen_value = self.sum_buff("heal")
 
         if wound_damage > 0:
@@ -228,6 +218,11 @@ class Battler:
             dmg = int(poison_damage)
             self.hp = max(0, self.hp - dmg)
             push_event_fn(round_num, self.tag, "dot_damage", dmg, False, False, False, "poison", 0)
+
+        if burn_damage > 0:
+            dmg = int(burn_damage)
+            self.hp = max(0, self.hp - dmg)
+            push_event_fn(round_num, self.tag, "dot_damage", dmg, False, False, False, "burn", 0)
 
         if regen_value > 0 and self.hp > 0:
             heal_amt = int(regen_value)

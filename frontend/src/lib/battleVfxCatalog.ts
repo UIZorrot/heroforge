@@ -29,7 +29,6 @@ export const canonicalBattleProjectileTypeEffects = [
 ] as const;
 
 export const canonicalBattleInstantTypeEffects = [
-  'slash',
   'magic',
   'thunder',
   'strike',
@@ -52,13 +51,10 @@ export const canonicalBattleBuffTypeEffects = [
   'frozen',
   'poison',
   'wound',
+  'burn',
   'curse',
-  'bless',
   'heal',
-  'haste',
   'pray',
-  'weakness',
-  'vulnerable',
 ] as const;
 
 export const canonicalBattleBuffNames = [
@@ -66,13 +62,10 @@ export const canonicalBattleBuffNames = [
   'frozen',
   'poison',
   'wound',
+  'burn',
   'curse',
-  'bless',
   'heal',
-  'haste',
   'pray',
-  'weakness',
-  'vulnerable',
 ] as const;
 
 export type BattleVfxAttackType = (typeof canonicalBattleAttackTypes)[number];
@@ -86,12 +79,8 @@ export type BattleVfxFamily =
   | 'stun'
   | 'frozen'
   | 'corrupt'
-  | 'bless'
   | 'heal'
-  | 'haste'
   | 'pray'
-  | 'weakness'
-  | 'vulnerable'
   | 'wound'
   | 'curse'
   | 'rock'
@@ -150,26 +139,22 @@ const FAMILY_ALIASES: Array<[BattleVfxFamily, string[]]> = [
   ['nature', ['nature', 'thorn', 'beast', 'root', 'leaf', 'vine']],
   ['poison', ['poison', 'venom', 'toxin']],
   ['corrupt', ['corrupt', 'corruption']],
-  ['curse', ['curse', 'hex', 'doom']],
-  ['vulnerable', ['vulnerable', 'vulnerability', 'exposed']],
-  ['weakness', ['weakness']],
+  ['curse', ['curse', 'hex', 'doom', 'weakness', 'vulnerable', 'vulnerability', 'exposed']],
   ['wound', ['wound', 'bleed', 'blood']],
   ['dark', ['dark', 'void', 'shadow', 'siphon', 'soul']],
   ['light', ['light', 'holy', 'radiant']],
   ['fire', ['fire', 'burn', 'ember', 'flame', 'ash']],
   ['magic', ['magic', 'arcane', 'spell', 'rune']],
   ['gun', ['gun', 'shot', 'bullet']],
-  ['weapon', ['weapon', 'slash', 'blade', 'sword', 'steel']],
+  ['weapon', ['weapon', 'strike', 'blade', 'sword', 'steel']],
   ['flesh', ['flesh', 'flash', 'claw', 'bite', 'fang', 'blood', 'hemomancy']],
   ['rock', ['rock', 'stone', 'earth', 'boulder']],
   ['stun', ['stun', 'stunned', 'daze']],
-  ['bless', ['bless', 'blessing']],
   ['heal', ['heal', 'regen', 'restore', 'recover']],
-  ['haste', ['haste', 'quick', 'speed', 'accuracy']],
-  ['pray', ['pray', 'prayer', 'oath']],
+  ['pray', ['pray', 'prayer', 'oath', 'bless', 'blessing', 'haste', 'quick', 'speed', 'accuracy']],
 ];
 
-const POSITIVE_BUFFS = new Set<BattleVfxFamily>(['bless', 'heal', 'haste', 'pray']);
+const POSITIVE_BUFFS = new Set<BattleVfxFamily>(['heal', 'pray']);
 const SUPPORT_SKILL_ROLES = new Set(['buff', 'support', 'heal', 'defense', 'utility']);
 const SUPPORT_RANGES = new Set(['self', 'ally']);
 const PROJECTILE_ATTACK_TYPES = new Set<BattleVfxFamily>([
@@ -262,7 +247,6 @@ function eventBuffTypeEffect(event: BattleVfxEventInput = {}) {
 
 function visualEffectFamily(effect?: string): BattleVfxFamily {
   switch (effect) {
-    case 'slash':
     case 'arrow':
     case 'pierce':
     case 'blunt':
@@ -276,6 +260,7 @@ function visualEffectFamily(effect?: string): BattleVfxFamily {
     case 'bullet':
       return 'gun';
     case 'explode':
+    case 'burn':
       return 'fire';
     case 'thunder':
     case 'lighting':
@@ -312,18 +297,10 @@ function visualEffectFamily(effect?: string): BattleVfxFamily {
       return 'wound';
     case 'curse':
       return 'curse';
-    case 'bless':
-      return 'bless';
     case 'heal':
       return 'heal';
-    case 'haste':
-      return 'haste';
     case 'pray':
       return 'pray';
-    case 'weakness':
-      return 'weakness';
-    case 'vulnerable':
-      return 'vulnerable';
     default:
       return 'neutral';
   }
@@ -366,14 +343,10 @@ export function battleVfxToneForFamily(family: BattleVfxFamily): BattleVfxTone {
       return 'void';
     case 'corrupt':
     case 'curse':
-    case 'weakness':
-    case 'vulnerable':
       return 'curse';
     case 'wound':
       return 'wound';
-    case 'bless':
     case 'heal':
-    case 'haste':
     case 'pray':
       return 'heal';
     case 'light':

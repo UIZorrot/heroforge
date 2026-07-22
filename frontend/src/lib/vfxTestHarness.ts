@@ -81,7 +81,7 @@ function unit({
 }
 
 export function createVfxTestBoard(category: VfxTestCategory, effect: string): BattleBoardState {
-  const buff = category === 'buff' ? [{ name: effect, duration: 3, value: effect === 'vulnerable' ? 1 : 2 }] : [];
+  const buff = category === 'buff' ? [{ name: effect, duration: 3, value: 2 }] : [];
   const caster = unit({ tag: 'A1', side: 'A', name: 'VFX CASTER', typeEffect: effect, buffs: buff });
   const target = unit({ tag: 'B1', side: 'B', name: 'TARGET CARD', typeEffect: 'flesh' });
 
@@ -149,7 +149,7 @@ export function createVfxTestEvent(
       heal,
       hpA: 2200 + heal,
       hpB: 1800,
-      buffsA: [{ name: effect, duration: 3, value: effect === 'vulnerable' ? 1 : 2 }],
+      buffsA: [{ name: effect, duration: 3, value: 2 }],
       log: `A1 applies ${effect}.`,
     };
   }

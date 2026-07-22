@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
+import { canonicalBattleInstantTypeEffects } from './battleVfxCatalog';
 import {
   centerPointInHost,
   createFastProjectilePlan,
   createImpactVfxPlan,
   createBuffBorderVfxPlan,
   createProjectileVfxProfile,
+  instantHitSequenceKeyForEvent,
   PROJECTILE_BODY_LENGTH_SCALE,
   targetHitPointInHost,
   projectileBodyEnvelope,
@@ -17,6 +19,7 @@ import {
   projectileTrailWindow,
   projectileParticleAlpha,
   projectileAimBasis,
+  sourceCastPointInHost,
 } from './battleVfxParticlePlan';
 
 describe('battle VFX particle plan', () => {
@@ -154,21 +157,28 @@ describe('battle VFX particle plan', () => {
     expect(point).toEqual({ x: 520, y: 230 });
   });
 
-  it('keeps combat hit effects on the full target card center even when an art hitbox is present', () => {
+  it('anchors combat hit effects to the full target card center', () => {
     const point = targetHitPointInHost(
       { left: 640, top: 210, width: 160, height: 220 },
-      { left: 200, top: 90 },
-      { left: 650, top: 220, width: 140, height: 120 }
+      { left: 200, top: 90 }
     );
 
     expect(point).toEqual({ x: 520, y: 230 });
+  });
+
+  it('anchors instant caster effects to the full source card center', () => {
+    const point = sourceCastPointInHost(
+      { left: 240, top: 210, width: 160, height: 220 },
+      { left: 200, top: 90 }
+    );
+
+    expect(point).toEqual({ x: 120, y: 230 });
   });
 
   it('maps DOM card centers into the Pixi renderer coordinate space', () => {
     const point = targetHitPointInHost(
       { left: 900, top: 330, width: 160, height: 220 },
       { left: 100, top: 80, width: 1200, height: 800 },
-      null,
       { width: 900, height: 600 }
     );
 
@@ -217,21 +227,9 @@ describe('battle VFX particle plan', () => {
   });
 
   it('plans buff VFX as card-border decoration using canonical buff names', () => {
-    const expected = {
-      stun: 'buffBorderStorm',
-      frozen: 'buffBorderFrost',
-      poison: 'buffBorderNature',
-      wound: 'buffBorderBlood',
-      curse: 'buffBorderCurse',
-      bless: 'buffBorderHoly',
-      heal: 'buffBorderHoly',
-      haste: 'buffBorderStorm',
-      pray: 'buffBorderHoly',
-      weakness: 'buffBorderCurse',
-      vulnerable: 'buffBorderCurse',
-    } as const;
+    const buffNames = ['stun', 'frozen', 'poison', 'wound', 'burn', 'curse', 'heal', 'pray'] as const;
 
-    for (const [buffName, borderTextureKey] of Object.entries(expected)) {
+    for (const buffName of buffNames) {
       const plan = createBuffBorderVfxPlan({
         actionType: 'skill',
         skillRole: 'buff',
@@ -240,7 +238,6 @@ describe('battle VFX particle plan', () => {
       });
 
       expect(plan.placement).toBe('card-border');
-      expect(plan.borderTextureKey).toBe(borderTextureKey);
       expect(plan.particleTextureMix.length).toBeGreaterThanOrEqual(3);
       expect(plan.edgeParticleCount).toBeGreaterThanOrEqual(18);
     }
@@ -479,6 +476,31 @@ describe('battle VFX particle plan', () => {
       expect(profile.instantParticleCount).toBeGreaterThanOrEqual(24);
       expect(profile.buffGlyphScale).toBeGreaterThanOrEqual(0.72);
       expect(profile.impactFlashScale).toBeGreaterThanOrEqual(0.72);
+    }
+  });
+
+  it('maps every instant effect to the authored sequence pack', () => {
+    const expected = {
+      magic: 'magic',
+      thunder: 'thunder',
+      strike: 'strike',
+      explode: 'explode',
+      fire: 'fire',
+      poison: 'poison',
+      frost: 'frost',
+      dark: 'dark',
+      light: 'light',
+      nature: 'nature',
+      water: 'water',
+      claw: 'claw',
+      pierce: 'pierce',
+      blunt: 'smash',
+      bullet_hit: 'bulletHit',
+    } as const;
+
+    expect(Object.keys(expected)).toEqual(canonicalBattleInstantTypeEffects);
+    for (const typeEffect of canonicalBattleInstantTypeEffects) {
+      expect(instantHitSequenceKeyForEvent({ typeCatalog: 'instant', typeEffect })).toBe(expected[typeEffect]);
     }
   });
 });

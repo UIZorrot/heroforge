@@ -5,6 +5,7 @@ import {
   type BattleVfxFamily,
   type BattleVfxProjectileTypeEffect,
 } from './battleVfxCatalog';
+import type { InstantHitSequenceKey } from './battleVfxAssets';
 
 export type VfxPoint = { x: number; y: number };
 export type RectLike = { left: number; top: number; width: number; height: number };
@@ -58,7 +59,6 @@ export type ProjectileVfxSequenceTextureKey =
   | 'projectileRock';
 export type ProjectileVfxImpactTextureKey = 'impactFire' | 'impactBlood' | 'impactFrost' | 'impactVoid' | 'impactCurse' | 'impactHoly' | 'impactSteel' | 'impactGold' | 'impactNature' | 'impactWater' | 'impactStorm' | 'impactMagic';
 export type ProjectileVfxInstantTextureKey = 'instantFire' | 'instantBlood' | 'instantFrost' | 'instantVoid' | 'instantCurse' | 'instantHoly' | 'instantSteel' | 'instantGold' | 'instantNature' | 'instantWater' | 'instantStorm' | 'instantMagic';
-export type BuffBorderTextureKey = 'buffBorderFire' | 'buffBorderBlood' | 'buffBorderFrost' | 'buffBorderVoid' | 'buffBorderCurse' | 'buffBorderHoly' | 'buffBorderSteel' | 'buffBorderGold' | 'buffBorderNature' | 'buffBorderWater' | 'buffBorderStorm' | 'buffBorderMagic';
 
 export type ProjectileVfxProfile = {
   id: 'fire' | 'blood' | 'frost' | 'void' | 'curse' | 'holy' | 'steel' | 'bullet' | 'gold' | 'nature' | 'water' | 'storm' | 'magic';
@@ -110,6 +110,55 @@ export type ProjectileVfxProfile = {
   shardCount: number;
 };
 
+const INSTANT_HIT_SEQUENCE_BY_TOKEN: Record<string, InstantHitSequenceKey> = {
+  bullet: 'bulletHit',
+  bullet_hit: 'bulletHit',
+  gun: 'bulletHit',
+  shot: 'bulletHit',
+  claw: 'claw',
+  flesh: 'claw',
+  blood: 'claw',
+  dark: 'dark',
+  void: 'dark',
+  shadow: 'dark',
+  curse: 'dark',
+  explode: 'explode',
+  fire: 'fire',
+  flame: 'fire',
+  frost: 'frost',
+  frozen: 'frost',
+  ice: 'frost',
+  holy: 'light',
+  light: 'light',
+  radiant: 'light',
+  magic: 'magic',
+  arcane: 'magic',
+  nature: 'nature',
+  poison: 'poison',
+  venom: 'poison',
+  smash: 'smash',
+  blunt: 'smash',
+  rock: 'smash',
+  stone: 'smash',
+  strike: 'strike',
+  pierce: 'pierce',
+  arrow: 'strike',
+  weapon: 'strike',
+  steel: 'strike',
+  thunder: 'thunder',
+  lightning: 'thunder',
+  lighting: 'thunder',
+  storm: 'thunder',
+  shock: 'thunder',
+  water: 'water',
+  tide: 'water',
+  wave: 'water',
+};
+
+function instantHitToken(value?: string | null) {
+  return String(value ?? '').trim().toLowerCase().replace(/\s+/g, '_').replace(/-/g, '_');
+}
+
 type ProjectileProfileEvent = {
   actionType?: string | null;
   attackType?: string | null;
@@ -132,12 +181,10 @@ type ProjectileProfileEvent = {
 export type BuffBorderVfxPlan = {
   placement: 'card-border';
   profile: ProjectileVfxProfile;
-  borderTextureKey: BuffBorderTextureKey;
   particleTextureMix: ProjectileVfxTextureKey[];
   edgeParticleCount: number;
   borderGlowWidth: number;
   pulseDurationMs: number;
-  cornerScale: number;
 };
 
 const IMPACT_BURST_ANCHOR: VfxPoint = { x: 0.5, y: 0.5 };
@@ -733,7 +780,11 @@ export function centerPointInHost(rect: RectLike, hostRect: HostRectLike, render
   };
 }
 
-export function targetHitPointInHost(unitRect: RectLike, hostRect: HostRectLike, _artRect?: RectLike | null, renderSize?: RenderSizeLike): VfxPoint {
+export function targetHitPointInHost(unitRect: RectLike, hostRect: HostRectLike, renderSize?: RenderSizeLike): VfxPoint {
+  return centerPointInHost(unitRect, hostRect, renderSize);
+}
+
+export function sourceCastPointInHost(unitRect: RectLike, hostRect: HostRectLike, renderSize?: RenderSizeLike): VfxPoint {
   return centerPointInHost(unitRect, hostRect, renderSize);
 }
 
@@ -760,12 +811,8 @@ export function createProjectileVfxProfile(event: ProjectileProfileEvent = {}): 
     frozen: PROJECTILE_PROFILES.frost,
     wound: PROJECTILE_PROFILES.blood,
     curse: PROJECTILE_PROFILES.curse,
-    bless: PROJECTILE_PROFILES.holy,
     heal: PROJECTILE_PROFILES.holy,
-    haste: PROJECTILE_PROFILES.storm,
     pray: PROJECTILE_PROFILES.holy,
-    weakness: PROJECTILE_PROFILES.curse,
-    vulnerable: PROJECTILE_PROFILES.curse,
     weapon: PROJECTILE_PROFILES.steel,
     flesh: PROJECTILE_PROFILES.blood,
     gun: PROJECTILE_PROFILES.bullet,
@@ -776,23 +823,30 @@ export function createProjectileVfxProfile(event: ProjectileProfileEvent = {}): 
   return PROJECTILE_PROFILES.gold;
 }
 
-function buffBorderTextureKey(profile: ProjectileVfxProfile): BuffBorderTextureKey {
-  const keys: Record<ProjectileVfxProfile['id'], BuffBorderTextureKey> = {
-    fire: 'buffBorderFire',
-    frost: 'buffBorderFrost',
-    void: 'buffBorderVoid',
-    curse: 'buffBorderCurse',
-    holy: 'buffBorderHoly',
-    steel: 'buffBorderSteel',
-    blood: 'buffBorderBlood',
-    bullet: 'buffBorderSteel',
-    gold: 'buffBorderGold',
-    nature: 'buffBorderNature',
-    water: 'buffBorderWater',
-    storm: 'buffBorderStorm',
-    magic: 'buffBorderMagic',
+export function instantHitSequenceKeyForEvent(event: ProjectileProfileEvent = {}): InstantHitSequenceKey {
+  const descriptor = resolveBattleVfxDescriptor(event);
+  const directKey = INSTANT_HIT_SEQUENCE_BY_TOKEN[instantHitToken(descriptor.typeEffect)];
+  if (directKey) return directKey;
+
+  const familyKey = INSTANT_HIT_SEQUENCE_BY_TOKEN[instantHitToken(descriptor.family)];
+  if (familyKey) return familyKey;
+
+  const profileKey: Record<ProjectileVfxProfile['id'], InstantHitSequenceKey> = {
+    fire: 'fire',
+    blood: 'claw',
+    frost: 'frost',
+    void: 'dark',
+    curse: 'dark',
+    holy: 'light',
+    steel: 'strike',
+    bullet: 'bulletHit',
+    gold: 'smash',
+    nature: 'nature',
+    water: 'water',
+    storm: 'thunder',
+    magic: 'magic',
   };
-  return keys[profile.id];
+  return profileKey[createProjectileVfxProfile(event).id];
 }
 
 export function createBuffBorderVfxPlan(event: ProjectileProfileEvent = {}): BuffBorderVfxPlan {
@@ -809,12 +863,10 @@ export function createBuffBorderVfxPlan(event: ProjectileProfileEvent = {}): Buf
   return {
     placement: 'card-border',
     profile,
-    borderTextureKey: buffBorderTextureKey(profile),
     particleTextureMix: profile.textureMix,
     edgeParticleCount: Math.round(clamp(18 + profile.particleDensity * 12, 18, 36)),
     borderGlowWidth: Math.round(clamp(2 + profile.particleScale * 2.2, 3, 6)),
     pulseDurationMs: Math.round(clamp(820 * profile.speedScale, 680, 980)),
-    cornerScale: clamp(profile.buffGlyphScale * 0.28, 0.18, 0.34),
   };
 }
 

@@ -208,7 +208,7 @@ export const mockHeroes: SavedHero[] = [
     speed: 88,
     typeCatalog: 'instant',
     typeEffect: 'fire',
-    description: 'A front-line spellblade built to test fire slashes and curse debuffs.',
+    description: 'A front-line spellblade built to test fire strikes and curse debuffs.',
     skills: {
       s1: { name: 'Witchflame Cut', description: 'Carves the target with a short-lived blade of fire.', TYPE: 'fire', TARGET: 'Enemy', TARGET_NUM: '1', RANGE: 'melee', ROLE: 'attack', type_catalog: 'instant', type_effect: 'fire', DMG: '96', MP_COST: '26' },
       s2: { name: 'Corrupting Sigil', description: 'Brands the enemy and lowers their defenses.', TYPE: 'dark', TARGET: 'Enemy', TARGET_NUM: '1', RANGE: 'enemy', ROLE: 'attack', type_catalog: 'instant', type_effect: 'dark', buff_type_effect: 'curse', BUFF_NAME: 'curse', BUFF_TIME: '3', BUFF_DEF: '-12', DMG: '44', MP_COST: '36' },
@@ -257,7 +257,7 @@ export const mockHeroes: SavedHero[] = [
     description: 'A tempo archer for testing green projectiles, poison marks, and wound feedback.',
     skills: {
       s1: { name: 'Briar Arrow', description: 'Sends a thorned arrow that leaves a bleeding wound.', TYPE: 'nature', TARGET: 'Enemy', TARGET_NUM: '1', RANGE: 'enemy', ROLE: 'attack', type_catalog: 'proj', type_effect: 'nature', buff_type_effect: 'wound', BUFF_NAME: 'wound', BUFF_TIME: '2', BUFF_DMG: '42', DMG: '72', MP_COST: '24' },
-      s2: { name: 'Venom Root', description: 'Poisons and weakens the target with crawling roots.', TYPE: 'poison', TARGET: 'Enemy', TARGET_NUM: '1', RANGE: 'enemy', ROLE: 'attack', type_catalog: 'instant', type_effect: 'poison', buff_type_effect: 'weakness', BUFF_NAME: 'weakness', BUFF_TIME: '2', BUFF_DMG: '-28', DMG: '38', MP_COST: '32' },
+      s2: { name: 'Venom Root', description: 'Poisons and weakens the target with crawling roots.', TYPE: 'poison', TARGET: 'Enemy', TARGET_NUM: '1', RANGE: 'enemy', ROLE: 'attack', type_catalog: 'instant', type_effect: 'poison', buff_type_effect: 'curse', BUFF_NAME: 'curse', BUFF_TIME: '2', BUFF_DMG: '28', DMG: '38', MP_COST: '32' },
     },
   }, 4),
   hero({
@@ -303,7 +303,7 @@ export const mockHeroes: SavedHero[] = [
     description: 'A bruiser used to test heavy flesh impacts, wounds, and party offense buffs.',
     skills: {
       s1: { name: 'Rending Claw', description: 'Tears through armor and leaves a visible wound.', TYPE: 'flesh', TARGET: 'Enemy', TARGET_NUM: '1', RANGE: 'melee', ROLE: 'attack', type_catalog: 'instant', type_effect: 'claw', buff_type_effect: 'wound', BUFF_NAME: 'wound', BUFF_TIME: '2', BUFF_DMG: '54', DMG: '88', MP_COST: '24' },
-      s2: { name: 'Blood Banner', description: 'Raises a brutal banner that empowers the next attacks.', TYPE: 'buff', TARGET: 'Self', TARGET_NUM: '1', RANGE: 'self', ROLE: 'buff', type_catalog: 'instant', type_effect: 'fire', buff_type_effect: 'bless', BUFF_NAME: 'bless', BUFF_TIME: '3', BUFF_DMG: '48', MP_COST: '30' },
+      s2: { name: 'Blood Banner', description: 'Raises a brutal banner that empowers the next attacks.', TYPE: 'buff', TARGET: 'Self', TARGET_NUM: '1', RANGE: 'self', ROLE: 'buff', type_catalog: 'instant', type_effect: 'fire', buff_type_effect: 'pray', BUFF_NAME: 'pray', BUFF_TIME: '3', BUFF_DMG: '48', MP_COST: '30' },
     },
   }, 6),
   hero({
@@ -322,10 +322,10 @@ export const mockHeroes: SavedHero[] = [
     ac: 12,
     speed: 64,
     typeCatalog: 'instant',
-    typeEffect: 'slash',
+    typeEffect: 'strike',
     description: 'A defensive knight for testing weapon impacts, thunder strikes, and stun states.',
     skills: {
-      s1: { name: 'Shieldbreaker Slash', description: 'Crushes the target with a blunt steel impact.', TYPE: 'weapon', TARGET: 'Enemy', TARGET_NUM: '1', RANGE: 'melee', ROLE: 'attack', type_catalog: 'instant', type_effect: 'blunt', DMG: '84', MP_COST: '22' },
+      s1: { name: 'Shieldbreaker Strike', description: 'Crushes the target with a blunt steel impact.', TYPE: 'weapon', TARGET: 'Enemy', TARGET_NUM: '1', RANGE: 'melee', ROLE: 'attack', type_catalog: 'instant', type_effect: 'blunt', DMG: '84', MP_COST: '22' },
       s2: { name: 'Storm Oath', description: 'Calls a short thunder impact that can stun the target.', TYPE: 'thunder', TARGET: 'Enemy', TARGET_NUM: '1', RANGE: 'enemy', ROLE: 'attack', type_catalog: 'instant', type_effect: 'thunder', buff_type_effect: 'stun', BUFF_NAME: 'stun', BUFF_TIME: '1', IS_STUN: 'True', DMG: '56', MP_COST: '38' },
     },
     equippedRelicId: 'named_oath_lantern',

@@ -11,7 +11,6 @@ import {
   Swords,
   Sun,
   Sword,
-  Wind,
   Zap,
   Snowflake,
 } from 'lucide-react';
@@ -156,20 +155,17 @@ function getBuffVisual(name?: string | null): VisualTone {
   if (key === 'wound') {
     return { ring: 'border-rose-500/35', glow: 'from-rose-500/18 via-red-500/10 to-transparent', chip: 'border-rose-400/30 bg-rose-500/10 text-rose-100', icon: Skull, label: 'Wound' };
   }
-  if (key === 'curse' || key === 'corrupt') {
+  if (key === 'curse' || key === 'corrupt' || key === 'weakness' || key === 'vulnerable') {
     return { ring: 'border-violet-500/35', glow: 'from-violet-500/18 via-fuchsia-500/10 to-transparent', chip: 'border-violet-400/30 bg-violet-500/10 text-violet-100', icon: Shield, label: 'Curse' };
   }
-  if (key === 'weakness' || key === 'vulnerable') {
-    return { ring: 'border-orange-400/35', glow: 'from-orange-400/18 via-amber-400/10 to-transparent', chip: 'border-orange-300/30 bg-orange-500/10 text-orange-100', icon: Crosshair, label: 'Weakness' };
+  if (key === 'burn') {
+    return { ring: 'border-orange-500/35', glow: 'from-orange-500/18 via-red-400/10 to-transparent', chip: 'border-orange-400/30 bg-orange-500/10 text-orange-100', icon: Flame, label: 'Burn' };
   }
-  if (key === 'bless' || key === 'pray') {
-    return { ring: 'border-emerald-400/35', glow: 'from-emerald-400/18 via-lime-400/10 to-transparent', chip: 'border-emerald-300/30 bg-emerald-500/10 text-emerald-100', icon: Sparkles, label: key === 'pray' ? 'Pray' : 'Bless' };
+  if (key === 'bless' || key === 'pray' || key === 'haste') {
+    return { ring: 'border-amber-200/35', glow: 'from-amber-200/18 via-amber-100/10 to-transparent', chip: 'border-amber-100/30 bg-amber-200/10 text-amber-50', icon: Sparkles, label: 'Pray' };
   }
   if (key === 'heal') {
-    return { ring: 'border-emerald-300/35', glow: 'from-emerald-300/18 via-teal-300/10 to-transparent', chip: 'border-emerald-200/30 bg-emerald-500/10 text-emerald-50', icon: Sparkles, label: 'Heal' };
-  }
-  if (key === 'haste') {
-    return { ring: 'border-sky-400/35', glow: 'from-sky-400/18 via-cyan-400/10 to-transparent', chip: 'border-sky-300/30 bg-sky-500/10 text-sky-100', icon: Wind, label: 'Haste' };
+    return { ring: 'border-amber-400/35', glow: 'from-amber-400/18 via-yellow-500/10 to-transparent', chip: 'border-amber-300/30 bg-amber-500/10 text-amber-100', icon: Sparkles, label: 'Heal' };
   }
   if (key === 'frozen') {
     return { ring: 'border-cyan-300/35', glow: 'from-cyan-300/18 via-sky-300/10 to-transparent', chip: 'border-cyan-200/30 bg-cyan-500/10 text-cyan-100', icon: Snowflake, label: 'Frozen' };
