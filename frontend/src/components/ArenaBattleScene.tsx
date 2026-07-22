@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent a
 import { AnimatePresence, motion } from 'framer-motion';
 import { gsap } from 'gsap';
 import { Application, Assets, BlurFilter, Container, Graphics, Particle, ParticleContainer, Rectangle, Sprite, Text, Texture } from 'pixi.js';
-import { Pause, Play, RotateCcw, Shield, Sparkles } from 'lucide-react';
+import { Crown, Pause, Play, RotateCcw, Shield, Skull, Sparkles } from 'lucide-react';
 import arenaHallPerspective from '../assets/battle/arena-hall-perspective.png';
 import { CARD_FALLBACK_SRC } from '../lib/cards';
 import {
@@ -29,6 +29,11 @@ import {
   type BattleBuffBehavior,
   type BattleBuffKey,
 } from '../lib/battleBuffDisplay';
+import {
+  battleDebrisLingerRecipe,
+  battleDebrisRecipeForEvent,
+  type BattleDebrisRecipe,
+} from '../lib/battleVfxDebris';
 import type { BattleBoardState, BattleBoardUnit, BattleEvent, BattleResult } from '../lib/battleTypes';
 import {
   createFastProjectilePlan,
@@ -65,9 +70,40 @@ type ArenaBattleSceneProps = {
   result: BattleResult;
   autoStartKey?: string | number;
   showCommanders?: boolean;
+  showResultReveal?: boolean;
   editUnitSlots?: boolean;
   onUnitSlotChange?: (unitTag: string, slot: number) => void;
 };
+
+export type BattleOutcome = 'victory' | 'defeat' | 'draw';
+
+function normalizedOutcomeLabel(value?: string | null) {
+  return String(value ?? '').trim().toLowerCase();
+}
+
+export function battleOutcomeForBottom(result: BattleResult, board: BattleBoardState): BattleOutcome {
+  const winner = normalizedOutcomeLabel(result.winner);
+  const winnerLabel = normalizedOutcomeLabel(result.winnerLabel);
+  if (winner === 'tie' || winnerLabel === 'tie' || winner === 'draw' || winnerLabel === 'draw') return 'draw';
+  if (winner === 'a') return 'victory';
+  if (winner === 'b') return 'defeat';
+
+  const bottomLabel = normalizedOutcomeLabel(board.bottomLabel);
+  const topLabel = normalizedOutcomeLabel(board.topLabel);
+  if (bottomLabel && (winner === bottomLabel || winnerLabel === bottomLabel)) return 'victory';
+  if (topLabel && (winner === topLabel || winnerLabel === topLabel)) return 'defeat';
+  if (Number.isFinite(result.finalHpA) && Number.isFinite(result.finalHpB)) {
+    if ((result.finalHpA ?? 0) === (result.finalHpB ?? 0)) return 'draw';
+    return (result.finalHpA ?? 0) > (result.finalHpB ?? 0) ? 'victory' : 'defeat';
+  }
+  return 'draw';
+}
+
+export function battlePlaybackHistoryIndex(historyLength: number, eventLength: number, eventIndex: number) {
+  if (historyLength <= 0 || eventIndex < 0) return -1;
+  const includesInitialSnapshot = historyLength > eventLength;
+  return Math.min(historyLength - 1, eventIndex + (includesInitialSnapshot ? 1 : 0));
+}
 
 type SlotSpec = {
   slot: number;
@@ -1286,7 +1322,7 @@ function renderPixiImpact(
     }));
   }
 
-  tweens.push(gsap.fromTo(burst, { alpha: 0, scale: impactStyle === 'collapse' ? 1 : 0.42 }, {
+  tweens.push(gsap.fromTo(burst, { alpha: 1, scale: impactStyle === 'collapse' ? 1 : 0.42 }, {
     alpha: 0,
     scale: impactStyle === 'collapse' ? 0.62 : 1.02,
     duration: impactMotion.duration,
@@ -1402,7 +1438,17 @@ function renderPixiImpact(
   }
 }
 
-function renderPixiInstant(add: PixiAdd, tweens: gsap.core.Tween[], point: PixiPoint, palette: PixiPalette, event: BattleEvent, textures?: BattleVfxTextures, profile?: ProjectileVfxProfile) {
+function renderPixiInstant(
+  add: PixiAdd,
+  app: Application,
+  tweens: gsap.core.Tween[],
+  point: PixiPoint,
+  palette: PixiPalette,
+  event: BattleEvent,
+  textures: BattleVfxTextures | undefined,
+  profile: ProjectileVfxProfile | undefined,
+  registerCleanup: (cleanup: TickerCleanup) => void,
+) {
   const layer = add(new Container(), 8);
   layer.blendMode = 'add';
   const addToLayer: PixiAdd = (node, zIndex = 1) => {
@@ -1410,6 +1456,11 @@ function renderPixiInstant(add: PixiAdd, tweens: gsap.core.Tween[], point: PixiP
     layer.addChild(node);
     return node;
   };
+
+  // Contact flash + element debris give the authored sheet its physical read.
+  renderPixiContactFlash(addToLayer, tweens, point, palette);
+  const debrisRecipe = battleDebrisRecipeForEvent(event);
+  renderPixiDebrisBurst(addToLayer, app, point, palette, textures, debrisRecipe, registerCleanup);
 
   const renderedHitSequence = textures
     ? renderPixiInstantHitSequence(
@@ -1423,8 +1474,12 @@ function renderPixiInstant(add: PixiAdd, tweens: gsap.core.Tween[], point: PixiP
     : false;
 
   // A loaded sequence owns the entire instant hit. Do not dilute its authored
-  // silhouette with the old generic ring, random sparks, or impact burst.
+  // silhouette with the old generic ring, random sparks, or impact burst —
+  // only a soft lingering tail of debris as the energy settles.
   if (renderedHitSequence) {
+    tweens.push(gsap.delayedCall(instantHitSequence.durationMs / 1000, () => {
+      renderPixiDebrisBurst(addToLayer, app, point, palette, textures, battleDebrisLingerRecipe(debrisRecipe), registerCleanup);
+    }));
     tweens.push(gsap.delayedCall((instantHitSequence.durationMs + (event.isCrit ? 15 : 0) + 200) / 1000, () => {
       if (!layer.destroyed) layer.destroy({ children: true });
     }));
@@ -1951,6 +2006,134 @@ function renderPixiBuff(add: PixiAdd, tweens: gsap.core.Tween[], point: PixiPoin
 }
 
 type TickerCleanup = () => void;
+
+function createDebrisNode(recipe: BattleDebrisRecipe, palette: PixiPalette, textures?: BattleVfxTextures): Graphics | Sprite {
+  if (recipe.pool === 'smokes' && textures?.smokes.length) {
+    const sprite = new Sprite(textures.smokes[Math.floor(Math.random() * textures.smokes.length)]);
+    sprite.anchor.set(0.5);
+    sprite.tint = palette.dark;
+    sprite.blendMode = 'add';
+    sprite.scale.set(0.08);
+    return sprite;
+  }
+  if (recipe.pool === 'sparks' && textures?.sparks.length) {
+    const sprite = new Sprite(textures.sparks[Math.floor(Math.random() * textures.sparks.length)]);
+    sprite.anchor.set(0.5);
+    sprite.tint = Math.random() > 0.4 ? palette.hot : palette.core;
+    sprite.blendMode = 'add';
+    sprite.scale.set(0.05);
+    return sprite;
+  }
+  const g = new Graphics();
+  g.blendMode = 'add';
+  g.circle(0, 0, 1.9 + Math.random() * 1.3);
+  g.fill({ color: Math.random() > 0.4 ? palette.hot : palette.core, alpha: 0.95 });
+  return g;
+}
+
+/**
+ * Element-flavored debris scattered by a hit. One ticker drives simple
+ * physics (initial velocity + gravity/drift) so fire embers rise, ice
+ * shards fly, and droplets fall — the authored sheet stays the hero.
+ */
+function renderPixiDebrisBurst(
+  add: PixiAdd,
+  app: Application,
+  point: PixiPoint,
+  palette: PixiPalette,
+  textures: BattleVfxTextures | undefined,
+  recipe: BattleDebrisRecipe,
+  registerCleanup: (cleanup: TickerCleanup) => void,
+) {
+  const layer = add(new Container(), 10);
+  layer.blendMode = 'add';
+  type DebrisParticle = {
+    node: Graphics | Sprite;
+    vx: number;
+    vy: number;
+    spin: number;
+    age: number;
+    life: number;
+    scale0: number;
+    baseScale: number;
+  };
+  const particles: DebrisParticle[] = [];
+
+  for (let index = 0; index < recipe.count; index += 1) {
+    const node = createDebrisNode(recipe, palette, textures);
+    layer.addChild(node);
+    node.x = point.x;
+    node.y = point.y;
+    const angle = recipe.motion === 'rise'
+      ? -Math.PI / 2 + (Math.random() - 0.5) * 2.4
+      : Math.random() * Math.PI * 2;
+    const speed = recipe.speed[0] + Math.random() * (recipe.speed[1] - recipe.speed[0]);
+    const upwardBias = recipe.motion === 'float' ? -Math.abs(Math.sin(angle)) : 1;
+    particles.push({
+      node,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed * upwardBias,
+      spin: (Math.random() - 0.5) * 0.006,
+      age: 0,
+      life: recipe.lifeMs[0] + Math.random() * (recipe.lifeMs[1] - recipe.lifeMs[0]),
+      scale0: recipe.scale[0] + Math.random() * (recipe.scale[1] - recipe.scale[0]),
+      baseScale: node instanceof Sprite ? 0.105 : 1,
+    });
+  }
+
+  let disposed = false;
+  const update = () => {
+    if (disposed || layer.destroyed) {
+      disposed = true;
+      app.ticker.remove(update);
+      return;
+    }
+    const deltaMs = Math.min(64, app.ticker.deltaMS);
+    let alive = 0;
+    for (const p of particles) {
+      if (p.age >= p.life) {
+        p.node.visible = false;
+        continue;
+      }
+      alive += 1;
+      p.age += deltaMs;
+      p.vy += recipe.gravity * deltaMs;
+      if (recipe.jitter) p.vx += (Math.random() - 0.5) * recipe.jitter * deltaMs;
+      p.node.x += p.vx * deltaMs;
+      p.node.y += p.vy * deltaMs;
+      p.node.rotation += p.spin * deltaMs;
+      const t = Math.min(1, p.age / p.life);
+      p.node.alpha = recipe.alpha * (t < 0.12 ? t / 0.12 : t < 0.7 ? 1 : 1 - (t - 0.7) / 0.3);
+      p.node.scale.set(p.scale0 * p.baseScale * (1 - t * 0.45));
+    }
+    if (!alive && !disposed) cleanup();
+  };
+  const cleanup = () => {
+    if (disposed) return;
+    disposed = true;
+    app.ticker.remove(update);
+    layer.destroy({ children: true });
+  };
+  update();
+  app.ticker.add(update);
+  registerCleanup(cleanup);
+}
+
+/** A bright contact point at the moment of impact — the "crack" of the hit. */
+function renderPixiContactFlash(add: PixiAdd, tweens: gsap.core.Tween[], point: PixiPoint, palette: PixiPalette) {
+  const flash = add(new Graphics(), 12);
+  flash.blendMode = 'add';
+  drawGlowCircle(flash, point.x, point.y, 16, palette.hot, 0.9);
+  drawGlowCircle(flash, point.x, point.y, 34, palette.core, 0.4);
+  flash.filters = [new BlurFilter({ strength: 2 })];
+  tweens.push(gsap.to(flash, {
+    alpha: 0,
+    duration: 0.16,
+    ease: 'power2.out',
+    onComplete: () => flash.destroy(),
+  }));
+}
+
 type LiveVfxParticle = {
   particle: Particle;
   ageMs: number;
@@ -2196,6 +2379,8 @@ function renderPixiProjectileEmitter({
     bloom.clear();
     onImpact?.();
     renderPixiImpact(add, tweens, end, palette, event, 0, textures, createImpactVfxPlan(event));
+    renderPixiContactFlash(add, tweens, end, palette);
+    renderPixiDebrisBurst(add, app, end, palette, textures, battleDebrisRecipeForEvent(event), registerCleanup);
   };
 
   for (let i = 0; i < 8; i += 1) {
@@ -2714,7 +2899,9 @@ function BattleEffectLayer({ board, event, disabled }: { board: BattleBoardState
     } else if (mode === 'projectile' && !selfTarget) {
       renderPixiImpact(add, tweensRef.current, end, palette, event, 0, undefined, createImpactVfxPlan(event));
     } else {
-      renderPixiInstant(add, tweensRef.current, end, palette, event, textures, profile);
+      renderPixiInstant(add, app, tweensRef.current, end, palette, event, textures, profile, (cleanup) => {
+        tickerCleanupRef.current.push(cleanup);
+      });
     }
 
     return () => {
@@ -2778,11 +2965,171 @@ function BattleLogPanel({ events, logs, currentEvent, orderBoard, started }: { e
   );
 }
 
+function BattleResultReveal({
+  outcome,
+  result,
+  board,
+  totalRounds,
+  reducedMotion,
+}: {
+  outcome: BattleOutcome;
+  result: BattleResult;
+  board: BattleBoardState;
+  totalRounds: number;
+  reducedMotion?: boolean;
+}) {
+  const presentation = outcome === 'victory'
+    ? {
+        eyebrow: 'Battle Concluded',
+        title: 'Victory',
+        statement: `${board.bottomLabel} commands the field`,
+        accent: '#e3c589',
+        hot: '#fff1bd',
+        muted: '#8f6b32',
+        backdrop: 'radial-gradient(circle at 50% 48%, rgba(216,176,108,0.32), rgba(14,10,5,0.9) 48%, rgba(0,0,0,0.96) 100%)',
+        Icon: Crown,
+      }
+    : outcome === 'defeat'
+      ? {
+          eyebrow: 'The Field Is Lost',
+          title: 'Defeat',
+          statement: `${result.winnerLabel ?? result.winner} holds the field`,
+          accent: '#cf7568',
+          hot: '#ffc1b5',
+          muted: '#71352f',
+          backdrop: 'radial-gradient(circle at 50% 48%, rgba(137,45,37,0.34), rgba(17,7,6,0.92) 48%, rgba(0,0,0,0.97) 100%)',
+          Icon: Skull,
+        }
+      : {
+          eyebrow: 'No Side Yields',
+          title: 'Stalemate',
+          statement: 'The field falls silent without a victor',
+          accent: '#b8b0a1',
+          hot: '#eee8da',
+          muted: '#5f5a52',
+          backdrop: 'radial-gradient(circle at 50% 48%, rgba(148,137,119,0.22), rgba(12,11,10,0.92) 48%, rgba(0,0,0,0.97) 100%)',
+          Icon: Shield,
+        };
+  const bottomAlive = board.bottom.filter((unit) => unit?.alive && unit.hp > 0).length;
+  const topAlive = board.top.filter((unit) => unit?.alive && unit.hp > 0).length;
+  const enter = reducedMotion ? { duration: 0 } : { duration: 0.72, ease: [0.16, 1, 0.3, 1] as const };
+
+  return (
+    <motion.div
+      key={`battle-result-${outcome}-${result.winner}`}
+      role="status"
+      aria-live="polite"
+      className="absolute inset-0 z-40 flex items-start justify-center overflow-hidden pt-8 sm:pt-12 lg:pt-16"
+      style={{ backgroundImage: presentation.backdrop }}
+      initial={reducedMotion ? false : { opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={enter}
+    >
+      <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(90deg,rgba(0,0,0,0.72),transparent_20%,transparent_80%,rgba(0,0,0,0.72))]" />
+      <motion.div
+        className="pointer-events-none absolute left-1/2 top-[38%] h-[min(70vw,560px)] w-[min(70vw,560px)] -translate-x-1/2 -translate-y-1/2 rotate-45 border"
+        style={{ borderColor: `${presentation.accent}33`, boxShadow: `inset 0 0 80px ${presentation.accent}14, 0 0 80px ${presentation.accent}12` }}
+        initial={reducedMotion ? false : { opacity: 0, scale: 0.72, rotate: 34 }}
+        animate={{ opacity: 1, scale: 1, rotate: 45 }}
+        transition={enter}
+      />
+      <motion.div
+        className="pointer-events-none absolute left-1/2 top-[38%] h-[min(46vw,360px)] w-[min(46vw,360px)] -translate-x-1/2 -translate-y-1/2 rotate-45 border"
+        style={{ borderColor: `${presentation.hot}24` }}
+        initial={reducedMotion ? false : { opacity: 0, scale: 1.25 }}
+        animate={{ opacity: 1, scale: 1 }}
+        transition={{ ...enter, delay: reducedMotion ? 0 : 0.1 }}
+      />
+
+      {!reducedMotion && Array.from({ length: 22 }, (_, index) => {
+        const angle = index / 22 * Math.PI * 2;
+        const distance = 132 + index % 5 * 22;
+        return (
+          <motion.span
+            key={index}
+            className="pointer-events-none absolute left-1/2 top-[38%] h-px origin-left"
+            style={{ width: index % 3 === 0 ? 34 : 18, background: `linear-gradient(90deg, ${presentation.hot}, transparent)` }}
+            initial={{ opacity: 0, x: 0, y: 0, rotate: angle * 180 / Math.PI, scaleX: 0.15 }}
+            animate={{
+              opacity: [0, index % 3 === 0 ? 0.82 : 0.48, 0],
+              x: Math.cos(angle) * distance,
+              y: Math.sin(angle) * distance,
+              scaleX: [0.15, 1, 0.35],
+            }}
+            transition={{ duration: 0.8, delay: 0.08 + index * 0.012, ease: [0.16, 1, 0.3, 1] }}
+          />
+        );
+      })}
+
+      <div className="relative z-10 w-full max-w-3xl px-6 text-center">
+        <motion.div
+          className="mx-auto flex h-16 w-16 rotate-45 items-center justify-center border bg-black/45 sm:h-20 sm:w-20 lg:h-24 lg:w-24"
+          style={{ borderColor: `${presentation.accent}66`, boxShadow: `0 0 42px ${presentation.accent}30` }}
+          initial={reducedMotion ? false : { opacity: 0, scale: 0.6, rotate: 24 }}
+          animate={{ opacity: 1, scale: 1, rotate: 45 }}
+          transition={enter}
+        >
+          <presentation.Icon className="-rotate-45" size={34} strokeWidth={1.15} style={{ color: presentation.hot }} />
+        </motion.div>
+
+        <motion.div
+          className="mt-5 text-[10px] uppercase tracking-[0.5em] sm:mt-6 sm:text-xs"
+          style={{ color: presentation.accent }}
+          initial={reducedMotion ? false : { opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ ...enter, delay: reducedMotion ? 0 : 0.12 }}
+        >
+          {presentation.eyebrow}
+        </motion.div>
+        <motion.h2
+          className="mt-2 font-display text-[clamp(3rem,7vw,6.5rem)] font-light uppercase leading-[0.86] tracking-[0.14em]"
+          style={{ color: presentation.hot, textShadow: `0 0 38px ${presentation.accent}54` }}
+          initial={reducedMotion ? false : { opacity: 0, y: 22, letterSpacing: '0.24em' }}
+          animate={{ opacity: 1, y: 0, letterSpacing: '0.14em' }}
+          transition={{ ...enter, delay: reducedMotion ? 0 : 0.17 }}
+        >
+          {presentation.title}
+        </motion.h2>
+        <motion.div
+          className="mx-auto mt-5 flex max-w-xl items-center gap-4 sm:mt-6"
+          initial={reducedMotion ? false : { opacity: 0, scaleX: 0.25 }}
+          animate={{ opacity: 1, scaleX: 1 }}
+          transition={{ ...enter, delay: reducedMotion ? 0 : 0.24 }}
+        >
+          <div className="h-px flex-1" style={{ background: `linear-gradient(90deg, transparent, ${presentation.muted})` }} />
+          <Sparkles size={14} strokeWidth={1.25} style={{ color: presentation.accent }} />
+          <div className="h-px flex-1" style={{ background: `linear-gradient(90deg, ${presentation.muted}, transparent)` }} />
+        </motion.div>
+        <motion.p
+          className="mt-4 text-sm uppercase tracking-[0.24em] text-stone-300 sm:text-base"
+          initial={reducedMotion ? false : { opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ ...enter, delay: reducedMotion ? 0 : 0.3 }}
+        >
+          {presentation.statement}
+        </motion.p>
+        <motion.div
+          className="mt-5 flex flex-wrap items-center justify-center gap-x-8 gap-y-2 text-[10px] uppercase tracking-[0.26em] text-stone-500 sm:mt-7"
+          initial={reducedMotion ? false : { opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ ...enter, delay: reducedMotion ? 0 : 0.36 }}
+        >
+          <span>Round {totalRounds}</span>
+          <span style={{ color: presentation.accent }}>Survivors {bottomAlive} · {topAlive}</span>
+          <span>Final HP {result.finalHpA ?? 0} · {result.finalHpB ?? 0}</span>
+        </motion.div>
+      </div>
+    </motion.div>
+  );
+}
+
 function ArenaStage({
   board,
   currentEvent,
   totalRounds,
   reducedMotion,
+  resultReveal,
   editUnitSlots,
   onUnitSlotChange,
 }: {
@@ -2790,6 +3137,7 @@ function ArenaStage({
   currentEvent?: BattleEvent | null;
   totalRounds: number;
   reducedMotion?: boolean;
+  resultReveal?: { outcome: BattleOutcome; result: BattleResult } | null;
   editUnitSlots?: boolean;
   onUnitSlotChange?: (unitTag: string, slot: number) => void;
 }) {
@@ -2850,6 +3198,17 @@ function ArenaStage({
           onUnitSlotChange={onUnitSlotChange}
         />
       </div>
+      <AnimatePresence>
+        {resultReveal ? (
+          <BattleResultReveal
+            outcome={resultReveal.outcome}
+            result={resultReveal.result}
+            board={board}
+            totalRounds={totalRounds}
+            reducedMotion={reducedMotion}
+          />
+        ) : null}
+      </AnimatePresence>
     </section>
   );
 }
@@ -2861,6 +3220,7 @@ export function ArenaBattleScene({
   result,
   autoStartKey,
   showCommanders = true,
+  showResultReveal = true,
   editUnitSlots = false,
   onUnitSlotChange,
 }: ArenaBattleSceneProps) {
@@ -2908,13 +3268,21 @@ export function ArenaBattleScene({
   const currentEvent = safeEventIndex >= 0 ? events[safeEventIndex] ?? null : null;
   const currentRound = currentEvent?.round ?? board.round;
   const boardHistory = useMemo(() => result.boardHistory?.length ? result.boardHistory : [board], [board, result.boardHistory]);
+  const reachedFinalEvent = started && events.length > 0 && safeEventIndex >= events.length - 1;
+  const playbackFinished = reachedFinalEvent && !isPlaying;
+  const outcome = useMemo(() => battleOutcomeForBottom(result, result.board ?? board), [board, result]);
   const playbackBoard = useMemo(() => {
     if (!started) return boardHistory[0] ?? board;
-    const indexedBoard = boardHistory[Math.min(Math.max(safeEventIndex, 0), boardHistory.length - 1)];
-    if (indexedBoard) return indexedBoard;
-    const eligibleBoards = boardHistory.filter((entry) => entry.round <= currentRound);
+    if (reachedFinalEvent) return result.board ?? boardHistory[boardHistory.length - 1] ?? board;
+    if (boardHistory.length >= events.length) {
+      const historyIndex = battlePlaybackHistoryIndex(boardHistory.length, events.length, safeEventIndex);
+      const indexedBoard = historyIndex >= 0 ? boardHistory[historyIndex] : undefined;
+      if (indexedBoard) return indexedBoard;
+    }
+    const completesRound = events[safeEventIndex + 1]?.round !== currentRound;
+    const eligibleBoards = boardHistory.filter((entry) => completesRound ? entry.round <= currentRound : entry.round < currentRound);
     return eligibleBoards[eligibleBoards.length - 1] ?? boardHistory[0] ?? board;
-  }, [board, boardHistory, currentRound, events.length, safeEventIndex, started]);
+  }, [board, boardHistory, currentRound, events, reachedFinalEvent, result.board, safeEventIndex, started]);
   const visibleEvents = useMemo(() => (started ? events.slice(0, safeEventIndex + 1) : []), [events, safeEventIndex, started]);
   const visibleLogs = useMemo(() => {
     if (!started) return [];
@@ -2944,7 +3312,13 @@ export function ArenaBattleScene({
         <div className="min-w-0">
           <div className="text-[10px] uppercase tracking-[0.28em] text-[#b49664]">Battle Control</div>
           <div className="mt-1 truncate text-xs text-stone-500">
-            {currentEvent ? `${eventActionLabel(currentEvent)} - ${currentEvent.attacker} to ${currentEvent.defender}` : events.length ? 'Ready. Start battle to execute the resolved combat feed.' : 'No combat feed generated.'}
+            {playbackFinished
+              ? `Battle resolved · ${result.winnerLabel ?? result.winner}`
+              : currentEvent
+                ? `${eventActionLabel(currentEvent)} - ${currentEvent.attacker} to ${currentEvent.defender}`
+                : events.length
+                  ? 'Ready. Start battle to execute the resolved combat feed.'
+                  : 'No combat feed generated.'}
           </div>
           <div className="hidden">
             {currentEvent ? `${eventActionLabel(currentEvent)} · ${currentEvent.attacker} to ${currentEvent.defender}` : 'Waiting for combat feed'}
@@ -2957,7 +3331,7 @@ export function ArenaBattleScene({
           <button
             type="button"
             onClick={() => {
-              if (!started) {
+              if (!started || playbackFinished) {
                 startPlayback();
                 return;
               }
@@ -2965,10 +3339,10 @@ export function ArenaBattleScene({
             }}
             disabled={!events.length || (started && reducedMotion)}
             className="flex h-11 items-center justify-center gap-2 border border-white/10 bg-black/45 px-4 text-[10px] uppercase tracking-[0.18em] text-stone-300 transition hover:border-[#b49664]/45 hover:text-[#f0d8ad] disabled:cursor-not-allowed disabled:opacity-40"
-            aria-label={isPlaying ? 'Pause battle playback' : 'Play battle playback'}
+            aria-label={playbackFinished ? 'Replay battle' : isPlaying ? 'Pause battle playback' : 'Play battle playback'}
           >
             {isPlaying ? <Pause size={15} /> : <Play size={15} />}
-            <span>{!started ? 'Start Battle' : isPlaying ? 'Pause' : 'Play'}</span>
+            <span>{!started ? 'Start Battle' : playbackFinished ? 'Replay' : isPlaying ? 'Pause' : 'Play'}</span>
           </button>
           <button
             type="button"
@@ -2992,6 +3366,7 @@ export function ArenaBattleScene({
               currentEvent={currentEvent}
               totalRounds={totalRounds}
               reducedMotion={reducedMotion}
+              resultReveal={showResultReveal && playbackFinished ? { outcome, result } : null}
               editUnitSlots={editUnitSlots}
               onUnitSlotChange={onUnitSlotChange}
             />
@@ -3006,6 +3381,7 @@ export function ArenaBattleScene({
           currentEvent={currentEvent}
           totalRounds={totalRounds}
           reducedMotion={reducedMotion}
+          resultReveal={showResultReveal && playbackFinished ? { outcome, result } : null}
           editUnitSlots={editUnitSlots}
           onUnitSlotChange={onUnitSlotChange}
         />
