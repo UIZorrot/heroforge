@@ -131,6 +131,13 @@ const rivalSlots: SlotSpec[] = [
 
 const PLAYBACK_STEP_MS = 1150;
 
+/**
+ * EXPERIMENT: projectile trail rendering.
+ * 'particles' — smoky spark ribbon spawned along the flight path.
+ * 'strokes'  — the original drawn line-segment trail (revert to this to undo).
+ */
+const PROJECTILE_TRAIL_MODE: 'strokes' | 'particles' = 'particles';
+
 function prefersReducedMotion() {
   return typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 }
@@ -2026,7 +2033,7 @@ function createDebrisNode(recipe: BattleDebrisRecipe, palette: PixiPalette, text
   }
   const g = new Graphics();
   g.blendMode = 'add';
-  g.circle(0, 0, 1.9 + Math.random() * 1.3);
+  g.circle(0, 0, 1.4 + Math.random() * 1.1);
   g.fill({ color: Math.random() > 0.4 ? palette.hot : palette.core, alpha: 0.95 });
   return g;
 }
@@ -2077,7 +2084,7 @@ function renderPixiDebrisBurst(
       age: 0,
       life: recipe.lifeMs[0] + Math.random() * (recipe.lifeMs[1] - recipe.lifeMs[0]),
       scale0: recipe.scale[0] + Math.random() * (recipe.scale[1] - recipe.scale[0]),
-      baseScale: node instanceof Sprite ? 0.105 : 1,
+      baseScale: node instanceof Sprite ? 0.085 : 1,
     });
   }
 
@@ -2215,9 +2222,53 @@ function renderPixiProjectileEmitter({
   let elapsedMs = 0;
   let emitterBudget = plan.emitterParticleCount;
   let emitterAccumulator = 0;
+  let trailAccumMs = 0;
+  let trailTick = 0;
   let launchBurstDone = false;
   let impactDone = false;
   let disposed = false;
+
+  const spawnTrailParticle = (point: PixiPoint, travelAngle: number, strength: number) => {
+    trailTick += 1;
+    const useSmoke = trailTick % 3 === 0;
+    const texture = useSmoke
+      ? textures.smokes[Math.floor(Math.random() * textures.smokes.length)]
+      : textures.sparks[Math.floor(Math.random() * textures.sparks.length)];
+    const sprite = new Sprite(texture);
+    sprite.anchor.set(0.5);
+    sprite.blendMode = 'add';
+    sprite.tint = useSmoke ? beamPalette.core : (Math.random() > 0.35 ? beamPalette.hot : beamPalette.core);
+    const backX = point.x - Math.cos(travelAngle) * 5 + (Math.random() - 0.5) * 3.5;
+    const backY = point.y - Math.sin(travelAngle) * 5 + (Math.random() - 0.5) * 3.5;
+    sprite.x = backX;
+    sprite.y = backY;
+    sprite.rotation = Math.random() * Math.PI * 2;
+    const startScale = (useSmoke ? 0.11 : 0.07) * (0.75 + Math.random() * 0.55) * (0.4 + strength * 0.6);
+    const state = {
+      alpha: (useSmoke ? 0.42 : 0.85) * strength,
+      scale: startScale,
+      x: backX,
+      y: backY,
+    };
+    sprite.scale.set(startScale);
+    sprite.alpha = state.alpha;
+    add(sprite, 6);
+    tweens.push(gsap.to(state, {
+      alpha: 0,
+      scale: startScale * 0.35,
+      x: backX - Math.cos(travelAngle) * 14,
+      y: backY - Math.sin(travelAngle) * 14,
+      duration: 0.3 + Math.random() * 0.18,
+      ease: 'power1.out',
+      onUpdate: () => {
+        sprite.alpha = state.alpha;
+        sprite.scale.set(state.scale);
+        sprite.x = state.x;
+        sprite.y = state.y;
+      },
+      onComplete: () => sprite.destroy(),
+    }));
+  };
 
   core.blendMode = bloom.blendMode = source.blendMode = particleLayer.blendMode = smokeLayer.blendMode = 'add';
   beam.blendMode = useBeamSequence ? projectileBeamSequence.blendMode : 'add';
@@ -2447,39 +2498,47 @@ function renderPixiProjectileEmitter({
         path.depthEnvelope,
         profile.depthScale,
       );
-      for (const segment of trailSegments) {
-        const segmentStart = projectilePathSample(start, end, segment.startT, profile.arcBend, profile.pathWobble, profile.pathWaves).point;
-        const segmentEnd = projectilePathSample(start, end, segment.endT, profile.arcBend, profile.pathWobble, profile.pathWaves).point;
-        const strength = segment.strength * beamAlpha;
+      if (PROJECTILE_TRAIL_MODE === 'strokes') {
+        for (const segment of trailSegments) {
+          const segmentStart = projectilePathSample(start, end, segment.startT, profile.arcBend, profile.pathWobble, profile.pathWaves).point;
+          const segmentEnd = projectilePathSample(start, end, segment.endT, profile.arcBend, profile.pathWobble, profile.pathWaves).point;
+          const strength = segment.strength * beamAlpha;
 
-        bloom.moveTo(segmentStart.x, segmentStart.y);
-        bloom.lineTo(segmentEnd.x, segmentEnd.y);
-        bloom.stroke({
-          color: beamPalette.core,
-          width: Math.max(11, profile.bloomWidth * 0.72) * (0.28 + segment.strength * 0.72),
-          alpha: 0.28 * strength,
-          cap: 'round',
-        });
+          bloom.moveTo(segmentStart.x, segmentStart.y);
+          bloom.lineTo(segmentEnd.x, segmentEnd.y);
+          bloom.stroke({
+            color: beamPalette.core,
+            width: Math.max(11, profile.bloomWidth * 0.72) * (0.28 + segment.strength * 0.72),
+            alpha: 0.28 * strength,
+            cap: 'round',
+          });
 
-        core.moveTo(segmentStart.x, segmentStart.y);
-        core.lineTo(segmentEnd.x, segmentEnd.y);
-        core.stroke({
-          color: beamPalette.core,
-          width: Math.max(3.4, profile.coreWidth * 0.62) * (0.2 + segment.strength * 0.8),
-          alpha: 0.76 * strength,
-          cap: 'round',
-        });
-
-        if (segment.strength > 0.48) {
-          const hotStrength = (segment.strength - 0.48) / 0.52;
           core.moveTo(segmentStart.x, segmentStart.y);
           core.lineTo(segmentEnd.x, segmentEnd.y);
           core.stroke({
-            color: beamPalette.hot,
-            width: 1.15 + hotStrength * 1.55,
-            alpha: 0.9 * hotStrength * beamAlpha,
+            color: beamPalette.core,
+            width: Math.max(3.4, profile.coreWidth * 0.62) * (0.2 + segment.strength * 0.8),
+            alpha: 0.76 * strength,
             cap: 'round',
           });
+
+          if (segment.strength > 0.48) {
+            const hotStrength = (segment.strength - 0.48) / 0.52;
+            core.moveTo(segmentStart.x, segmentStart.y);
+            core.lineTo(segmentEnd.x, segmentEnd.y);
+            core.stroke({
+              color: beamPalette.hot,
+              width: 1.15 + hotStrength * 1.55,
+              alpha: 0.9 * hotStrength * beamAlpha,
+              cap: 'round',
+            });
+          }
+        }
+      } else {
+        trailAccumMs += deltaMs;
+        while (trailAccumMs >= 13) {
+          trailAccumMs -= 13;
+          spawnTrailParticle(headPoint, angle, beamAlpha);
         }
       }
       drawGlowCircle(bloom, headPoint.x, headPoint.y, Math.max(6, profile.headGlowRadius * 0.48), beamPalette.core, 0.08 * beamAlpha);
