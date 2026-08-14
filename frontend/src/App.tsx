@@ -7,6 +7,7 @@ import { ForgePage } from './components/ForgePage';
 import { ArenaPage } from './components/ArenaPage';
 import { VfxTestPage } from './components/VfxTestPage';
 import { MarketPage } from './components/MarketPage';
+import { SettingsPage } from './components/SettingsPage';
 import { DailyActivity } from './components/DailyActivity';
 import { SectionHeader } from './components/Effects';
 import { PageHeader, PageHeaderStat } from './components/PageHeader';
@@ -14,6 +15,7 @@ import {
   clearStoredSession,
   enchantCard,
   equipCardRelic,
+  fetchBattles,
   fetchCurrentUser,
   fetchEconomy,
   fetchHeroes,
@@ -26,16 +28,89 @@ import {
   washCardEnchant,
 } from './lib/api';
 import { normalizeCharacterData, type CharacterData, type Rarity } from './lib/gameLogic';
-import { mockEconomy, mockHeroes, mockRelicCatalog } from './lib/mockContent';
+import { createMockEconomy, createMockHeroes, mockEconomy, mockHeroes, mockRelicCatalog } from './lib/mockContent';
 import { IS_MOCK_MODE } from './lib/runtimeMode';
-import type { AuthUser, EconomySnapshot, HeroHistoryRecord, SavedHero } from './types';
+import type { AuthUser, BattleHistoryRecord, EconomySnapshot, HeroHistoryRecord, SavedHero } from './types';
 
 type VaultSort = 'date' | 'bp' | 'name';
 
 const LOGIN_RESEND_SECONDS = 60;
+const MOCK_SANDBOX_KEY = 'hf.mock.sandbox.v1';
 
 function createMockSession() {
   return { token: 'mock-token', email: 'forger@example.com', expiresAt: new Date(Date.now() + 86400000).toISOString() };
+}
+
+type MockSandbox = {
+  heroes: SavedHero[];
+  economy: EconomySnapshot;
+};
+
+function readMockSandbox(): MockSandbox | null {
+  try {
+    const raw = localStorage.getItem(MOCK_SANDBOX_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<MockSandbox>;
+    if (!Array.isArray(parsed.heroes) || !parsed.economy?.wallet || !Array.isArray(parsed.economy.relics)) return null;
+    const baseline = createMockEconomy();
+    const storedRelics = new Map(parsed.economy.relics.map((relic) => [relic.relic_type, relic]));
+    return {
+      heroes: parsed.heroes,
+      economy: {
+        ...baseline,
+        ...parsed.economy,
+        wallet: {
+          ...baseline.wallet!,
+          ...parsed.economy.wallet,
+          dust_balance: Math.max(baseline.wallet!.dust_balance, parsed.economy.wallet.dust_balance),
+        },
+        relics: baseline.relics.map((relic) => {
+          const stored = storedRelics.get(relic.relic_type);
+          return stored ? { ...relic, ...stored, amount: Math.max(relic.amount, stored.amount) } : relic;
+        }),
+      },
+    };
+  } catch {
+    return null;
+  }
+}
+
+function createForgedMockHero(image: string): SavedHero {
+  const index = Date.now() % 4;
+  const variants = [
+    { name: 'Cinder Warden', type: 'fire guardian', bp: 5420, hp: 2860, mp: 620, atk: 342, def: 62, speed: 76, effect: 'fire', skill: 'Cinder Verdict' },
+    { name: 'Veil Seeker', type: 'void assassin', bp: 5180, hp: 2110, mp: 780, atk: 368, def: 34, speed: 122, effect: 'void', skill: 'Nightfall Needle' },
+    { name: 'Storm Cantor', type: 'storm mage', bp: 4960, hp: 1940, mp: 980, atk: 326, def: 30, speed: 108, effect: 'storm', skill: 'Choir of Thunder' },
+    { name: 'Oathbreaker', type: 'steel warrior', bp: 5640, hp: 3140, mp: 540, atk: 354, def: 68, speed: 70, effect: 'weapon', skill: 'Iron Eclipse' },
+  ] as const;
+  const variant = variants[index];
+  const now = Date.now();
+  const character: CharacterData = {
+    name: `${variant.name} ${String(now).slice(-3)}`,
+    description: 'A locally forged sandbox card. Its actions, skills, enchantments, and Arena behavior can be tested without a live service.',
+    BP: String(variant.bp),
+    template: variant.type,
+    state: {
+      HP: String(variant.hp), MP: String(variant.mp), ATK: String(variant.atk), DEF: String(variant.def),
+      CC: '18', SPEED: String(variant.speed), CA: '14', PI: '12', EV: '10', AC: '12', TYPE: variant.type,
+      type_catalog: 'instant', type_effect: variant.effect,
+    },
+    skill: {
+      s1: { name: variant.skill, description: 'A primary sandbox combat skill.', TYPE: variant.effect, TARGET: 'Enemy', TARGET_NUM: '1', RANGE: 'enemy', ROLE: 'attack', type_catalog: 'instant', type_effect: variant.effect, DMG: '108', MP_COST: '28' },
+      s2: { name: 'Forge Resonance', description: 'A self-protecting secondary sandbox skill.', TYPE: 'buff', TARGET: 'Self', TARGET_NUM: '1', RANGE: 'self', ROLE: 'buff', type_catalog: 'instant', type_effect: variant.effect, BUFF_NAME: 'guard', BUFF_TIME: '2', BUFF_DEF: '18', MP_COST: '22' },
+    },
+  };
+  return {
+    id: `mock-forged-${now}-${Math.floor(Math.random() * 10000)}`,
+    createdAt: now,
+    image,
+    character,
+    equippedRelicId: null,
+    enchantment: null,
+    pvpLifeState: 'active',
+    pveLifeState: 'active',
+    cardStatus: 'active',
+  };
 }
 
 function dustBalance(economy: EconomySnapshot | null) {
@@ -238,16 +313,39 @@ function AuthModal({ open, onClose, children }: { open: boolean; onClose: () => 
   );
 }
 
+function battleTypeLabel(battleType: string): string {
+  if (battleType.startsWith('pvp_')) return `PvP ${battleType.slice(4)}`;
+  if (battleType.startsWith('battle_session_')) return `Session ${battleType.slice('battle_session_'.length)}`;
+  return battleType.toUpperCase();
+}
+
+function battleRecordTitle(record: BattleHistoryRecord): string {
+  const labelA = record.payload?.labelA;
+  const labelB = record.payload?.labelB;
+  if (labelA && labelB) return `${labelA} vs ${labelB}`;
+  const board = record.result?.board;
+  if (board?.bottomLabel && board?.topLabel) return `${board.bottomLabel} vs ${board.topLabel}`;
+  return battleTypeLabel(record.battle_type);
+}
+
+function battleRecordDate(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+
 function HomePage({
   user,
   activeTab,
   heroCount,
   dust,
   relics,
+  economy,
   token,
   onNavigate,
   onEconomyChange,
   onOpenAuth,
+  onOpenBattleReplay,
   previewContentEnabled,
 }: {
   user: AuthUser | null;
@@ -255,13 +353,31 @@ function HomePage({
   heroCount: number;
   dust: number;
   relics: number;
+  economy: EconomySnapshot | null;
   token?: string | null;
   onNavigate: (section: GameSectionKey) => void;
   onEconomyChange: (economy: EconomySnapshot) => void;
   onOpenAuth: () => void;
+  onOpenBattleReplay: (record: BattleHistoryRecord) => void;
   previewContentEnabled: boolean;
 }) {
   const dailyToken = token && token !== 'mock-token' ? token : null;
+  const [battleHistory, setBattleHistory] = useState<BattleHistoryRecord[] | null>(null);
+
+  useEffect(() => {
+    if (activeTab !== 'profile' || !dailyToken) return;
+    let cancelled = false;
+    fetchBattles(dailyToken)
+      .then((records) => {
+        if (!cancelled) setBattleHistory(records);
+      })
+      .catch(() => {
+        if (!cancelled) setBattleHistory([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, dailyToken]);
   const playerName = user?.email?.split('@')[0] || 'Visitor';
   const news = [
     {
@@ -399,6 +515,46 @@ function HomePage({
                   <SmallProfileStat label="Win Rate" value={user ? combatWinRate : '--'} />
                   <SmallProfileStat label="Streak" value={user ? combatStreak : '--'} />
                 </div>
+                <div className="mt-6 border-t border-white/8 pt-5">
+                  <div className="flex items-center justify-between text-[10px] uppercase tracking-[0.24em] text-stone-600">
+                    <span>Recent Battles</span>
+                    <span>{battleHistory?.length ? `${battleHistory.length} recorded` : ''}</span>
+                  </div>
+                  {battleHistory === null ? (
+                    <div className="mt-4 flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-stone-500">
+                      <RefreshCw className="animate-spin" size={12} />
+                      Loading combat record
+                    </div>
+                  ) : battleHistory.length === 0 ? (
+                    <p className="mt-4 text-xs leading-5 text-stone-500">
+                      No battles recorded yet. Resolve an Arena queue match, training clash, or battle session and it will appear here with a full replay.
+                    </p>
+                  ) : (
+                    <div className="mt-4 max-h-[320px] space-y-2 overflow-y-auto pr-1">
+                      {battleHistory.map((record) => (
+                        <button
+                          key={record.id}
+                          type="button"
+                          onClick={() => onOpenBattleReplay(record)}
+                          className="group flex w-full items-center justify-between gap-3 border border-white/8 bg-black/30 px-4 py-3 text-left transition-colors hover:border-[#b49664]/40 hover:bg-[#b49664]/5"
+                        >
+                          <div className="min-w-0">
+                            <div className="text-[9px] uppercase tracking-[0.22em] text-[#b49664]">{battleTypeLabel(record.battle_type)}</div>
+                            <div className="mt-1 truncate text-sm text-stone-200">{battleRecordTitle(record)}</div>
+                          </div>
+                          <div className="shrink-0 text-right">
+                            <div className="text-[10px] uppercase tracking-[0.18em] text-stone-400">
+                              {record.result?.winnerLabel ? `Winner ${record.result.winnerLabel}` : 'Resolved'}
+                            </div>
+                            <div className="mt-1 text-[10px] uppercase tracking-[0.14em] text-stone-600 group-hover:text-stone-500">
+                              {battleRecordDate(record.created_at)} · Replay
+                            </div>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
               <div className="border border-white/8 bg-black/20 p-6">
                 <HomeSectionTitle icon={<Sparkles size={16} />} eyebrow="Forge" title="Creation Status" />
@@ -465,7 +621,7 @@ function HomePage({
           <section className="flex flex-1 flex-col border border-white/8 bg-black/20 p-6">
             <HomeSectionTitle icon={<CalendarDays size={16} />} eyebrow="Daily" title="Ritual Board" />
             {dailyToken ? (
-              <DailyActivity token={dailyToken} onEconomyChange={onEconomyChange} />
+              <DailyActivity token={dailyToken} demoMode={previewContentEnabled} economy={economy} onEconomyChange={onEconomyChange} />
             ) : (
               <DailyPreview />
             )}
@@ -977,6 +1133,7 @@ const App: React.FC = () => {
   const [forgeTab, setForgeTab] = useState<ForgeSideKey>('create');
   const [arenaTab, setArenaTab] = useState<ArenaSideKey>('queue');
   const [arenaLocked, setArenaLocked] = useState(false);
+  const [replayRecord, setReplayRecord] = useState<BattleHistoryRecord | null>(null);
   const [authOpen, setAuthOpen] = useState(false);
   const [booting, setBooting] = useState(true);
   const [session, setSession] = useState(getStoredSession());
@@ -1022,11 +1179,12 @@ const App: React.FC = () => {
     const boot = async () => {
       if (IS_MOCK_MODE) {
         const mockSession = createMockSession();
+        const sandbox = readMockSandbox() ?? { heroes: createMockHeroes(), economy: createMockEconomy() };
         setSession(mockSession);
         setUser({ id: 'mock-user', email: mockSession.email, expires_at: mockSession.expiresAt });
         setEmail(mockSession.email);
-        setEconomy(mockEconomy);
-        setSavedHeroes(mockHeroes);
+        setEconomy(sandbox.economy);
+        setSavedHeroes(sandbox.heroes);
         setBooting(false);
         return;
       }
@@ -1056,6 +1214,15 @@ const App: React.FC = () => {
     };
     void boot();
   }, []);
+
+  useEffect(() => {
+    if (!IS_MOCK_MODE || !economy) return;
+    try {
+      localStorage.setItem(MOCK_SANDBOX_KEY, JSON.stringify({ heroes: savedHeroes, economy } satisfies MockSandbox));
+    } catch {
+      // Sandbox persistence is best-effort; the active testing session remains usable.
+    }
+  }, [economy, savedHeroes]);
 
   useEffect(() => {
     if (cooldown <= 0) return;
@@ -1148,7 +1315,18 @@ const App: React.FC = () => {
   const handleNavigate = (section: GameSectionKey) => {
     if (section === 'home') setHomeTab('welcome');
     if (section === 'forge') setForgeTab('create');
+    if (section !== 'arena') setReplayRecord(null);
     setActiveSection(section);
+  };
+  const handleOpenBattleReplay = (record: BattleHistoryRecord) => {
+    setReplayRecord(record);
+    setArenaTab('battle');
+    setActiveSection('arena');
+  };
+  const handleCloseBattleReplay = () => {
+    setReplayRecord(null);
+    setActiveSection('home');
+    setHomeTab('profile');
   };
   const handleImageSelect = async (file: File) => {
     const base64Image = await new Promise<string>((resolve) => {
@@ -1164,6 +1342,34 @@ const App: React.FC = () => {
 
     try {
       const token = session?.token ?? getStoredToken();
+      if (IS_MOCK_MODE) {
+        const forgeCost = economy?.costs.forge ?? mockEconomy.costs.forge;
+        const currentDust = economy?.wallet?.dust_balance ?? mockEconomy.wallet?.dust_balance ?? 0;
+        if (currentDust < forgeCost) throw new Error(`Need ${forgeCost} Dust to forge this card.`);
+        const forgedHero = createForgedMockHero(base64Image);
+        const timestamp = new Date().toISOString();
+        setCharacter(forgedHero.character);
+        setSavedHeroes((current) => [forgedHero, ...current]);
+        setEconomy((current) => {
+          const base = current ?? createMockEconomy();
+          const nextDust = Math.max(0, (base.wallet?.dust_balance ?? 0) - forgeCost);
+          return {
+            ...base,
+            wallet: base.wallet ? { ...base.wallet, dust_balance: nextDust, updated_at: timestamp } : base.wallet,
+            transactions: [{
+              id: `mock-forge-${Date.now()}`,
+              resource_type: 'dust',
+              delta: -forgeCost,
+              balance_after: nextDust,
+              reason: 'forge_card',
+              ref_type: 'hero',
+              metadata: { hero_id: forgedHero.id },
+              created_at: timestamp,
+            }, ...base.transactions],
+          };
+        });
+        return;
+      }
       if (!token || token === 'mock-token') throw new Error('Login with a real session to forge cards.');
       const heroData = await forgeHero(file, token);
       const normalizedHero = normalizeCharacterData(heroData);
@@ -1317,10 +1523,12 @@ const App: React.FC = () => {
           heroCount={savedHeroes.length}
           dust={dustBalance(economy)}
           relics={relicBalance(economy)}
+          economy={economy}
           token={session?.token ?? getStoredToken()}
           onNavigate={handleNavigate}
           onEconomyChange={setEconomy}
           onOpenAuth={() => setAuthOpen(true)}
+          onOpenBattleReplay={handleOpenBattleReplay}
           previewContentEnabled={IS_MOCK_MODE}
         />
       );
@@ -1331,6 +1539,10 @@ const App: React.FC = () => {
     }
 
     if (!isAuthenticated) return <AccessRequired onOpenAuth={() => setAuthOpen(true)} />;
+
+    if (activeSection === 'settings') {
+      return <SettingsPage token={session?.token ?? getStoredToken()} demoMode={demoMode} />;
+    }
 
     if (activeSection === 'vault') {
       return (
@@ -1380,6 +1592,8 @@ const App: React.FC = () => {
           activeTab={arenaTab}
           onTabChange={setArenaTab}
           onBattleLockChange={setArenaLocked}
+          replayRecord={replayRecord}
+          onReplayClose={handleCloseBattleReplay}
           onRefresh={async () => {
             await reloadCollections();
           }}
@@ -1438,6 +1652,13 @@ const App: React.FC = () => {
           setArenaTab(tab);
         }}
         onOpenAuth={() => setAuthOpen(true)}
+        onOpenSettings={() => {
+          if (!user) {
+            setAuthOpen(true);
+            return;
+          }
+          setActiveSection('settings');
+        }}
       >
         {content}
       </GameShell>

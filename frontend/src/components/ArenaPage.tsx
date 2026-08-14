@@ -20,7 +20,7 @@ import { mockHeroes } from '../lib/mockContent';
 import { cn } from '../lib/utils';
 import { STORAGE_NAMESPACE } from '../lib/runtimeMode';
 import type { BattleBoardUnit } from '../lib/battleTypes';
-import type { ArenaFormation, ArenaSlotKey, BattleResult, BattleSessionAction, BattleSessionObservation, BattleSessionSnapshot, EconomySnapshot, PvpBattleMode, PvpMatchRecord, PvpQueueEntry, SavedHero } from '../types';
+import type { ArenaFormation, ArenaSlotKey, BattleHistoryRecord, BattleResult, BattleSessionAction, BattleSessionObservation, BattleSessionSnapshot, EconomySnapshot, PvpBattleMode, PvpMatchRecord, PvpQueueEntry, SavedHero } from '../types';
 
 type ArenaTab = 'queue' | 'train' | 'battle';
 
@@ -38,6 +38,8 @@ type ArenaPageProps = {
   activeTab: ArenaTab;
   onTabChange: (tab: ArenaTab) => void;
   onBattleLockChange: (locked: boolean) => void;
+  replayRecord?: BattleHistoryRecord | null;
+  onReplayClose?: () => void;
   onRefresh: () => Promise<void>;
 };
 
@@ -88,7 +90,7 @@ function createDemoHero(id: string, name: string, type: string, bp: number, hp: 
         AC: '8',
         TYPE: type,
         type_catalog: 'instant',
-        type_effect: 'slash',
+        type_effect: 'strike',
       },
       skill: {
         s1: { name: skill, description: 'Primary Arena protocol.', TYPE: 'attack', TARGET: 'Enemy', TARGET_NUM: '1' },
@@ -179,6 +181,31 @@ function buildArenaFormation(heroIds: string[]): ArenaFormation {
 
 function resolveBattleResult(match?: PvpMatchRecord | null, battle?: BattleResult | null) {
   return battle ?? match?.battle_result ?? null;
+}
+
+function battleSessionToResult(session: BattleSessionSnapshot | null): BattleResult | null {
+  if (!session) return null;
+  if (session.result) return session.result;
+  const board = session.board;
+  if (!board) return null;
+  const totalHp = (units: typeof board.bottom) => units.reduce((sum, unit) => sum + Math.max(0, unit?.hp ?? 0), 0);
+  const totalMaxHp = (units: typeof board.bottom) => units.reduce((sum, unit) => sum + Math.max(0, unit?.maxHp ?? 0), 0);
+  const alive = (units: typeof board.bottom) => units.filter((unit) => unit?.alive && unit.hp > 0).length;
+  return {
+    winner: 'Pending',
+    winnerLabel: 'Battle in progress',
+    logs: session.logs ?? [],
+    events: session.events ?? [],
+    board,
+    boardHistory: session.boardHistory?.length ? session.boardHistory : [board],
+    finalHpA: totalHp(board.bottom),
+    finalHpB: totalHp(board.top),
+    maxHpA: totalMaxHp(board.bottom),
+    maxHpB: totalMaxHp(board.top),
+    aliveA: alive(board.bottom),
+    aliveB: alive(board.top),
+    summary: session.lastActionSource === 'program' ? 'Program controller advanced the current turn.' : 'Waiting for the active Agent or program fallback.',
+  };
 }
 
 function heroSessionPayload(hero: SavedHero) {
@@ -779,7 +806,7 @@ function PowerComparison({ left, right = 0, leftLabel = 'Forger', rightLabel = '
   );
 }
 
-export function ArenaPage({ heroes, economy, token, demoMode = false, activeTab, onTabChange, onBattleLockChange, onRefresh }: ArenaPageProps) {
+export function ArenaPage({ heroes, economy, token, demoMode = false, activeTab, onTabChange, onBattleLockChange, replayRecord = null, onReplayClose, onRefresh }: ArenaPageProps) {
   const displayHeroes = demoMode && heroes.length === 0 ? demoHeroes : heroes;
   const [search, setSearch] = useState('');
   const [queuePage, setQueuePage] = useState(1);
@@ -793,6 +820,7 @@ export function ArenaPage({ heroes, economy, token, demoMode = false, activeTab,
   const [queueEntry, setQueueEntry] = useState<PvpQueueEntry | null>(null);
   const [, setMatchRecord] = useState<PvpMatchRecord | null>(null);
   const [battleResult, setBattleResult] = useState<BattleResult | null>(null);
+  const [battleSession, setBattleSession] = useState<BattleSessionSnapshot | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
@@ -875,8 +903,13 @@ export function ArenaPage({ heroes, economy, token, demoMode = false, activeTab,
   const upperBp = totalBp > 0 ? Math.floor(totalBp * (1 + tolerancePct / 100)) : 0;
   const selectedHeroesEligible = selectedHeroes.every(isArenaEligible);
   const waiting = queueEntry?.status === 'waiting';
-  const queueReady = selectedHeroes.length > 0 && selectedHeroes.length <= MAX_TEAM_SIZE && selectedHeroesEligible && walletDust >= stakeDust && !busy && !demoMode;
-  const battleLoaded = activeTab === 'battle' && Boolean(battleResult);
+  const queueReady = selectedHeroes.length > 0 && selectedHeroes.length <= MAX_TEAM_SIZE && selectedHeroesEligible && walletDust >= stakeDust && !busy;
+  const liveBattleResult = useMemo(() => battleResult ?? battleSessionToResult(battleSession), [battleResult, battleSession]);
+  const replayResult = useMemo(
+    () => (!battleResult && !battleSession && replayRecord?.result ? replayRecord.result : null),
+    [battleResult, battleSession, replayRecord]
+  );
+  const battleLoaded = activeTab === 'battle' && Boolean(liveBattleResult ?? replayResult);
 
   const moveBattleHero = (heroId: string, direction: -1 | 1) => {
     setBattleOrder((current) => {
@@ -894,6 +927,7 @@ export function ArenaPage({ heroes, economy, token, demoMode = false, activeTab,
     setQueueEntry(null);
     setMatchRecord(null);
     setBattleResult(null);
+    setBattleSession(null);
     setResumeEntryId(null);
     onTabChange('queue');
   };
@@ -903,6 +937,7 @@ export function ArenaPage({ heroes, economy, token, demoMode = false, activeTab,
     setQueueEntry(entry);
     setMatchRecord(match);
     setBattleResult(visibleBattle);
+    setBattleSession(null);
     if (visibleBattle) onTabChange('battle');
     setResumeEntryId(null);
     setMessage(statusMessage);
@@ -971,29 +1006,38 @@ export function ArenaPage({ heroes, economy, token, demoMode = false, activeTab,
       setError(`Need ${stakeDust} Dust to enter Arena.`);
       return;
     }
-    if (demoMode) {
-      setError('Demo Arena shows layout only. Login with a real session to queue.');
-      return;
-    }
-    if (!currentToken) {
-      setError('Please login first.');
-      return;
-    }
     if (!queueReady) {
       setError('Arena formation is not ready.');
+      return;
+    }
+    if (!demoMode && (!currentToken || currentToken === 'mock-token')) {
+      setError('Please login first.');
       return;
     }
     setBusy(true);
     setError('');
     setMessage('');
     try {
+      if (demoMode) {
+        setBattleResult(createPreviewBattleResult(selectedHeroes));
+        setMatchRecord(null);
+        setQueueEntry(null);
+        setBattleSession(null);
+        setResumeEntryId(null);
+        setMessage('Simulation match resolved locally by program control.');
+        onTabChange('battle');
+        return;
+      }
       const response = await joinArenaQueue(arenaFormation, queueKey, currentToken);
       setQueueEntry(response.entry);
       setMatchRecord(response.match ?? null);
+      const sessionId = response.battle_session?.sessionId ?? response.match?.battle_session_id ?? null;
+      const liveSession = sessionId ? await fetchBattleSession(sessionId, currentToken) : response.battle_session ?? null;
+      setBattleSession(liveSession);
       const battle = resolveBattleResult(response.match, response.battle);
       const visibleBattle = battle ? enrichBattleResultImages(battle, selectedHeroes, []) : battle;
       setBattleResult(visibleBattle);
-      setResumeEntryId(response.status === 'waiting' ? response.entry.id : null);
+      setResumeEntryId(response.entry.id);
       if (response.status === 'waiting') {
         setMessage(`Queued. Waiting for a rival within the ${tolerancePct}% BP window.`);
         try {
@@ -1001,8 +1045,11 @@ export function ArenaPage({ heroes, economy, token, demoMode = false, activeTab,
         } catch {
           // Best effort refresh.
         }
+      } else if (visibleBattle) {
+        await syncResolvedMatch(response.entry, response.match ?? null, visibleBattle, 'Match resolved. Settlement is complete.');
       } else {
-        await syncResolvedMatch(response.entry, response.match ?? null, visibleBattle, 'Match found. The Arena resolved the fight.');
+        setMessage('Match found. The shared Arena battle is now live.');
+        onTabChange('battle');
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to join PvP queue.');
@@ -1037,11 +1084,15 @@ export function ArenaPage({ heroes, economy, token, demoMode = false, activeTab,
 
   const handleStartBattle = useCallback(async () => {
     const orderedHeroes = battleOrderHeroes.length ? battleOrderHeroes : selectedHeroes.length ? selectedHeroes : displayHeroes;
+    if (!demoMode && (!currentToken || currentToken === 'mock-token')) {
+      setError('Please login first.');
+      return;
+    }
     setError('');
     setMessage('');
     setBusy(true);
     try {
-      if (demoMode || !currentToken || currentToken === 'mock-token') {
+      if (demoMode) {
         setBattleResult(createPreviewBattleResult(orderedHeroes));
       } else {
         const result = await resolveBattleSessionToResult(
@@ -1056,6 +1107,7 @@ export function ArenaPage({ heroes, economy, token, demoMode = false, activeTab,
       }
       setMatchRecord(null);
       setQueueEntry(null);
+      setBattleSession(null);
       setResumeEntryId(null);
       setMessage('Battle resolved through the server battle session.');
       onTabChange('battle');
@@ -1071,11 +1123,15 @@ export function ArenaPage({ heroes, economy, token, demoMode = false, activeTab,
       setError('Choose cards for both training sides.');
       return;
     }
+    if (!demoMode && (!currentToken || currentToken === 'mock-token')) {
+      setError('Please login first.');
+      return;
+    }
     setBusy(true);
     setError('');
     setMessage('');
     try {
-      if (demoMode || !currentToken || currentToken === 'mock-token') {
+      if (demoMode) {
         setBattleResult(createTrainPreviewBattleResult(trainTeamA, trainTeamB));
       } else {
         const result = await resolveBattleSessionToResult(
@@ -1090,6 +1146,7 @@ export function ArenaPage({ heroes, economy, token, demoMode = false, activeTab,
       }
       setMatchRecord(null);
       setQueueEntry(null);
+      setBattleSession(null);
       setResumeEntryId(null);
       setMessage('Training battle resolved.');
       onTabChange('battle');
@@ -1110,13 +1167,20 @@ export function ArenaPage({ heroes, economy, token, demoMode = false, activeTab,
         if (cancelled) return;
         setQueueEntry(response.entry);
         setMatchRecord(response.match ?? null);
+        const sessionId = response.battle_session?.sessionId ?? response.match?.battle_session_id ?? null;
+        const liveSession = sessionId ? await fetchBattleSession(sessionId, currentToken) : response.battle_session ?? null;
+        if (cancelled) return;
+        setBattleSession(liveSession);
         const battle = response.match?.battle_result ?? null;
         if (response.entry.status === 'waiting') {
           setMessage('Waiting for opponent...');
           return;
         }
-        if (battle || response.match) {
+        if (battle) {
           await syncResolvedMatch(response.entry, response.match ?? null, battle, 'Match resolved while you were away.');
+        } else if (liveSession) {
+          setMessage(liveSession.lastActionSource === 'program' ? 'Program controller is advancing the battle.' : 'Arena battle is live.');
+          onTabChange('battle');
         } else {
           setResumeEntryId(null);
         }
@@ -1139,14 +1203,15 @@ export function ArenaPage({ heroes, economy, token, demoMode = false, activeTab,
   }, [currentToken, demoMode, resumeEntryId, syncResolvedMatch]);
 
   useEffect(() => {
-    onBattleLockChange(Boolean(battleResult));
-    if (battleResult && activeTab !== 'battle') {
+    const loadedResult = liveBattleResult ?? replayResult;
+    onBattleLockChange(Boolean(loadedResult));
+    if (loadedResult && activeTab !== 'battle') {
       onTabChange('battle');
     }
-    if (!battleResult && activeTab === 'battle') {
+    if (!loadedResult && activeTab === 'battle') {
       onTabChange('queue');
     }
-  }, [activeTab, battleResult, onBattleLockChange, onTabChange]);
+  }, [activeTab, liveBattleResult, replayResult, onBattleLockChange, onTabChange]);
 
   return (
     <div className={cn('mx-auto max-w-[1540px] px-6 2xl:px-8', battleLoaded ? 'py-5' : 'py-8')}>
@@ -1169,22 +1234,39 @@ export function ArenaPage({ heroes, economy, token, demoMode = false, activeTab,
         </section>
       )}
 
-      {activeTab === 'battle' && battleResult ? (
+      {activeTab === 'battle' && (liveBattleResult ?? replayResult) ? (
         <section className="space-y-4">
           <div className="flex items-center justify-between gap-4 border border-[#2b241b] bg-black/30 px-5 py-3">
             <div>
-              <div className="text-[10px] uppercase tracking-[0.28em] text-[#b49664]">Battle</div>
-              <div className="mt-1 text-xs text-stone-500">Resolved combat scene loaded.</div>
+              <div className="text-[10px] uppercase tracking-[0.28em] text-[#b49664]">
+                {replayResult ? 'Battle Replay' : battleResult ? 'Battle Resolved' : 'Arena Battle Live'}
+              </div>
+              <div className="mt-1 text-xs text-stone-500">
+                {replayResult
+                  ? 'Read-only replay loaded from your combat record.'
+                  : battleResult
+                    ? 'Settlement and replay are ready.'
+                    : battleSession?.lastActionSource === 'program'
+                      ? 'Program controller advanced the latest turn.'
+                      : 'Observing the shared Agent battle session.'}
+              </div>
             </div>
-            <button
-              type="button"
-              onClick={clearQueueArtifacts}
-              className="border border-red-400/25 bg-red-950/20 px-5 py-3 text-[10px] font-semibold uppercase tracking-[0.22em] text-red-100 transition hover:border-red-300/45 hover:bg-red-900/25"
-            >
-              Abandon Match
-            </button>
+            {replayResult ? (
+              <button
+                type="button"
+                onClick={onReplayClose}
+                className="flex shrink-0 items-center gap-2 border border-[#b49664]/40 px-4 py-2 text-[10px] uppercase tracking-[0.22em] text-[#b49664] transition-colors hover:bg-[#b49664]/10"
+              >
+                <X size={12} />
+                Exit Replay
+              </button>
+            ) : (
+              <div className="text-right text-[10px] uppercase tracking-[0.2em] text-stone-500">
+                {battleSession?.activeActorTag ? `Active ${battleSession.activeActorTag}` : battleResult ? 'Complete' : 'Syncing'}
+              </div>
+            )}
           </div>
-          <BattleVisualizer heroA={null} heroB={null} result={battleResult} onClose={clearQueueArtifacts} />
+          <BattleVisualizer heroA={null} heroB={null} result={liveBattleResult ?? replayResult} liveSession={!battleResult && !replayResult} />
         </section>
       ) : activeTab === 'battle' ? (
         <section className="mt-5 grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
@@ -1406,6 +1488,20 @@ export function ArenaPage({ heroes, economy, token, demoMode = false, activeTab,
                   <div className="mt-1 truncate text-sm text-stone-200">{totalBp ? `${formatNumber(lowerBp)}-${formatNumber(upperBp)}` : '-'}</div>
                 </div>
               </div>
+              {waiting && queueEntry && (
+                <div className="mt-5 border border-[#b49664]/25 bg-[#b49664]/[0.055] px-4 py-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-[10px] font-semibold uppercase tracking-[0.24em] text-[#e8c98d]">Live Queue</span>
+                    <span className="text-[10px] uppercase tracking-[0.2em] text-stone-500">Searching</span>
+                  </div>
+                  <p className="mt-2 text-xs leading-5 text-stone-400">
+                    Awaiting an Agent squad in your {tolerancePct}% BP window. The match resolves automatically when one joins.
+                  </p>
+                  <div className="mt-2 text-[9px] uppercase tracking-[0.18em] text-stone-600">
+                    Entry {queueEntry.id.slice(0, 8)} · Cards locked until match, cancel, or expiry
+                  </div>
+                </div>
+              )}
               <button
                 type="button"
                 onClick={handleJoin}
@@ -1413,7 +1509,7 @@ export function ArenaPage({ heroes, economy, token, demoMode = false, activeTab,
                 className="mt-5 inline-flex h-14 w-full items-center justify-center gap-3 bg-[#9a7338] px-5 text-[13px] font-semibold uppercase tracking-[0.24em] text-stone-100 transition hover:bg-[#b18647] disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {busy ? <RefreshCw size={17} className="animate-spin" /> : <Zap size={17} />}
-                Find Match
+                {waiting ? 'Searching' : demoMode ? 'Simulate Match' : 'Find Match'}
               </button>
               <button
                 type="button"

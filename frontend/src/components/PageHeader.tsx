@@ -8,13 +8,14 @@ type PageHeaderProps = {
   description: ReactNode;
   stats?: ReactNode;
   className?: string;
+  titleClassName?: string;
 };
 
-export function PageHeader({ title, eyebrow, subtitle, description, stats, className }: PageHeaderProps) {
+export function PageHeader({ title, eyebrow, subtitle, description, stats, className, titleClassName }: PageHeaderProps) {
   return (
     <section className={cn('border-b border-white/8 pb-6', className)}>
       <div className="flex flex-col gap-5 xl:flex-row xl:items-end">
-        <h1 className="font-display text-4xl font-light uppercase leading-none tracking-[0.34em] text-stone-100 sm:text-5xl xl:text-6xl">
+        <h1 className={cn('font-display text-4xl font-light uppercase leading-none tracking-[0.34em] text-stone-100 sm:text-5xl xl:text-6xl', titleClassName)}>
           {title}
         </h1>
         <div className="hidden h-14 border-l border-white/10 xl:block" />

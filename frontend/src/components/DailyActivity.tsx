@@ -5,16 +5,55 @@ import type { DailySnapshot, EconomySnapshot } from '../types';
 
 interface DailyActivityProps {
   token?: string | null;
+  demoMode?: boolean;
+  economy?: EconomySnapshot | null;
   onEconomyChange?: (economy: EconomySnapshot) => void;
 }
 
-export const DailyActivity: React.FC<DailyActivityProps> = ({ token, onEconomyChange }) => {
+function createSandboxDaily(economy: EconomySnapshot): DailySnapshot {
+  const date = new Date().toISOString().slice(0, 10);
+  return {
+    date,
+    checkin: { claimed: false, claim_date: date, reward_dust: 30 },
+    tasks: [
+      { id: 'sandbox-forge', key: 'forge_one_card', title: 'Forge a card', description: 'Create one hero in the local Forge.', task_date: date, progress: 1, target: 1, reward_dust: 100, claimed: false, claimable: true },
+      { id: 'sandbox-relic', key: 'use_one_relic', title: 'Use a relic', description: 'Equip or enchant with a relic in the sandbox.', task_date: date, progress: 1, target: 1, reward_dust: 300, claimed: false, claimable: true },
+    ],
+    economy,
+  };
+}
+
+function rewardSandboxEconomy(economy: EconomySnapshot, reward: number, reason: string): EconomySnapshot {
+  if (!economy.wallet) return economy;
+  const timestamp = new Date().toISOString();
+  const balance = economy.wallet.dust_balance + reward;
+  return {
+    ...economy,
+    wallet: { ...economy.wallet, dust_balance: balance, updated_at: timestamp },
+    transactions: [{
+      id: `mock-daily-${reason}-${Date.now()}`,
+      resource_type: 'dust',
+      delta: reward,
+      balance_after: balance,
+      reason: `daily_${reason}`,
+      metadata: { sandbox: true },
+      created_at: timestamp,
+    }, ...economy.transactions],
+  };
+}
+
+export const DailyActivity: React.FC<DailyActivityProps> = ({ token, demoMode = false, economy, onEconomyChange }) => {
   const [daily, setDaily] = useState<DailySnapshot | null>(null);
   const [loading, setLoading] = useState(false);
   const [claimingKey, setClaimingKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const loadDaily = async () => {
+    if (demoMode) {
+      if (economy) setDaily(createSandboxDaily(economy));
+      setLoading(false);
+      return;
+    }
     if (!token) return;
     setLoading(true);
     setError(null);
@@ -31,13 +70,20 @@ export const DailyActivity: React.FC<DailyActivityProps> = ({ token, onEconomyCh
 
   useEffect(() => {
     void loadDaily();
-  }, [token]);
+  }, [demoMode, token]);
 
   const claimSignIn = async () => {
-    if (!token || !daily || daily.checkin.claimed) return;
+    if (!daily || daily.checkin.claimed) return;
     setClaimingKey('sign-in');
     setError(null);
     try {
+      if (demoMode) {
+        const nextEconomy = rewardSandboxEconomy(daily.economy, daily.checkin.reward_dust, 'sign_in');
+        setDaily({ ...daily, checkin: { ...daily.checkin, claimed: true, claimed_at: new Date().toISOString() }, economy: nextEconomy });
+        onEconomyChange?.(nextEconomy);
+        return;
+      }
+      if (!token) return;
       const next = await claimDailySignIn(token);
       setDaily(next);
       onEconomyChange?.(next.economy);
@@ -49,10 +95,23 @@ export const DailyActivity: React.FC<DailyActivityProps> = ({ token, onEconomyCh
   };
 
   const claimTask = async (taskKey: string) => {
-    if (!token) return;
+    if (!daily) return;
     setClaimingKey(taskKey);
     setError(null);
     try {
+      if (demoMode) {
+        const task = daily.tasks.find((item) => item.key === taskKey);
+        if (!task || !task.claimable) return;
+        const nextEconomy = rewardSandboxEconomy(daily.economy, task.reward_dust, taskKey);
+        setDaily({
+          ...daily,
+          tasks: daily.tasks.map((item) => item.key === taskKey ? { ...item, claimed: true, claimable: false, claimed_at: new Date().toISOString() } : item),
+          economy: nextEconomy,
+        });
+        onEconomyChange?.(nextEconomy);
+        return;
+      }
+      if (!token) return;
       const next = await claimDailyTask(taskKey, token);
       setDaily(next);
       onEconomyChange?.(next.economy);

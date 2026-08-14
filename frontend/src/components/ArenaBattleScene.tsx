@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent a
 import { AnimatePresence, motion } from 'framer-motion';
 import { gsap } from 'gsap';
 import { Application, Assets, BlurFilter, Container, Graphics, Particle, ParticleContainer, Rectangle, Sprite, Text, Texture } from 'pixi.js';
-import { Crown, Pause, Play, RotateCcw, Shield, Skull, Sparkles } from 'lucide-react';
+import { Pause, Play, RotateCcw, Shield, Sparkles } from 'lucide-react';
 import arenaHallPerspective from '../assets/battle/arena-hall-perspective.png';
 import { CARD_FALLBACK_SRC } from '../lib/cards';
 import {
@@ -71,6 +71,7 @@ type ArenaBattleSceneProps = {
   autoStartKey?: string | number;
   showCommanders?: boolean;
   showResultReveal?: boolean;
+  liveSession?: boolean;
   editUnitSlots?: boolean;
   onUnitSlotChange?: (unitTag: string, slot: number) => void;
 };
@@ -1725,11 +1726,15 @@ function renderPixiBuffAuraLoop(
   }
   layer.addChild(accent);
 
-  // Streaming light chasing around the card edge — the primary "this card is marked" read.
+  // Streaming light chasing around the card edge — two heads per buff:
+  // dark stream for debuffs, bright stream for positive buffs.
   const stream = new Graphics();
   stream.blendMode = 'add';
   layer.addChild(stream);
-  const streamHeads = display.control ? 2 : 1;
+  const streamHeads = 2;
+  const streamColors = display.polarity === 'negative'
+    ? { head: palette.core, trail: palette.dark, glow: palette.core, headAlpha: 0.5 }
+    : { head: palette.hot, trail: palette.core, glow: palette.hot, headAlpha: 0.85 };
 
   const resetMote = (mote: BuffMote, initial: boolean) => {
     mote.age = initial ? Math.random() * 4000 : 0;
@@ -1846,15 +1851,15 @@ function renderPixiBuffAuraLoop(
         stream.moveTo(p0.x, p0.y);
         stream.lineTo(p1.x, p1.y);
         stream.stroke({
-          color: i < 2 ? palette.hot : palette.core,
+          color: i < 2 ? streamColors.head : streamColors.trail,
           width: 1 + strength * 2.2,
           alpha: 0.8 * strength * strength,
           cap: 'round',
         });
       }
       const headPoint = pointOnRectEdge(rect, headT);
-      drawGlowCircle(stream, headPoint.x, headPoint.y, 3.4, palette.hot, 0.34);
-      drawGlowCircle(stream, headPoint.x, headPoint.y, 1.5, palette.hot, 0.85);
+      drawGlowCircle(stream, headPoint.x, headPoint.y, 3.4, streamColors.glow, 0.34);
+      drawGlowCircle(stream, headPoint.x, headPoint.y, 1.5, streamColors.head, streamColors.headAlpha);
     }
 
     for (const mote of motes) {
@@ -3046,7 +3051,7 @@ function BattleResultReveal({
         hot: '#fff1bd',
         muted: '#8f6b32',
         backdrop: 'radial-gradient(circle at 50% 48%, rgba(216,176,108,0.32), rgba(14,10,5,0.9) 48%, rgba(0,0,0,0.96) 100%)',
-        Icon: Crown,
+        Icon: null,
       }
     : outcome === 'defeat'
       ? {
@@ -3057,7 +3062,7 @@ function BattleResultReveal({
           hot: '#ffc1b5',
           muted: '#71352f',
           backdrop: 'radial-gradient(circle at 50% 48%, rgba(137,45,37,0.34), rgba(17,7,6,0.92) 48%, rgba(0,0,0,0.97) 100%)',
-          Icon: Skull,
+          Icon: null,
         }
       : {
           eyebrow: 'No Side Yields',
@@ -3121,16 +3126,18 @@ function BattleResultReveal({
         );
       })}
 
-      <div className="relative z-10 w-full max-w-3xl px-6 text-center">
-        <motion.div
-          className="mx-auto flex h-16 w-16 rotate-45 items-center justify-center border bg-black/45 sm:h-20 sm:w-20 lg:h-24 lg:w-24"
-          style={{ borderColor: `${presentation.accent}66`, boxShadow: `0 0 42px ${presentation.accent}30` }}
-          initial={reducedMotion ? false : { opacity: 0, scale: 0.6, rotate: 24 }}
-          animate={{ opacity: 1, scale: 1, rotate: 45 }}
-          transition={enter}
-        >
-          <presentation.Icon className="-rotate-45" size={34} strokeWidth={1.15} style={{ color: presentation.hot }} />
-        </motion.div>
+      <div className={cn('relative z-10 w-full max-w-3xl px-6 text-center', presentation.Icon ? '' : 'pt-8 sm:pt-12')}>
+        {presentation.Icon ? (
+          <motion.div
+            className="mx-auto flex h-16 w-16 rotate-45 items-center justify-center border bg-black/45 sm:h-20 sm:w-20 lg:h-24 lg:w-24"
+            style={{ borderColor: `${presentation.accent}66`, boxShadow: `0 0 42px ${presentation.accent}30` }}
+            initial={reducedMotion ? false : { opacity: 0, scale: 0.6, rotate: 24 }}
+            animate={{ opacity: 1, scale: 1, rotate: 45 }}
+            transition={enter}
+          >
+            <presentation.Icon className="-rotate-45" size={34} strokeWidth={1.15} style={{ color: presentation.hot }} />
+          </motion.div>
+        ) : null}
 
         <motion.div
           className="mt-5 text-[10px] uppercase tracking-[0.5em] sm:mt-6 sm:text-xs"
@@ -3280,6 +3287,7 @@ export function ArenaBattleScene({
   autoStartKey,
   showCommanders = true,
   showResultReveal = true,
+  liveSession = false,
   editUnitSlots = false,
   onUnitSlotChange,
 }: ArenaBattleSceneProps) {
@@ -3321,6 +3329,12 @@ export function ArenaBattleScene({
     setEventIndex(reducedMotion ? events.length - 1 : 0);
     setIsPlaying(!reducedMotion && events.length > 1);
   }, [autoStartKey, events.length, reducedMotion]);
+
+  useEffect(() => {
+    if (!liveSession) return;
+    setEventIndex(events.length - 1);
+    setIsPlaying(false);
+  }, [events.length, liveSession]);
 
   const started = eventIndex >= 0;
   const safeEventIndex = events.length && started ? Math.min(eventIndex, events.length - 1) : -1;
@@ -3371,7 +3385,11 @@ export function ArenaBattleScene({
         <div className="min-w-0">
           <div className="text-[10px] uppercase tracking-[0.28em] text-[#b49664]">Battle Control</div>
           <div className="mt-1 truncate text-xs text-stone-500">
-            {playbackFinished
+            {liveSession
+              ? currentEvent
+                ? `Live · ${eventActionLabel(currentEvent)} - ${currentEvent.attacker} to ${currentEvent.defender}`
+                : 'Live session connected. Waiting for the opening action.'
+              : playbackFinished
               ? `Battle resolved · ${result.winnerLabel ?? result.winner}`
               : currentEvent
                 ? `${eventActionLabel(currentEvent)} - ${currentEvent.attacker} to ${currentEvent.defender}`

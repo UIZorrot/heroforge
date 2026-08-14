@@ -258,6 +258,7 @@ export function VfxTestPage() {
             result={result}
             autoStartKey={`${category}-${selectedEffect}-${sequence}-${amount}-${crit ? 'crit' : 'normal'}`}
             showCommanders={false}
+            showResultReveal={false}
             editUnitSlots={true}
             onUnitSlotChange={moveUnitToSlot}
           />

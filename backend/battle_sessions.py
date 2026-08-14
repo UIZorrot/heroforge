@@ -523,8 +523,10 @@ class BattleSession:
 
     def public_snapshot(self) -> Dict[str, Any]:
         observation = self.observation
+        board = battle_logic._board_snapshot(self.round, self.team_a_units, self.team_b_units, self.label_a, self.label_b)
         if self.status == "resolved" and self.result:
             observation = self.result["board"]
+            board = self.result["board"]
         return {
             "sessionId": self.session_id,
             "battleMode": self.battle_mode,
@@ -540,6 +542,10 @@ class BattleSession:
             "lastActionSource": self.last_action_source,
             "lastAction": self.last_action,
             "observation": observation,
+            "board": board,
+            "logs": list(self.logs),
+            "events": list(self.events),
+            "boardHistory": list(self.board_history),
             "result": self.result,
         }
 

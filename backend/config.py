@@ -38,6 +38,7 @@ class Settings:
     pvp_match_tolerance_pct: int
     pvp_low_tier_relic_drop_pct: int
     pvp_queue_ttl_minutes: int
+    pvp_battle_session_wait_seconds: int
 
 
 def _get_int_env(name: str, default: int) -> int:
@@ -142,4 +143,5 @@ def get_settings() -> Settings:
         pvp_match_tolerance_pct=_get_int_env("PVP_MATCH_TOLERANCE_PCT", 5),
         pvp_low_tier_relic_drop_pct=_get_int_env("PVP_LOW_TIER_RELIC_DROP_PCT", 3),
         pvp_queue_ttl_minutes=_get_int_env("PVP_QUEUE_TTL_MINUTES", 10),
+        pvp_battle_session_wait_seconds=_get_int_env("PVP_BATTLE_SESSION_WAIT_SECONDS", 5),
     )

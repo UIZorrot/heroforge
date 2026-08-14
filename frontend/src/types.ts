@@ -32,6 +32,22 @@ export interface VerifyLoginResponse {
   user: AuthUser;
 }
 
+export interface AgentAccessKey {
+  id: string;
+  name: string;
+  key_prefix: string;
+  scopes: string[];
+  created_at: string;
+  expires_at: string;
+  last_used_at?: string | null;
+  revoked_at?: string | null;
+}
+
+export interface CreateAgentAccessKeyResponse {
+  key: AgentAccessKey;
+  secret: string;
+}
+
 export interface SavedHero {
   id: string;
   createdAt: number;
@@ -81,11 +97,20 @@ export interface HeroHistoryRecord {
   active_pvp_entry_id?: string | null;
 }
 
+export interface BattleHistoryPayload {
+  labelA?: string;
+  labelB?: string;
+  battleMode?: string;
+  controlMode?: string;
+  size?: string | number;
+  [key: string]: unknown;
+}
+
 export interface BattleHistoryRecord {
   id: string;
   created_at: string;
   battle_type: string;
-  payload?: unknown;
+  payload?: BattleHistoryPayload | null;
   result: BattleResult;
 }
 
@@ -322,6 +347,10 @@ export interface BattleSessionSnapshot {
   lastActionSource?: string | null;
   lastAction?: Record<string, unknown> | null;
   observation?: BattleSessionObservation | BattleResult['board'] | null;
+  board?: BattleResult['board'] | null;
+  logs?: string[];
+  events?: BattleResult['events'];
+  boardHistory?: NonNullable<BattleResult['board']>[];
   result?: BattleResult | null;
 }
 
@@ -384,6 +413,7 @@ export interface PvpMatchRecord {
   formation_b?: ArenaFormationSnapshot | Record<string, unknown>;
   reward_payload?: Record<string, unknown>;
   card_state_changes?: Array<Record<string, unknown>>;
+  battle_session_id?: string | null;
   battle_id?: string | null;
   winner_user_id?: string | null;
   winner_side?: 'A' | 'B' | 'Tie' | null;
@@ -397,6 +427,7 @@ export interface PvpJoinResponse {
   opponent?: PvpQueueEntry | null;
   match?: PvpMatchRecord | null;
   battle?: BattleResult | null;
+  battle_session?: BattleSessionSnapshot | null;
   battle_record_a?: BattleHistoryRecord | null;
   battle_record_b?: BattleHistoryRecord | null;
   battle_payload?: Record<string, unknown> | null;
@@ -410,4 +441,5 @@ export interface PvpEntryStatusResponse {
   ok: boolean;
   entry: PvpQueueEntry;
   match?: PvpMatchRecord | null;
+  battle_session?: BattleSessionSnapshot | null;
 }

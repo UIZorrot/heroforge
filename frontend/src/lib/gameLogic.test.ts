@@ -20,7 +20,7 @@ describe('game logic data normalization', () => {
         AC: '90',
         TYPE: 'weapon',
         type_catalog: 'instant',
-        type_effect: 'slash',
+        type_effect: 'strike',
       },
       skill: {
         s1: {
@@ -56,7 +56,7 @@ describe('game logic data normalization', () => {
     });
 
     expect(hero.state.type_catalog).toBe('instant');
-    expect(hero.state.type_effect).toBe('slash');
+    expect(hero.state.type_effect).toBe('strike');
     expect(Object.keys(hero.skill)).toEqual(['s1', 's2', 's3']);
     expect(hero.skill.s1.type_catalog).toBe('instant');
     expect(hero.skill.s1.type_effect).toBe('claw');
@@ -77,7 +77,7 @@ describe('game logic data normalization', () => {
     expect(hero.state.type_catalog).toBe('proj');
     expect(hero.state.type_effect).toBe('bullet');
     expect(hero.skill.s1.type_catalog).toBe('instant');
-    expect(hero.skill.s1.type_effect).toBe('slash');
+    expect(hero.skill.s1.type_effect).toBe('strike');
     expect(hero.skill.s2.type_catalog).toBe('instant');
     expect(hero.skill.s2.type_effect).toBe('claw');
   });

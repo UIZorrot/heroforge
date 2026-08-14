@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { battleUnitMotionKey } from './ArenaBattleScene';
-import { createVfxTestBoard, createVfxTestEvent } from '../lib/vfxTestHarness';
+import { battleOutcomeForBottom, battlePlaybackHistoryIndex, battleUnitMotionKey } from './ArenaBattleScene';
+import { createVfxTestBoard, createVfxTestEvent, createVfxTestResult } from '../lib/vfxTestHarness';
 
 describe('ArenaBattleScene card motion', () => {
   it('changes active card motion keys between VFX replays of the same attack', () => {
@@ -31,5 +31,22 @@ describe('ArenaBattleScene card motion', () => {
 
     expect(battleUnitMotionKey(frozenCaster, first)).toBe(`${frozenCaster?.tag}-motion-idle`);
     expect(battleUnitMotionKey(frozenCaster, replay)).toBe(`${frozenCaster?.tag}-motion-idle`);
+  });
+
+  it('advances event playback past the initial board snapshot', () => {
+    expect(battlePlaybackHistoryIndex(6, 5, 0)).toBe(1);
+    expect(battlePlaybackHistoryIndex(6, 5, 4)).toBe(5);
+    expect(battlePlaybackHistoryIndex(5, 5, 4)).toBe(4);
+    expect(battlePlaybackHistoryIndex(0, 5, 0)).toBe(-1);
+  });
+
+  it('resolves victory and defeat from the bottom-side perspective', () => {
+    const board = createVfxTestBoard('instant', 'strike');
+    const event = createVfxTestEvent('instant', 'strike', 1);
+    const result = createVfxTestResult(board, event);
+
+    expect(battleOutcomeForBottom({ ...result, winner: 'A', winnerLabel: board.bottomLabel }, board)).toBe('victory');
+    expect(battleOutcomeForBottom({ ...result, winner: 'B', winnerLabel: board.topLabel }, board)).toBe('defeat');
+    expect(battleOutcomeForBottom({ ...result, winner: 'Tie', winnerLabel: 'Tie' }, board)).toBe('draw');
   });
 });

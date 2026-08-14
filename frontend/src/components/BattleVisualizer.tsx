@@ -26,6 +26,7 @@ interface BattleVisualizerProps {
   heroA: CharacterData | null;
   heroB: CharacterData | null;
   result: BattleResult | null;
+  liveSession?: boolean;
   onClose?: () => void;
 }
 
@@ -274,7 +275,7 @@ function BattleEventCard({ event }: { event: BattleResult['events'][number] }) {
   );
 }
 
-export function BattleVisualizer({ heroA, heroB, result, onClose }: BattleVisualizerProps) {
+export function BattleVisualizer({ heroA, heroB, result, liveSession = false, onClose }: BattleVisualizerProps) {
   const board = result?.board ?? result?.details?.board ?? null;
   const lastLog = result?.logs?.[result.logs.length - 1];
   const winner = result?.winnerLabel || result?.winner || 'Pending';
@@ -294,7 +295,14 @@ export function BattleVisualizer({ heroA, heroB, result, onClose }: BattleVisual
 
   if (board && result) {
     return (
-      <ArenaBattleScene board={board} events={result?.events ?? []} logs={result?.logs ?? []} result={result} />
+      <ArenaBattleScene
+        board={board}
+        events={result?.events ?? []}
+        logs={result?.logs ?? []}
+        result={result}
+        liveSession={liveSession}
+        showResultReveal={!liveSession}
+      />
     );
   }
 

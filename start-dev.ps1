@@ -1,6 +1,8 @@
 param(
     [int]$BackendPort = 5544,
     [int]$FrontendPort = 5173,
+    [ValidateSet('live', 'mock')]
+    [string]$AppMode = 'live',
     [switch]$Install,
     [switch]$NoBrowser
 )
@@ -79,6 +81,12 @@ if (`$null -ne (Get-Variable -Name PSNativeCommandUseErrorActionPreference -Erro
     `$PSNativeCommandUseErrorActionPreference = `$false
 }
 Set-Location '$BackendDir'
+# Force local development to read backend/.env instead of an inherited test DB URL.
+Remove-Item Env:DATABASE_URL -ErrorAction SilentlyContinue
+Remove-Item Env:SUB_URL -ErrorAction SilentlyContinue
+Remove-Item Env:SUB_PASS -ErrorAction SilentlyContinue
+Remove-Item Env:SUPABASE_DB_USER -ErrorAction SilentlyContinue
+Remove-Item Env:SUPABASE_DB_NAME -ErrorAction SilentlyContinue
 `$env:PORT = '$BackendPort'
 Write-Host 'Backend starting on http://127.0.0.1:$BackendPort' -ForegroundColor Green
 cmd.exe /c "uv run python main.py 2>&1"
@@ -91,7 +99,8 @@ if (`$null -ne (Get-Variable -Name PSNativeCommandUseErrorActionPreference -Erro
 }
 Set-Location '$FrontendDir'
 `$env:VITE_BACKEND_URL = 'http://127.0.0.1:$BackendPort'
-Write-Host 'Frontend starting on http://127.0.0.1:$FrontendPort' -ForegroundColor Green
+`$env:VITE_APP_MODE = '$AppMode'
+Write-Host 'Frontend starting on http://127.0.0.1:$FrontendPort ($AppMode mode)' -ForegroundColor Green
 cmd.exe /c "npm run dev -- --host 127.0.0.1 --port $FrontendPort 2>&1"
 "@
 
@@ -114,12 +123,25 @@ Start-Process powershell.exe -NoNewWindow -ArgumentList @(
 $FrontendUrl = "http://127.0.0.1:$FrontendPort"
 Write-Step "Frontend URL: $FrontendUrl"
 Write-Step "Backend health: http://127.0.0.1:$BackendPort/api/health"
+Write-Step "App mode: $AppMode"
+
+Start-Sleep -Seconds 2
+try {
+    $health = Invoke-WebRequest -UseBasicParsing "http://127.0.0.1:$BackendPort/api/health" -TimeoutSec 4
+    if ([int]$health.StatusCode -ne 200) {
+        throw "Backend returned HTTP $([int]$health.StatusCode)"
+    }
+    Write-Step "Backend health check passed"
+}
+catch {
+    Write-Warning "Backend is not healthy. Check backend/.env and the Supabase connection URL."
+}
 
 if (-not $NoBrowser) {
-    Start-Sleep -Seconds 2
     Start-Process $FrontendUrl
 }
 
 Write-Host ""
 Write-Host "Started. Press Ctrl+C or close this terminal to stop the dev servers." -ForegroundColor Yellow
+Write-Host "Use './start-dev.ps1 -AppMode mock' only for isolated mock UI testing." -ForegroundColor Yellow
 Write-Host "Use './start-dev.ps1 -Install' if dependencies are missing." -ForegroundColor Yellow

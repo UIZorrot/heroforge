@@ -354,3 +354,18 @@ export const mockEconomy: EconomySnapshot = {
     queue_ttl_minutes: 10,
   },
 };
+
+export function createMockEconomy(): EconomySnapshot {
+  const now = new Date().toISOString();
+  return {
+    ...mockEconomy,
+    wallet: { ...mockEconomy.wallet!, dust_balance: 25000, updated_at: now },
+    starter: { ...mockEconomy.starter, dust_balance: 25000 },
+    relics: mockEconomy.relics.map((relic) => ({ ...relic, amount: 20, updated_at: now })),
+    transactions: [],
+  };
+}
+
+export function createMockHeroes(): SavedHero[] {
+  return JSON.parse(JSON.stringify(mockHeroes)) as SavedHero[];
+}

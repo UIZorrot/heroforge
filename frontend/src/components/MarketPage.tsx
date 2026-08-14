@@ -330,7 +330,7 @@ export function MarketPage({ heroes, economy, token, demoMode = false, onEconomy
     }
   }, [filteredListings, selectedListingId]);
 
-  const walletDust = demoMode ? 8650 : economy?.wallet?.dust_balance ?? economy?.starter.dust_balance ?? 0;
+  const walletDust = economy?.wallet?.dust_balance ?? economy?.starter.dust_balance ?? 0;
   const sortedByAsk = [...relicListings].sort((a, b) => a.ask_price - b.ask_price);
   const medianAsk = sortedByAsk.length > 0 ? sortedByAsk[Math.floor(sortedByAsk.length / 2)]?.ask_price ?? 0 : 0;
   const selectedListing = filteredListings.find((listing) => listing.relic_type === selectedListingId) ?? filteredListings[0] ?? relicListings[0] ?? null;
@@ -346,7 +346,57 @@ export function MarketPage({ heroes, economy, token, demoMode = false, onEconomy
 
   async function handleTrade(side: 'buy' | 'sell') {
     if (!selectedListing) return;
-    if (!token || demoMode) {
+    if (demoMode) {
+      const totalPrice = side === 'buy' ? buyTotal : sellTotal;
+      const ownedAmount = selectedListing.owned_amount;
+      if (side === 'buy' && walletDust < totalPrice) {
+        setError('Insufficient sandbox Dust.');
+        return;
+      }
+      if (side === 'sell' && ownedAmount < safeQuantity) {
+        setError('Not enough relics in the sandbox inventory.');
+        return;
+      }
+      setBusySide(side);
+      setError(null);
+      setMessage(null);
+      const timestamp = new Date().toISOString();
+      const delta = side === 'buy' ? safeQuantity : -safeQuantity;
+      const dustDelta = side === 'buy' ? -totalPrice : totalPrice;
+      const base = economy;
+      if (!base?.wallet) {
+        setError('Sandbox economy is unavailable.');
+        setBusySide(null);
+        return;
+      }
+      const matchingRelic = base.relics.find((relic) => relic.relic_type === selectedListing.relic_type);
+      const nextRelics = matchingRelic
+        ? base.relics.map((relic) => relic.relic_type === selectedListing.relic_type ? { ...relic, amount: Math.max(0, relic.amount + delta), updated_at: timestamp } : relic)
+        : [...base.relics, { user_id: base.wallet.user_id, relic_type: selectedListing.relic_type, amount: Math.max(0, delta), created_at: timestamp, updated_at: timestamp }];
+      const nextDust = Math.max(0, base.wallet.dust_balance + dustDelta);
+      onEconomyChange?.({
+        ...base,
+        wallet: { ...base.wallet, dust_balance: nextDust, updated_at: timestamp },
+        relics: nextRelics,
+        transactions: [{
+          id: `mock-market-${Date.now()}`,
+          resource_type: 'dust',
+          delta: dustDelta,
+          balance_after: nextDust,
+          reason: side === 'buy' ? 'market_buy_relic' : 'market_sell_relic',
+          metadata: { relic_type: selectedListing.relic_type, quantity: safeQuantity, total_price: totalPrice },
+          created_at: timestamp,
+        }, ...base.transactions],
+      });
+      setMessage(
+        side === 'buy'
+          ? `Purchased ${safeQuantity} ${selectedListing.display_name} for ${formatNumber(totalPrice)} sandbox Dust.`
+          : `Sold ${safeQuantity} ${selectedListing.display_name} for ${formatNumber(totalPrice)} sandbox Dust.`
+      );
+      setBusySide(null);
+      return;
+    }
+    if (!token) {
       setError('Market trading requires a live player session.');
       return;
     }
@@ -378,6 +428,7 @@ export function MarketPage({ heroes, economy, token, demoMode = false, onEconomy
         title="Market"
         eyebrow="Exchange"
         subtitle="Relic & Broker Board"
+        titleClassName="xl:w-[421px] xl:tracking-[0.2em]"
         description="The board is now sourced from the backend. Frontend filtering stays local, but pricing, depth, featured windows, broker offers, and tape are all server-authored."
         stats={
           <>
@@ -419,7 +470,7 @@ export function MarketPage({ heroes, economy, token, demoMode = false, onEconomy
 
           <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-4 text-[10px] uppercase tracking-[0.18em] text-stone-600">
             <span>{filteredListings.length} listings visible</span>
-            <span>{demoMode ? 'Demo market is read-only.' : 'System market settles directly in dust.'}</span>
+            <span>{demoMode ? 'Sandbox market settles locally in Dust.' : 'System market settles directly in dust.'}</span>
           </div>
 
           {boardError && !board && (
@@ -510,7 +561,7 @@ export function MarketPage({ heroes, economy, token, demoMode = false, onEconomy
                 <div className="mt-5 grid grid-cols-2 gap-3">
                   <button
                     type="button"
-                    disabled={busySide !== null || demoMode || !token || walletDust < buyTotal}
+                    disabled={busySide !== null || (!demoMode && !token) || walletDust < buyTotal}
                     onClick={() => void handleTrade('buy')}
                     className="border border-[#b49664]/45 bg-[#b49664]/10 px-3 py-3 text-[10px] uppercase tracking-[0.18em] text-stone-100 transition hover:border-[#f0d8ad]/70 hover:bg-[#b49664]/16 disabled:cursor-not-allowed disabled:opacity-45"
                   >
@@ -518,7 +569,7 @@ export function MarketPage({ heroes, economy, token, demoMode = false, onEconomy
                   </button>
                   <button
                     type="button"
-                    disabled={busySide !== null || demoMode || !token || selectedListing.owned_amount < safeQuantity}
+                    disabled={busySide !== null || (!demoMode && !token) || selectedListing.owned_amount < safeQuantity}
                     onClick={() => void handleTrade('sell')}
                     className="border border-white/10 bg-black/40 px-3 py-3 text-[10px] uppercase tracking-[0.18em] text-stone-300 transition hover:border-stone-500 hover:text-stone-100 disabled:cursor-not-allowed disabled:opacity-45"
                   >

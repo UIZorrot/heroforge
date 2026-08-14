@@ -1,4 +1,5 @@
 import type {
+  AgentAccessKey,
   AuthUser,
   BattleHistoryRecord,
   BattleResult,
@@ -8,6 +9,7 @@ import type {
   BattleSessionAction,
   BattleSessionSnapshot,
   CharacterData,
+  CreateAgentAccessKeyResponse,
   HeroHistoryRecord,
   LadderSnapshot,
   LoginCodeResponse,
@@ -148,6 +150,31 @@ export async function logout(token?: string | null): Promise<void> {
     token
   );
   clearStoredSession();
+}
+
+export async function fetchAgentAccessKeys(token?: string | null): Promise<AgentAccessKey[]> {
+  const payload = await requestJson<{ data: AgentAccessKey[] }>('/api/me/agent-keys', { method: 'GET' }, token);
+  return payload.data ?? [];
+}
+
+export async function createAgentAccessKey(name: string, token?: string | null): Promise<CreateAgentAccessKeyResponse> {
+  const payload = await requestJson<{ data: CreateAgentAccessKeyResponse }>(
+    '/api/me/agent-keys',
+    { method: 'POST', body: JSON.stringify({ name }) },
+    token
+  );
+  if (!payload.data?.secret || !payload.data?.key) throw new Error('Agent key response is incomplete');
+  return payload.data;
+}
+
+export async function revokeAgentAccessKey(keyId: string, token?: string | null): Promise<AgentAccessKey> {
+  const payload = await requestJson<{ data: AgentAccessKey }>(
+    `/api/me/agent-keys/${encodeURIComponent(keyId)}`,
+    { method: 'DELETE' },
+    token
+  );
+  if (!payload.data) throw new Error('Agent key revoke response is incomplete');
+  return payload.data;
 }
 
 export async function fetchHeroes(token?: string | null): Promise<HeroHistoryRecord[]> {

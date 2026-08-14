@@ -98,14 +98,14 @@ function normalizeToken(value: unknown, fallback = ''): string {
 
 function inferTypeCatalog(type: string): 'proj' | 'instant' {
   const token = normalizeToken(type, 'flesh');
-  if (token === 'weapon' || token === 'flesh' || token === 'slash' || token === 'claw') return 'instant';
+  if (token === 'weapon' || token === 'flesh' || token === 'claw') return 'instant';
   return 'proj';
 }
 
 function inferTypeEffect(type: string, catalog: string): string {
   const token = normalizeToken(type, 'flesh');
   if (catalog === 'instant') {
-    if (token === 'weapon') return 'slash';
+    if (token === 'weapon') return 'strike';
     if (token === 'flesh') return 'claw';
   }
   if (catalog === 'proj' && token === 'weapon') return 'arrow';

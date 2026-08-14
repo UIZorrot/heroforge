@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import secrets
+import threading
 import warnings
 from functools import wraps
 from datetime import datetime, timezone
@@ -21,7 +22,15 @@ warnings.filterwarnings(
 from google import genai
 from google.genai import types
 
-from auth import create_login_code, get_user_from_token, revoke_session, verify_login_code
+from auth import (
+    create_agent_api_key,
+    create_login_code,
+    get_principal_from_token,
+    list_agent_api_keys,
+    revoke_agent_api_key,
+    revoke_session,
+    verify_login_code,
+)
 from config import get_settings
 from db import (
     adjust_dust_balance,
@@ -45,6 +54,8 @@ from battle_logic import run_auto_duel, run_team_duel
 import battle_sessions
 
 settings = get_settings()
+PVP_SESSION_SETTLEMENT_LOCK = threading.RLock()
+PVP_BATTLE_SESSION_IDS: set[str] = set()
 
 app = Flask(__name__)
 CORS(app, resources={r"/api/*": {"origins": "*"}})
@@ -327,7 +338,34 @@ def get_bearer_token():
 
 
 def current_user():
-    return get_user_from_token(get_bearer_token())
+    cached = getattr(request, "current_user", None)
+    if cached:
+        return cached
+    return get_principal_from_token(get_bearer_token())
+
+
+def _agent_scope_for_request():
+    path = request.path
+    method = request.method.upper()
+    if method == "GET" and path == "/api/me/heroes":
+        return "collection:read"
+    if method == "GET" and path == "/api/me/economy":
+        return "economy:read"
+    if path in {"/api/pvp/join", "/api/pvp/cancel", "/api/economy/pvp-entry"} and method == "POST":
+        return "arena:queue"
+    if path.startswith("/api/pvp/entries/") and method in {"GET", "DELETE", "POST"}:
+        return "arena:queue"
+    if path in {"/api/battle", "/api/battle/team"} and method == "POST":
+        return "battle:create"
+    if path == "/api/battle/sessions" and method == "POST":
+        return "battle:create"
+    if path.startswith("/api/battle/sessions/") and method == "GET":
+        return "battle:read"
+    if path.startswith("/api/battle/sessions/") and path.endswith("/actions") and method == "POST":
+        return "battle:act"
+    if method == "GET" and path == "/api/me/battles":
+        return "battle:read"
+    return None
 
 
 def auth_required(fn):
@@ -336,6 +374,24 @@ def auth_required(fn):
         user = current_user()
         if not user:
             return jsonify({"error": "Authentication required"}), 401
+        if user.get("auth_type") == "agent_key":
+            required_scope = _agent_scope_for_request()
+            if not required_scope or required_scope not in user.get("scopes", []):
+                return jsonify({"error": "This Agent key is not allowed to access this endpoint"}), 403
+        request.current_user = user
+        return fn(*args, **kwargs)
+
+    return wrapper
+
+
+def session_required(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        user = current_user()
+        if not user:
+            return jsonify({"error": "Authentication required"}), 401
+        if user.get("auth_type") != "session":
+            return jsonify({"error": "A browser session is required for key management"}), 403
         request.current_user = user
         return fn(*args, **kwargs)
 
@@ -1301,6 +1357,106 @@ def _resolve_pvp_match(match_row, entry_a, entry_b, battle_result):
     }
 
 
+def _fetch_pvp_match(match_id):
+    return fetch_one(
+        """
+        SELECT id, queue_key, battle_mode, entry_a_id, entry_b_id, user_a_id, user_b_id,
+               stake_dust, bp_a, bp_b, bp_gap_pct, status, battle_payload, battle_result,
+               formation_a, formation_b, reward_payload, card_state_changes,
+               battle_session_id, battle_id, winner_user_id, winner_side, created_at, resolved_at
+        FROM pvp_matches
+        WHERE id = %s
+        """,
+        (match_id,),
+    )
+
+
+def _fetch_pvp_match_entries(match_row):
+    entry_a = fetch_one(
+        """
+        SELECT id, user_id, queue_key, battle_mode, stake_dust, bp_value, status, team_snapshot,
+               formation_snapshot, opponent_entry_id, match_id, expires_at, matched_at, cancelled_at, created_at
+        FROM pvp_queue_entries
+        WHERE id = %s
+        """,
+        (match_row["entry_a_id"],),
+    )
+    entry_b = fetch_one(
+        """
+        SELECT id, user_id, queue_key, battle_mode, stake_dust, bp_value, status, team_snapshot,
+               formation_snapshot, opponent_entry_id, match_id, expires_at, matched_at, cancelled_at, created_at
+        FROM pvp_queue_entries
+        WHERE id = %s
+        """,
+        (match_row["entry_b_id"],),
+    )
+    if not entry_a or not entry_b:
+        raise ValueError("PvP match entries are missing")
+    return normalize_json_value(entry_a), normalize_json_value(entry_b)
+
+
+def _sync_pvp_match_session(match_id):
+    """Return the live session snapshot and settle a completed formal match once."""
+    with PVP_SESSION_SETTLEMENT_LOCK:
+        match_row = _fetch_pvp_match(match_id)
+        if not match_row:
+            return None, None
+
+        session_id = str(match_row.get("battle_session_id") or "").strip()
+        session = battle_sessions.get_battle_session(session_id) if session_id else None
+        session_snapshot = session.public_snapshot() if session else None
+        if not session_snapshot or session_snapshot.get("status") != "resolved" or not session_snapshot.get("result"):
+            return normalize_json_value(match_row), session_snapshot
+
+        if match_row.get("status") == "resolved":
+            return normalize_json_value(match_row), session_snapshot
+
+        entry_a, entry_b = _fetch_pvp_match_entries(match_row)
+        _resolve_pvp_match(match_row, entry_a, entry_b, session_snapshot["result"])
+        return normalize_json_value(_fetch_pvp_match(match_id) or match_row), session_snapshot
+
+
+def _pvp_match_for_session(session_id):
+    if session_id not in PVP_BATTLE_SESSION_IDS:
+        return None
+    return fetch_one(
+        """
+        SELECT id, user_a_id, user_b_id, status, battle_session_id
+        FROM pvp_matches
+        WHERE battle_session_id = %s
+        ORDER BY created_at DESC
+        LIMIT 1
+        """,
+        (session_id,),
+    )
+
+
+def _sync_pvp_match_session_by_session_id(session_id):
+    match_row = _pvp_match_for_session(session_id)
+    if not match_row:
+        return None, None
+    return _sync_pvp_match_session(match_row["id"])
+
+
+def _assert_pvp_session_access(session_id, user, action=None):
+    match_row = _pvp_match_for_session(session_id)
+    if not match_row:
+        return None
+
+    user_id = str(user["id"])
+    if user_id == str(match_row["user_a_id"]):
+        side = "A"
+    elif user_id == str(match_row["user_b_id"]):
+        side = "B"
+    else:
+        raise PermissionError("You are not a participant in this Arena battle")
+
+    actor_tag = str((action or {}).get("actorTag") or "").strip()
+    if actor_tag and not actor_tag.startswith(side):
+        raise PermissionError("An Agent may only submit actions for its own Arena side")
+    return match_row
+
+
 def _join_pvp_queue(user, data, require_team_payload: bool = False):
     queue_key = _normalize_pvp_queue_key(data.get("queueKey") or data.get("queue_key"))
     formation_snapshot = {}
@@ -1327,145 +1483,200 @@ def _join_pvp_queue(user, data, require_team_payload: bool = False):
     team_snapshot, total_bp = _load_pvp_team_snapshot(user, hero_ids, battle_mode, formation=formation)
     if total_bp <= 0:
         raise ValueError("Arena team BP must be greater than 0")
-    stake_dust = settings.pvp_stake_dust
 
-    stake_row = adjust_dust_balance(
-        user["id"],
-        -stake_dust,
-        "pvp_stake",
-        ref_type="pvp_queue",
-            metadata={"queue_key": queue_key, "battle_mode": battle_mode, "hero_ids": hero_ids, "bp_value": total_bp, "formation": formation_snapshot},
+    # One account owns one live queue at a time.  Without this guard an agent
+    # could reserve multiple rosters, pay several stakes, and only observe the
+    # latest entry in its client state.
+    active_entry = fetch_one(
+        """
+        SELECT id
+        FROM pvp_queue_entries
+        WHERE user_id = %s
+          AND status = 'waiting'
+          AND expires_at > now()
+        ORDER BY created_at DESC
+        LIMIT 1
+        """,
+        (user["id"],),
     )
+    if active_entry:
+        raise ValueError("You are already searching for an Arena opponent. Cancel the active queue first.")
 
+    stake_dust = settings.pvp_stake_dust
+    stake_charged = False
     queue_entry = None
     opponent_entry = None
     match_row = None
 
     tolerance_pct = max(0, int(settings.pvp_match_tolerance_pct))
+    try:
+        adjust_dust_balance(
+            user["id"],
+            -stake_dust,
+            "pvp_stake",
+            ref_type="pvp_queue",
+            metadata={"queue_key": queue_key, "battle_mode": battle_mode, "hero_ids": hero_ids, "bp_value": total_bp, "formation": formation_snapshot},
+        )
+        stake_charged = True
 
-    with get_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                INSERT INTO pvp_queue_entries (
-                    user_id, queue_key, battle_mode, stake_dust, bp_value, team_snapshot, formation_snapshot, expires_at
-                )
-                VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, now() + (%s || ' minutes')::interval)
-                RETURNING id, user_id, queue_key, battle_mode, stake_dust, bp_value, status, team_snapshot, formation_snapshot, opponent_entry_id, match_id, expires_at, matched_at, cancelled_at, created_at
-                """,
-                (
-                    user["id"],
-                    queue_key,
-                    battle_mode,
-                    int(stake_dust),
-                    int(total_bp),
-                    serialize_json({"hero_ids": hero_ids, "team": team_snapshot, "total_bp": total_bp}),
-                    serialize_json(formation_snapshot),
-                    settings.pvp_queue_ttl_minutes,
-                ),
-            )
-            queue_entry = cur.fetchone()
-            lock_placeholders = ",".join(["%s"] * len(hero_ids))
-            cur.execute(
-                f"""
-                UPDATE heroes
-                SET active_pvp_entry_id = %s
-                WHERE user_id = %s
-                  AND id IN ({lock_placeholders})
-                  AND active_pvp_entry_id IS NULL
-                RETURNING id
-                """,
-                (queue_entry["id"], user["id"], *hero_ids),
-            )
-            locked_rows = cur.fetchall()
-            if len(locked_rows) != len(hero_ids):
-                raise ValueError("This card is already queued.")
-
-            cur.execute(
-                """
-                SELECT id, user_id, queue_key, battle_mode, stake_dust, bp_value, status, team_snapshot, formation_snapshot, opponent_entry_id, match_id, expires_at, matched_at, cancelled_at, created_at
-                FROM pvp_queue_entries
-                WHERE queue_key = %s
-                  AND battle_mode = %s
-                  AND status = 'waiting'
-                  AND user_id <> %s
-                  AND expires_at > now()
-                  AND ABS(bp_value - %s) <= LEAST(bp_value, %s) * (%s / 100.0)
-                ORDER BY ABS(bp_value - %s) ASC, created_at ASC
-                FOR UPDATE SKIP LOCKED
-                LIMIT 1
-                """,
-                (
-                    queue_key,
-                    battle_mode,
-                    user["id"],
-                    int(total_bp),
-                    max(int(total_bp), 1),
-                    tolerance_pct,
-                    int(total_bp),
-                ),
-            )
-            opponent_entry = cur.fetchone()
-
-            if opponent_entry:
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                # Serialize joins for this account. The optimistic read above
+                # keeps the common rejection cheap; this lock closes the race
+                # when two agent workers submit different formations together.
+                cur.execute("SELECT id FROM users WHERE id = %s FOR UPDATE", (user["id"],))
                 cur.execute(
                     """
-                    UPDATE pvp_queue_entries
-                    SET status = 'matched',
-                        matched_at = now(),
-                        opponent_entry_id = %s
-                    WHERE id = %s
+                    SELECT id
+                    FROM pvp_queue_entries
+                    WHERE user_id = %s
+                      AND status = 'waiting'
+                      AND expires_at > now()
+                    ORDER BY created_at DESC
+                    LIMIT 1
                     """,
-                    (opponent_entry["id"], queue_entry["id"]),
+                    (user["id"],),
                 )
+                if cur.fetchone():
+                    raise ValueError("You are already searching for an Arena opponent. Cancel the active queue first.")
+
                 cur.execute(
                     """
-                    UPDATE pvp_queue_entries
-                    SET status = 'matched',
-                        matched_at = now(),
-                        opponent_entry_id = %s
-                    WHERE id = %s
+                    INSERT INTO pvp_queue_entries (
+                        user_id, queue_key, battle_mode, stake_dust, bp_value, team_snapshot, formation_snapshot, expires_at
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, now() + (%s || ' minutes')::interval)
+                    RETURNING id, user_id, queue_key, battle_mode, stake_dust, bp_value, status, team_snapshot, formation_snapshot, opponent_entry_id, match_id, expires_at, matched_at, cancelled_at, created_at
                     """,
-                    (queue_entry["id"], opponent_entry["id"]),
+                    (
+                        user["id"],
+                        queue_key,
+                        battle_mode,
+                        int(stake_dust),
+                        int(total_bp),
+                        serialize_json({"hero_ids": hero_ids, "team": team_snapshot, "total_bp": total_bp}),
+                        serialize_json(formation_snapshot),
+                        settings.pvp_queue_ttl_minutes,
+                    ),
                 )
+                queue_entry = cur.fetchone()
+                lock_placeholders = ",".join(["%s"] * len(hero_ids))
+                cur.execute(
+                    f"""
+                    UPDATE heroes
+                    SET active_pvp_entry_id = %s
+                    WHERE user_id = %s
+                      AND id IN ({lock_placeholders})
+                      AND active_pvp_entry_id IS NULL
+                    RETURNING id
+                    """,
+                    (queue_entry["id"], user["id"], *hero_ids),
+                )
+                locked_rows = cur.fetchall()
+                if len(locked_rows) != len(hero_ids):
+                    raise ValueError("This card is already queued.")
+
                 cur.execute(
                     """
-                    INSERT INTO pvp_matches (
-                        queue_key, battle_mode, entry_a_id, entry_b_id,
-                        user_a_id, user_b_id, stake_dust, bp_a, bp_b, bp_gap_pct,
-                        status, battle_payload, formation_a, formation_b
-                    )
-                    VALUES (
-                        %s, %s, %s, %s,
-                        %s, %s, %s, %s, %s, %s,
-                        'created', %s::jsonb, %s::jsonb, %s::jsonb
-                    )
-                    RETURNING id, queue_key, battle_mode, entry_a_id, entry_b_id, user_a_id, user_b_id, stake_dust, bp_a, bp_b, bp_gap_pct, status, battle_payload, battle_result, formation_a, formation_b, reward_payload, card_state_changes, battle_id, winner_user_id, winner_side, created_at, resolved_at
+                    SELECT id, user_id, queue_key, battle_mode, stake_dust, bp_value, status, team_snapshot, formation_snapshot, opponent_entry_id, match_id, expires_at, matched_at, cancelled_at, created_at
+                    FROM pvp_queue_entries
+                    WHERE queue_key = %s
+                      AND battle_mode = %s
+                      AND status = 'waiting'
+                      AND user_id <> %s
+                      AND expires_at > now()
+                      AND ABS(bp_value - %s) <= LEAST(bp_value, %s) * (%s / 100.0)
+                    ORDER BY ABS(bp_value - %s) ASC, created_at ASC
+                    FOR UPDATE SKIP LOCKED
+                    LIMIT 1
                     """,
                     (
                         queue_key,
                         battle_mode,
-                        opponent_entry["id"],
-                        queue_entry["id"],
-                        opponent_entry["user_id"],
                         user["id"],
-                        int(stake_dust),
-                        int(opponent_entry["bp_value"]),
-                        int(queue_entry["bp_value"]),
-                        round(abs(int(opponent_entry["bp_value"]) - int(queue_entry["bp_value"])) / max(min(int(opponent_entry["bp_value"]), int(queue_entry["bp_value"])), 1) * 100, 2),
-                        serialize_json(
-                            {
-                                "queue_key": queue_key,
-                                "battle_mode": battle_mode,
-                                "tolerance_pct": tolerance_pct,
-                            }
-                        ),
-                        serialize_json(normalize_json_value(opponent_entry.get("formation_snapshot") or {})),
-                        serialize_json(normalize_json_value(queue_entry.get("formation_snapshot") or {})),
+                        int(total_bp),
+                        max(int(total_bp), 1),
+                        tolerance_pct,
+                        int(total_bp),
                     ),
                 )
-                match_row = cur.fetchone()
-        conn.commit()
+                opponent_entry = cur.fetchone()
+
+                if opponent_entry:
+                    cur.execute(
+                        """
+                        UPDATE pvp_queue_entries
+                        SET status = 'matched',
+                            matched_at = now(),
+                            opponent_entry_id = %s
+                        WHERE id = %s
+                        """,
+                        (opponent_entry["id"], queue_entry["id"]),
+                    )
+                    cur.execute(
+                        """
+                        UPDATE pvp_queue_entries
+                        SET status = 'matched',
+                            matched_at = now(),
+                            opponent_entry_id = %s
+                        WHERE id = %s
+                        """,
+                        (queue_entry["id"], opponent_entry["id"]),
+                    )
+                    cur.execute(
+                        """
+                        INSERT INTO pvp_matches (
+                            queue_key, battle_mode, entry_a_id, entry_b_id,
+                            user_a_id, user_b_id, stake_dust, bp_a, bp_b, bp_gap_pct,
+                            status, battle_payload, formation_a, formation_b
+                        )
+                        VALUES (
+                            %s, %s, %s, %s,
+                            %s, %s, %s, %s, %s, %s,
+                            'created', %s::jsonb, %s::jsonb, %s::jsonb
+                        )
+                        RETURNING id, queue_key, battle_mode, entry_a_id, entry_b_id, user_a_id, user_b_id, stake_dust, bp_a, bp_b, bp_gap_pct, status, battle_payload, battle_result, formation_a, formation_b, reward_payload, card_state_changes, battle_id, winner_user_id, winner_side, created_at, resolved_at
+                        """,
+                        (
+                            queue_key,
+                            battle_mode,
+                            opponent_entry["id"],
+                            queue_entry["id"],
+                            opponent_entry["user_id"],
+                            user["id"],
+                            int(stake_dust),
+                            int(opponent_entry["bp_value"]),
+                            int(queue_entry["bp_value"]),
+                            round(abs(int(opponent_entry["bp_value"]) - int(queue_entry["bp_value"])) / max(min(int(opponent_entry["bp_value"]), int(queue_entry["bp_value"])), 1) * 100, 2),
+                            serialize_json(
+                                {
+                                    "queue_key": queue_key,
+                                    "battle_mode": battle_mode,
+                                    "tolerance_pct": tolerance_pct,
+                                }
+                            ),
+                            serialize_json(normalize_json_value(opponent_entry.get("formation_snapshot") or {})),
+                            serialize_json(normalize_json_value(queue_entry.get("formation_snapshot") or {})),
+                        ),
+                    )
+                    match_row = cur.fetchone()
+            conn.commit()
+    except Exception:
+        # The wallet write is intentionally separate from the queue transaction.
+        # Any validation, locking, or insert failure before a match exists must
+        # restore the stake; otherwise a failed click silently burns Dust.
+        if stake_charged and match_row is None:
+            try:
+                adjust_dust_balance(
+                    user["id"],
+                    int(stake_dust),
+                    "pvp_queue_join_refund",
+                    ref_type="pvp_queue",
+                    metadata={"queue_key": queue_key, "battle_mode": battle_mode, "reason": "queue_join_failed"},
+                )
+            except Exception:
+                logging.exception("Failed to refund Arena stake after queue join failure")
+        raise
 
     _safe_record_daily_task_progress(user["id"], "enter_arena_once")
 
@@ -1487,25 +1698,37 @@ def _join_pvp_queue(user, data, require_team_payload: bool = False):
     label_b = "Player B"
 
     try:
-        battle_result = run_team_duel(
-            [item["hero_payload"] for item in team_a],
-            [item["hero_payload"] for item in team_b],
-            battle_mode,
-            label_a,
-            label_b,
+        session = battle_sessions.create_battle_session(
+            battle_mode=battle_mode,
+            control_mode="rest",
+            label_a=label_a,
+            label_b=label_b,
+            team_a=[item["hero_payload"] for item in team_a],
+            team_b=[item["hero_payload"] for item in team_b],
+            wait_seconds=max(1, min(60, int(settings.pvp_battle_session_wait_seconds))),
         )
-        resolved = _resolve_pvp_match(match_row, entry_a, entry_b, battle_result)
-        updated_match_row = fetch_one(
+        PVP_BATTLE_SESSION_IDS.add(session.session_id)
+        execute(
             """
-            SELECT id, queue_key, battle_mode, entry_a_id, entry_b_id, user_a_id, user_b_id,
-                   stake_dust, bp_a, bp_b, bp_gap_pct, status, battle_payload, battle_result,
-                   formation_a, formation_b, reward_payload, card_state_changes,
-                   battle_id, winner_user_id, winner_side, created_at, resolved_at
-            FROM pvp_matches
+            UPDATE pvp_matches
+            SET status = 'running',
+                battle_session_id = %s,
+                battle_payload = battle_payload || %s::jsonb
             WHERE id = %s
             """,
-            (match_row["id"],),
+            (
+                session.session_id,
+                serialize_json(
+                    {
+                        "battle_session_id": session.session_id,
+                        "control_mode": "rest",
+                        "wait_seconds": session.wait_seconds,
+                    }
+                ),
+                match_row["id"],
+            ),
         )
+        updated_match_row = _fetch_pvp_match(match_row["id"])
         battle_payload = {
             "queue_key": queue_key,
             "battle_mode": battle_mode,
@@ -1513,30 +1736,23 @@ def _join_pvp_queue(user, data, require_team_payload: bool = False):
             "entry_b": entry_b,
             "match_id": str(match_row["id"]),
             "stake_dust": int(stake_dust),
+            "battle_session_id": session.session_id,
         }
-        result = {
+        return {
             "status": "matched",
             "entry": normalize_json_value(queue_entry),
             "opponent": normalize_json_value(opponent_entry),
             "match": normalize_json_value(updated_match_row or match_row),
-            "battle": normalize_json_value(resolved["battle"]),
-            "battle_record_a": normalize_json_value(resolved["battleRowA"]) if resolved["battleRowA"] else None,
-            "battle_record_b": normalize_json_value(resolved["battleRowB"]) if resolved["battleRowB"] else None,
+            "battle": None,
+            "battle_session": session.public_snapshot(),
             "battle_payload": battle_payload,
-            "reward": normalize_json_value(resolved["reward_payload"]),
-            "card_state_changes": normalize_json_value(resolved["card_state_changes"]),
+            "reward": None,
+            "card_state_changes": [],
             "economy": economy_snapshot(user),
-            "winner_side": resolved["winner_side"],
+            "winner_side": None,
         }
-        if isinstance(result["battle"], dict):
-            battle_payload_result = result["battle"]
-            details = battle_payload_result.get("details")
-            if isinstance(details, dict):
-                battle_payload_result.setdefault("winner", details.get("winner"))
-                battle_payload_result.setdefault("winnerLabel", details.get("winnerLabel"))
-        return result
     except Exception as exc:
-        logging.exception("PvP match resolution failed")
+        logging.exception("Failed to create PvP battle session")
         try:
             adjust_dust_balance(
                 str(queue_entry["user_id"]),
@@ -1630,6 +1846,40 @@ def auth_me():
 def auth_logout():
     revoke_session(get_bearer_token())
     return jsonify({"ok": True})
+
+
+@app.route("/api/me/agent-keys", methods=["GET"])
+@session_required
+def me_agent_keys():
+    return jsonify({"data": list_agent_api_keys(current_user()["id"])})
+
+
+@app.route("/api/me/agent-keys", methods=["POST"])
+@session_required
+def create_me_agent_key():
+    try:
+        data = request.json or {}
+        result = create_agent_api_key(current_user()["id"], str(data.get("name") or ""))
+        return jsonify({"data": result}), 201
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception as exc:
+        logging.exception("Failed to create Agent key")
+        return jsonify({"error": "Failed to create Agent key"}), 500
+
+
+@app.route("/api/me/agent-keys/<key_id>", methods=["DELETE"])
+@session_required
+def revoke_me_agent_key(key_id):
+    try:
+        UUID(str(key_id))
+        key = revoke_agent_api_key(current_user()["id"], key_id)
+        return jsonify({"ok": True, "data": key})
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception as exc:
+        logging.exception("Failed to revoke Agent key")
+        return jsonify({"error": "Failed to revoke Agent key"}), 500
 
 
 @app.route("/api/me/economy", methods=["GET"])
@@ -1931,7 +2181,11 @@ def get_battle_session_route(session_id):
         session = battle_sessions.get_battle_session(session_id)
         if not session:
             return jsonify({"error": "Battle session not found"}), 404
+        _assert_pvp_session_access(session_id, current_user())
+        _sync_pvp_match_session_by_session_id(session_id)
         return jsonify({"data": session.public_snapshot()})
+    except PermissionError as e:
+        return jsonify({"error": str(e)}), 403
     except Exception as e:
         logging.exception(e)
         return jsonify({"error": str(e)}), 500
@@ -1951,27 +2205,33 @@ def advance_battle_session_route(session_id):
         if not isinstance(action, dict):
             return jsonify({"error": "action is required"}), 400
 
+        pvp_match = _assert_pvp_session_access(session_id, current_user(), action)
         snapshot = session.submit_action(action)
         if snapshot.get("status") == "resolved":
-            try:
-                save_battle_history(
-                    current_user(),
-                    f"battle_session_{session.battle_mode}",
-                    {
-                        "sessionId": session.session_id,
-                        "battleMode": session.battle_mode,
-                        "controlMode": session.control_mode,
-                        "labelA": session.label_a,
-                        "labelB": session.label_b,
-                        "teamA": session.team_a_payload,
-                        "teamB": session.team_b_payload,
-                    },
-                    session.result,
-                )
-            except Exception:
-                logging.exception("Failed to persist battle session history")
+            if pvp_match:
+                _sync_pvp_match_session(pvp_match["id"])
+            else:
+                try:
+                    save_battle_history(
+                        current_user(),
+                        f"battle_session_{session.battle_mode}",
+                        {
+                            "sessionId": session.session_id,
+                            "battleMode": session.battle_mode,
+                            "controlMode": session.control_mode,
+                            "labelA": session.label_a,
+                            "labelB": session.label_b,
+                            "teamA": session.team_a_payload,
+                            "teamB": session.team_b_payload,
+                        },
+                        session.result,
+                    )
+                except Exception:
+                    logging.exception("Failed to persist battle session history")
 
         return jsonify({"data": snapshot})
+    except PermissionError as e:
+        return jsonify({"error": str(e)}), 403
     except battle_sessions.BattleSessionError as e:
         return jsonify({"error": str(e)}), 409
     except Exception as e:
@@ -2223,6 +2483,7 @@ def pvp_join():
 @auth_required
 def pvp_entry_status(entry_id):
     user = current_user()
+    battle_sessions.advance_due_sessions()
     entry = fetch_one(
         """
         SELECT id, user_id, queue_key, battle_mode, stake_dust, bp_value, status, team_snapshot,
@@ -2270,7 +2531,7 @@ def pvp_entry_status(entry_id):
         SELECT id, queue_key, battle_mode, entry_a_id, entry_b_id, user_a_id, user_b_id,
                stake_dust, bp_a, bp_b, bp_gap_pct, status, battle_payload, battle_result,
                formation_a, formation_b, reward_payload, card_state_changes,
-               battle_id, winner_user_id, winner_side, created_at, resolved_at
+               battle_session_id, battle_id, winner_user_id, winner_side, created_at, resolved_at
         FROM pvp_matches
         WHERE entry_a_id = %s OR entry_b_id = %s
         ORDER BY created_at DESC
@@ -2278,9 +2539,10 @@ def pvp_entry_status(entry_id):
         """,
         (entry["id"], entry["id"]),
     )
+    battle_session = None
     if match:
-        match = normalize_json_value(match)
-    return jsonify({"ok": True, "entry": entry, "match": match})
+        match, battle_session = _sync_pvp_match_session(match["id"])
+    return jsonify({"ok": True, "entry": entry, "match": match, "battle_session": battle_session})
 
 
 @app.route("/api/pvp/cancel", methods=["POST"])
@@ -2984,7 +3246,7 @@ def list_my_battles():
     user = current_user()
     rows = fetch_all(
         """
-        SELECT id, battle_type, result, created_at
+        SELECT id, battle_type, payload, result, created_at
         FROM battles
         WHERE user_id = %s
         ORDER BY created_at DESC

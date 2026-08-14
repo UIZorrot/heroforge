@@ -176,6 +176,20 @@ def _board_hero(
     }
 
 
+def _resolve_pvp_session_with_program(harness, headers: Dict[str, str], entry_id: str, session_id: str):
+    import battle_sessions
+
+    session = battle_sessions.get_battle_session(session_id)
+    assert session is not None
+    for _ in range(160):
+        if session.status == "resolved":
+            break
+        assert session.waiting_until_ms is not None
+        assert session.auto_advance_due(now_ms=session.waiting_until_ms + 1) is True
+    assert session.status == "resolved"
+    return harness.pvp_entry_status(headers, entry_id)
+
+
 @pytest.mark.integration
 def test_auth_login_and_initial_economy(harness):
     email = "integration-auth@example.com"
@@ -200,6 +214,46 @@ def test_auth_login_and_initial_economy(harness):
     unauthorized = harness.client.get("/api/me/economy")
     harness.trace("economy-unauthorized", unauthorized)
     assert unauthorized.status_code == 401
+
+
+@pytest.mark.integration
+def test_agent_key_can_read_roster_and_is_revocable(harness):
+    session_headers = harness.login("integration-agent-key@example.com")
+
+    created = harness.client.post("/api/me/agent-keys", headers=session_headers, json={"name": "Arena Strategist"})
+    harness.trace("agent-key-create", created)
+    assert created.status_code == 201
+    payload = created.get_json()["data"]
+    agent_key = payload["secret"]
+    key_record = payload["key"]
+    assert agent_key.startswith("hf_agent_")
+    assert key_record["name"] == "Arena Strategist"
+    assert "battle:act" in key_record["scopes"]
+    assert "secret" not in key_record
+
+    listed = harness.client.get("/api/me/agent-keys", headers=session_headers)
+    harness.trace("agent-key-list", listed)
+    assert listed.status_code == 200
+    assert listed.get_json()["data"][0]["id"] == key_record["id"]
+    assert "secret" not in listed.get_json()["data"][0]
+
+    agent_headers = harness.headers(agent_key)
+    roster = harness.client.get("/api/me/heroes", headers=agent_headers)
+    harness.trace("agent-key-heroes", roster)
+    assert roster.status_code == 200
+
+    forbidden = harness.client.get("/api/daily/me", headers=agent_headers)
+    harness.trace("agent-key-forbidden", forbidden)
+    assert forbidden.status_code == 403
+
+    revoked = harness.client.delete(f"/api/me/agent-keys/{key_record['id']}", headers=session_headers)
+    harness.trace("agent-key-revoke", revoked)
+    assert revoked.status_code == 200
+    assert revoked.get_json()["data"]["revoked_at"]
+
+    invalid_after_revoke = harness.client.get("/api/me/heroes", headers=agent_headers)
+    harness.trace("agent-key-revoked", invalid_after_revoke)
+    assert invalid_after_revoke.status_code == 401
 
 
 @pytest.mark.integration
@@ -915,6 +969,33 @@ def test_arena_waiting_entry_locks_card_and_cancel_clears_lock(harness):
 
 
 @pytest.mark.integration
+def test_arena_rejects_second_active_queue_without_charging_again(harness):
+    headers = harness.login("integration-arena-single-queue@example.com")
+    harness.set_forge_sequence([
+        _hero_pair("First Watch", "warrior", 1000, "weapon", "Watch Cut", "Brace"),
+        _hero_pair("Second Watch", "mage", 1000, "magic", "Watch Bolt", "Ward"),
+    ])
+    harness.forge(headers, _sample_image_base64((100, 90, 130)), materials={})
+    harness.forge(headers, _sample_image_base64((90, 110, 150)), materials={})
+    hero_ids = [hero["id"] for hero in harness.heroes(headers)[:2]]
+
+    first = harness.pvp_join(headers, [hero_ids[0]], queue_key="ranked-single", battle_mode="1v1")
+    assert first["status"] == "waiting"
+
+    duplicate = harness.client.post(
+        "/api/pvp/join",
+        headers=headers,
+        json={"queueKey": "ranked-single", "heroIds": [hero_ids[1]], "battleMode": "1v1"},
+    )
+    harness.trace("arena-second-active-queue", duplicate)
+    assert duplicate.status_code == 400
+    assert "already searching" in duplicate.get_json()["error"].lower()
+
+    economy = harness.economy(headers)
+    assert economy["wallet"]["dust_balance"] == 270
+
+
+@pytest.mark.integration
 def test_forge_and_battle_persistence(harness):
     email = "integration-battle@example.com"
     headers = harness.login(email)
@@ -958,6 +1039,10 @@ def test_forge_and_battle_persistence(harness):
 
     battles = harness.battles(headers)
     assert len(battles) >= 1
+    latest_battle = battles[0]
+    assert latest_battle["payload"]["heroA"]["name"] == "Northwind"
+    assert latest_battle["payload"]["heroB"]["name"] == "Starfall"
+    assert latest_battle["result"]["events"]
 
     battle_count_row = harness.db_module.fetch_one(
         "SELECT count(*) AS count FROM battles WHERE user_id = %s",
@@ -1046,13 +1131,20 @@ def test_pvp_matchmaking_within_bp_window_and_stake_settlement(harness):
 
     join_b = harness.pvp_join(headers_b, [hero_b_id], queue_key="ranked", battle_mode="1v1")
     assert join_b["status"] == "matched"
-    assert join_b["match"]["status"] == "resolved"
-    assert join_b["battle"]["winner"] in {"Aegis", "Blitz", "Tie"}
-    assert join_b["battle"]["winnerLabel"] in {"Player A", "Player B", "Tie"}
+    assert join_b["match"]["status"] == "running"
+    assert join_b["battle"] is None
+    assert join_b["battle_session"]["status"] == "awaiting_action"
+    assert join_b["battle_session"]["activeActorTag"]
 
-    status_a = harness.pvp_entry_status(headers_a, join_a["entry"]["id"])
+    status_a = _resolve_pvp_session_with_program(
+        harness,
+        headers_a,
+        join_a["entry"]["id"],
+        join_b["battle_session"]["sessionId"],
+    )
     assert status_a["entry"]["status"] == "matched"
     assert status_a["match"]["status"] == "resolved"
+    assert status_a["match"]["battle_result"]["winnerLabel"] in {"Player A", "Player B", "Tie"}
 
     lock_a = harness.db_module.fetch_one("SELECT active_pvp_entry_id FROM heroes WHERE id = %s", (hero_a_id,))
     lock_b = harness.db_module.fetch_one("SELECT active_pvp_entry_id FROM heroes WHERE id = %s", (hero_b_id,))
@@ -1063,6 +1155,41 @@ def test_pvp_matchmaking_within_bp_window_and_stake_settlement(harness):
     economy_b = harness.economy(headers_b)
     total_dust = economy_a["wallet"]["dust_balance"] + economy_b["wallet"]["dust_balance"]
     assert total_dust == 800
+
+
+@pytest.mark.integration
+def test_arena_session_allows_only_the_active_side_agent_to_act(harness):
+    headers_a = harness.login("integration-session-side-a@example.com")
+    harness.set_forge_sequence([_hero_pair("Aster", "knight", 1000, "weapon", "Aster Cut", "Aster Guard")])
+    harness.forge(headers_a, _sample_image_base64((130, 90, 60)), materials={})
+    hero_a_id = harness.heroes(headers_a)[0]["id"]
+
+    headers_b = harness.login("integration-session-side-b@example.com")
+    harness.set_forge_sequence([_hero_pair("Brim", "rogue", 1000, "gun", "Brim Shot", "Brim Guard")])
+    harness.forge(headers_b, _sample_image_base64((60, 100, 150)), materials={})
+    hero_b_id = harness.heroes(headers_b)[0]["id"]
+
+    join_a = harness.pvp_join(headers_a, [hero_a_id], queue_key="ranked-session-access", battle_mode="1v1")
+    join_b = harness.pvp_join(headers_b, [hero_b_id], queue_key="ranked-session-access", battle_mode="1v1")
+    session = join_b["battle_session"]
+    actor_tag = session["activeActorTag"]
+    wrong_headers = headers_b if actor_tag.startswith("A") else headers_a
+    right_headers = headers_a if actor_tag.startswith("A") else headers_b
+
+    denied = harness.client.post(
+        f"/api/battle/sessions/{session['sessionId']}/actions",
+        headers=wrong_headers,
+        json={"action": {"actorTag": actor_tag, "kind": "attack"}},
+    )
+    assert denied.status_code == 403
+
+    accepted = harness.client.post(
+        f"/api/battle/sessions/{session['sessionId']}/actions",
+        headers=right_headers,
+        json={"action": {"actorTag": actor_tag, "kind": "attack"}},
+    )
+    assert accepted.status_code == 200
+    assert accepted.get_json()["data"]["lastActionSource"] == "rest"
 
 
 @pytest.mark.integration
@@ -1134,14 +1261,21 @@ def test_pvp_win_can_grant_low_tier_relic(harness, monkeypatch):
 
     join_b = harness.pvp_join(headers_b, [hero_b_id], queue_key="ranked-relic", battle_mode="1v1")
     assert join_b["status"] == "matched"
-    assert join_b["winner_side"] == "A"
-    assert join_b["reward"]["relic_drop"] is not None
-    assert join_b["reward"]["relic_drop"]["relic_type"] in get_low_tier_relic_types()
-    assert join_b["reward"]["relic_drop"]["display_name"]
-    assert join_b["reward"]["relic_drop"]["amount"] == 1
+    status_a = _resolve_pvp_session_with_program(
+        harness,
+        headers_a,
+        join_a["entry"]["id"],
+        join_b["battle_session"]["sessionId"],
+    )
+    assert status_a["match"]["winner_side"] == "A"
+    reward = status_a["match"]["reward_payload"]
+    assert reward["relic_drop"] is not None
+    assert reward["relic_drop"]["relic_type"] in get_low_tier_relic_types()
+    assert reward["relic_drop"]["display_name"]
+    assert reward["relic_drop"]["amount"] == 1
 
     economy_a = harness.economy(headers_a)
-    assert any(relic["relic_type"] == join_b["reward"]["relic_drop"]["relic_type"] and relic["amount"] == 1 for relic in economy_a["relics"])
+    assert any(relic["relic_type"] == reward["relic_drop"]["relic_type"] and relic["amount"] == 1 for relic in economy_a["relics"])
     assert any(txn["reason"] == "pvp_relic_drop" for txn in economy_a["transactions"])
 
 
@@ -1175,11 +1309,12 @@ def test_pvp_matchmaking_supports_partial_4v4_rosters(harness):
 
     join_b = harness.pvp_join(headers_b, beta_ids, queue_key="ranked-partial", battle_mode="4v4")
     assert join_b["status"] == "matched"
-    assert join_b["battle"]["winner"] in {"Player A", "Player B", "Tie"}
-    assert join_b["battle"]["board"]["topLabel"] == "Player B"
-    assert join_b["battle"]["board"]["bottomLabel"] == "Player A"
-    assert len(join_b["battle"]["board"]["top"]) == 4
-    assert len(join_b["battle"]["board"]["bottom"]) == 4
+    assert join_b["battle"] is None
+    board = join_b["battle_session"]["board"]
+    assert board["topLabel"] == "Player B"
+    assert board["bottomLabel"] == "Player A"
+    assert len(board["top"]) == 4
+    assert len(board["bottom"]) == 4
 
 
 @pytest.mark.integration

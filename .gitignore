@@ -5,11 +5,16 @@ images
 .env
 backend/.env
 backend/.env.local
+frontend/.env
 backend/test-results
 backend/.venv/
 backend/**/__pycache__/
 frontend/output/
 output/
 test-results/
+.playwright-cli/
+frontend/.playwright-cli/
+.vscode/
+artifacts/
 frontend/*-check.png
 frontend/*tile*.png

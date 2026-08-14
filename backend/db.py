@@ -47,6 +47,22 @@ CREATE TABLE IF NOT EXISTS sessions (
 
 CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
 
+CREATE TABLE IF NOT EXISTS agent_api_keys (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name text NOT NULL,
+    key_prefix text NOT NULL,
+    key_hash text NOT NULL UNIQUE,
+    scopes jsonb NOT NULL DEFAULT '[]'::jsonb,
+    expires_at timestamptz NOT NULL,
+    last_used_at timestamptz,
+    revoked_at timestamptz,
+    created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_api_keys_user_created_at ON agent_api_keys(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_agent_api_keys_hash ON agent_api_keys(key_hash);
+
 CREATE TABLE IF NOT EXISTS heroes (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id uuid REFERENCES users(id) ON DELETE SET NULL,
@@ -266,6 +282,7 @@ CREATE TABLE IF NOT EXISTS pvp_matches (
     formation_b jsonb NOT NULL DEFAULT '{}'::jsonb,
     reward_payload jsonb NOT NULL DEFAULT '{}'::jsonb,
     card_state_changes jsonb NOT NULL DEFAULT '[]'::jsonb,
+    battle_session_id text,
     battle_id uuid REFERENCES battles(id) ON DELETE SET NULL,
     winner_user_id uuid REFERENCES users(id) ON DELETE SET NULL,
     winner_side text,
@@ -336,6 +353,7 @@ ALTER TABLE pvp_matches ADD COLUMN IF NOT EXISTS formation_a jsonb NOT NULL DEFA
 ALTER TABLE pvp_matches ADD COLUMN IF NOT EXISTS formation_b jsonb NOT NULL DEFAULT '{}'::jsonb;
 ALTER TABLE pvp_matches ADD COLUMN IF NOT EXISTS reward_payload jsonb NOT NULL DEFAULT '{}'::jsonb;
 ALTER TABLE pvp_matches ADD COLUMN IF NOT EXISTS card_state_changes jsonb NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE pvp_matches ADD COLUMN IF NOT EXISTS battle_session_id text;
 
 DO $$
 BEGIN

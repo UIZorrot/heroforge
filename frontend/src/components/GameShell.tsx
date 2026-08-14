@@ -4,7 +4,7 @@ import { AppLogo } from './AppLogo';
 import type { AuthUser } from '../types';
 import { IS_MOCK_MODE } from '../lib/runtimeMode';
 
-export type GameSectionKey = 'home' | 'forge' | 'vault' | 'arena' | 'vfx' | 'chronicle' | 'market';
+export type GameSectionKey = 'home' | 'forge' | 'vault' | 'arena' | 'vfx' | 'chronicle' | 'market' | 'settings';
 export type ArenaSideKey = 'queue' | 'train' | 'battle';
 export type HomeSideKey = 'welcome' | 'profile';
 export type ForgeSideKey = 'create' | 'enchant' | 'break';
@@ -36,6 +36,7 @@ type GameShellProps = {
   onForgeTabChange?: (tab: ForgeSideKey) => void;
   onArenaTabChange?: (tab: ArenaSideKey) => void;
   onOpenAuth?: () => void;
+  onOpenSettings?: () => void;
   children: ReactNode;
 };
 
@@ -76,6 +77,7 @@ const sideItemsBySection: Record<GameSectionKey, SideItem[]> = {
     { label: 'Market', icon: <Gem size={20} />, active: true },
     { label: 'Orders', icon: <WalletCards size={20} /> },
   ],
+  settings: [],
 };
 
 function formatNumber(value: number) {
@@ -101,6 +103,7 @@ export function GameShell({
   onForgeTabChange,
   onArenaTabChange,
   onOpenAuth,
+  onOpenSettings,
   children,
 }: GameShellProps) {
   const sideItems: SideItem[] =
@@ -232,7 +235,10 @@ export function GameShell({
         </div>
         <button
           type="button"
-          className="flex w-full flex-col items-center gap-2 border-l-2 border-transparent py-5 text-[9px] font-semibold uppercase tracking-[0.14em] text-stone-500 transition-colors hover:bg-white/[0.03] hover:text-stone-300"
+          onClick={onOpenSettings}
+          className={`flex w-full flex-col items-center gap-2 border-l-2 py-5 text-[9px] font-semibold uppercase tracking-[0.14em] transition-colors hover:bg-white/[0.03] hover:text-stone-300 ${
+            activeSection === 'settings' ? 'border-[#b49664] bg-[#b49664]/8 text-stone-100' : 'border-transparent text-stone-500'
+          }`}
         >
           <Settings size={20} />
           <span>Settings</span>
