@@ -14,14 +14,14 @@ This service handles:
 - `Battle engine`: deterministic battle simulation with limited randomness
 - `Storage`: Supabase Postgres or any PostgreSQL connection string
 - `Email`: Resend for login codes
-- `Gemini SDK`: `google-genai`
-
+- `LLM`: OpenAI-compatible API (OpenAI preferred, Kimi fallback)
 ## Environment
 
 Required:
 
-- `GEMINI_API_KEY`
-- `GEMINI_MODEL`
+- `OPENAI_API_KEY` (preferred) or `KIMI_API_KEY` (fallback)
+- `OPENAI_BASE_URL` / `OPENAI_MODEL` when using OpenAI
+- `KIMI_BASE_URL` / `KIMI_MODEL` when using Kimi
 - `RESEND_API_KEY`
 - `EMAIL_FROM`
 - `APP_URL`

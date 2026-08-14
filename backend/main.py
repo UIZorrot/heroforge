@@ -4,7 +4,6 @@ import logging
 import os
 import secrets
 import threading
-import warnings
 from functools import wraps
 from datetime import datetime, timezone
 from uuid import UUID
@@ -12,15 +11,7 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 from PIL import Image
 import io
-from pydantic.warnings import PydanticDeprecatedSince212
-
-warnings.filterwarnings(
-    "ignore",
-    category=PydanticDeprecatedSince212,
-    module=r"google\.genai\.types",
-)
-from google import genai
-from google.genai import types
+from openai import OpenAI
 
 from auth import (
     create_agent_api_key,
@@ -67,31 +58,77 @@ except Exception as exc:
     _database_init_error = exc
     logging.exception("Database schema initialization skipped or failed")
 
-class GeminiModelAdapter:
-    def __init__(self, client: genai.Client, model_name: str):
+class _LlmTextResponse:
+    def __init__(self, text: str):
+        self.text = text
+
+
+class OpenAICompatibleModel:
+    """OpenAI-compatible chat client used for forge vision + text steps."""
+
+    def __init__(self, client: OpenAI, model_name: str, provider: str):
         self._client = client
         self._model_name = model_name
+        self.provider = provider
 
     def generate_content(self, contents, **kwargs):
-        return self._client.models.generate_content(
+        del kwargs  # Gemini-era kwargs are ignored for OpenAI-compatible calls.
+        messages = self._to_messages(contents)
+        response = self._client.chat.completions.create(
             model=self._model_name,
-            contents=contents,
-            **kwargs,
+            messages=messages,
         )
+        choice = response.choices[0].message if response.choices else None
+        text = (choice.content or "") if choice else ""
+        return _LlmTextResponse(text)
+
+    def _to_messages(self, contents):
+        if isinstance(contents, str):
+            return [{"role": "user", "content": contents}]
+
+        if not isinstance(contents, (list, tuple)):
+            raise TypeError(f"Unsupported LLM contents type: {type(contents)!r}")
+
+        parts = []
+        for item in contents:
+            if isinstance(item, str):
+                parts.append({"type": "text", "text": item})
+            elif isinstance(item, dict) and item.get("type") == "image_png_base64":
+                data_url = f"data:image/png;base64,{item['data']}"
+                parts.append({"type": "image_url", "image_url": {"url": data_url}})
+            else:
+                raise TypeError(f"Unsupported LLM content part: {type(item)!r}")
+        return [{"role": "user", "content": parts}]
 
 
-# Configure Gemini
-GEMINI_API_KEY = settings.gemini_api_key
-GEM_MODEL_NAME = settings.gemini_model
+def _build_forge_llm() -> OpenAICompatibleModel | None:
+    if settings.openai_api_key:
+        client = OpenAI(api_key=settings.openai_api_key, base_url=settings.openai_base_url)
+        logging.info(
+            "Forge LLM provider=openai model=%s base_url=%s",
+            settings.openai_model,
+            settings.openai_base_url,
+        )
+        return OpenAICompatibleModel(client, settings.openai_model, "openai")
 
-if GEMINI_API_KEY:
-    _gemini_client = genai.Client(api_key=GEMINI_API_KEY)
-    model_vision = GeminiModelAdapter(_gemini_client, GEM_MODEL_NAME)
-    model_text = GeminiModelAdapter(_gemini_client, GEM_MODEL_NAME)
-else:
-    model_vision = None
-    model_text = None
-    logging.warning("GEMINI_API_KEY is not configured; /api/forge will be unavailable")
+    if settings.kimi_api_key:
+        client = OpenAI(api_key=settings.kimi_api_key, base_url=settings.kimi_base_url)
+        logging.info(
+            "Forge LLM provider=kimi model=%s base_url=%s",
+            settings.kimi_model,
+            settings.kimi_base_url,
+        )
+        return OpenAICompatibleModel(client, settings.kimi_model, "kimi")
+
+    return None
+
+
+forge_llm = _build_forge_llm()
+model_vision = forge_llm
+model_text = forge_llm
+LLM_MODEL_NAME = forge_llm._model_name if forge_llm else ""
+if forge_llm is None:
+    logging.warning("OPENAI_API_KEY/KIMI_API_KEY is not configured; /api/forge will be unavailable")
 
 P1_PROMPT = """
 You are a battle power judgment robot, and your task is to evaluate the battle power of a given character.
@@ -327,7 +364,8 @@ def _image_part_from_base64(image_base64: str):
     image = Image.open(io.BytesIO(image_bytes))
     buffer = io.BytesIO()
     image.save(buffer, format="PNG")
-    return types.Part.from_bytes(data=buffer.getvalue(), mime_type="image/png")
+    encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
+    return {"type": "image_png_base64", "data": encoded}
 
 
 def get_bearer_token():
@@ -2018,7 +2056,7 @@ def forge():
             return jsonify({"error": "No image provided"}), 400
 
         if model_vision is None or model_text is None:
-            return jsonify({"error": "GEMINI_API_KEY is not configured"}), 500
+            return jsonify({"error": "OPENAI_API_KEY or KIMI_API_KEY is not configured"}), 500
 
         try:
             adjust_dust_balance(
@@ -2059,7 +2097,7 @@ def forge():
             template=p2_data.get("template"),
             bp_requested=int(p2_data.get("BP") or p1_data.get("BP") or final_hero.get("BP") or 0),
             bp_final=int(final_hero.get("BP") or 0),
-            model_name=GEM_MODEL_NAME,
+            model_name=LLM_MODEL_NAME,
             prompt_version="p2_v2",
             status="completed",
         )

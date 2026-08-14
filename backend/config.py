@@ -19,6 +19,12 @@ _load_environment()
 
 @dataclass(frozen=True)
 class Settings:
+    openai_api_key: str
+    openai_base_url: str
+    openai_model: str
+    kimi_api_key: str
+    kimi_base_url: str
+    kimi_model: str
     gemini_api_key: str
     gemini_model: str
     port: int
@@ -124,6 +130,14 @@ def get_settings() -> Settings:
     else:
         database_url = _build_supabase_database_url()
     return Settings(
+        openai_api_key=os.getenv("OPENAI_API_KEY", "").strip(),
+        openai_base_url=os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1").strip()
+        or "https://api.openai.com/v1",
+        openai_model=os.getenv("OPENAI_MODEL", "gpt-4o").strip() or "gpt-4o",
+        kimi_api_key=os.getenv("KIMI_API_KEY", "").strip(),
+        kimi_base_url=os.getenv("KIMI_BASE_URL", "https://api.moonshot.cn/v1").strip()
+        or "https://api.moonshot.cn/v1",
+        kimi_model=os.getenv("KIMI_MODEL", "kimi-k2.6").strip() or "kimi-k2.6",
         gemini_api_key=os.getenv("GEMINI_API_KEY", "").strip(),
         gemini_model=os.getenv("GEMINI_MODEL", "gemini-1.5-flash").strip(),
         port=int(os.getenv("PORT", "5544")),
