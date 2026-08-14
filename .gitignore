@@ -14,7 +14,6 @@ output/
 test-results/
 .playwright-cli/
 frontend/.playwright-cli/
-.wrangler/
 .vscode/
 artifacts/
 frontend/*-check.png
