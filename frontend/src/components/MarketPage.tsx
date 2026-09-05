@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ArrowUpRight, Check, Clock3, Crown, Gem, Search, Shield, ShoppingBag, Sparkles, Swords, WalletCards } from 'lucide-react';
-import { buyMarketRelic, fetchMarketBoard, sellMarketRelic } from '../lib/api';
+import { Check, Crown, Gem, Search, ShoppingBag, Sparkles, WalletCards } from 'lucide-react';
+import { buyDiamondPack, buyDustPack, buyMarketRelic, fetchMarketBoard, sellMarketRelic } from '../lib/api';
 import { PageHeader, PageHeaderStat } from './PageHeader';
-import { calculateRarity, normalizeCardType, toNumber, type Rarity } from '../lib/gameLogic';
-import { CARD_FALLBACK_SRC } from '../lib/cards';
-import { mockHeroes, mockRelicCatalog } from '../lib/mockContent';
-import { getRelicCategory, getRelicIconSrc, type RelicCategory } from '../lib/relics';
-import type { EconomySnapshot, MarketBoardSnapshot, MarketBrokerOffer, MarketRelicListing, SavedHero } from '../types';
+import { mockRelicCatalog } from '../lib/mockContent';
+import { DustIcon } from './CurrencyIcons';
+import { getRelicCategory, getRelicIconSrc, getRelicKind, type RelicCategory } from '../lib/relics';
+import { currentIsoWeekKey, resolvePurchaseWindow } from '../lib/marketShop';
+import type { CurrencyDiamondPack, CurrencyDustPack, EconomySnapshot, MarketBoardSnapshot, MarketRelicListing, SavedHero } from '../types';
 
 type MarketPageProps = {
   heroes: SavedHero[];
@@ -16,7 +16,9 @@ type MarketPageProps = {
   onEconomyChange?: (economy: EconomySnapshot) => void;
 };
 
-const rarityTone: Record<Rarity, { text: string; border: string; chip: string; glow: string }> = {
+type MarketBoardTab = 'shards' | 'relics' | 'currency';
+
+const rarityTone: Record<MarketRelicListing['rarity'], { text: string; border: string; chip: string; glow: string }> = {
   mythic: { text: 'text-[#d7a852]', border: 'border-[#b49664]/70', chip: 'bg-[#b49664]/10 text-[#f0d8ad]', glow: 'shadow-[0_0_26px_rgba(180,150,100,0.18)]' },
   epic: { text: 'text-violet-300', border: 'border-violet-400/35', chip: 'bg-violet-400/10 text-violet-200', glow: 'shadow-[0_0_24px_rgba(139,92,246,0.14)]' },
   rare: { text: 'text-sky-300', border: 'border-sky-400/35', chip: 'bg-sky-400/10 text-sky-200', glow: 'shadow-[0_0_24px_rgba(56,189,248,0.14)]' },
@@ -40,6 +42,9 @@ function buildDemoRelicListing(
   index: number,
   ownedAmount: number
 ): MarketRelicListing {
+  const kind = getRelicKind(relic);
+  const purchaseWindow = resolvePurchaseWindow({ relic_type: relic.relic_type, kind });
+  const purchasable = purchaseWindow !== null;
   const tierPrice = tierBasePrice[relic.tier] ?? tierBasePrice.common;
   const demandScalar = relic.is_limited ? 1.55 : relic.tier === 'epic' ? 1.24 : relic.tier === 'rare' ? 1.08 : 1;
   const askPrice = Math.round(tierPrice * demandScalar + index * 17);
@@ -48,28 +53,25 @@ function buildDemoRelicListing(
 
   let marketDepth = 12 + (index % 5);
   let trend: MarketRelicListing['trend'] = index % 3 === 0 ? 'soft' : 'firm';
-  let settlement = 'Instant settlement';
+  let settlement = purchasable ? 'Instant settlement' : 'Not currently listed';
 
-  if (relic.is_limited) {
+  if (purchaseWindow === 'weekly' || relic.is_limited) {
     marketDepth = 1;
     trend = 'hot';
-    settlement = 'Escrow window 12h';
-  } else if (relic.tier === 'legendary') {
-    marketDepth = 2;
-    trend = 'firm';
-    settlement = 'Broker release 4h';
-  } else if (relic.tier === 'epic') {
+    settlement = 'Weekly window · limited stock';
+  } else if (purchaseWindow === 'stock') {
     marketDepth = 4 + (index % 2);
     trend = 'firm';
-    settlement = 'Broker release 4h';
-  } else if (relic.tier === 'rare') {
-    marketDepth = 8 + (index % 3);
+    settlement = 'Always in stock';
+  } else if (kind === 'shard') {
+    settlement = 'Instant settlement';
   }
 
   return {
     relic_type: relic.relic_type,
     display_name: relic.display_name,
     family: relic.family,
+    kind,
     tier: relic.tier,
     rarity: relic.tier === 'limited' || relic.tier === 'legendary' ? 'mythic' : relic.tier,
     category: getRelicCategory(relic),
@@ -79,6 +81,8 @@ function buildDemoRelicListing(
     forge_bias: relic.forge_bias,
     battle_bias: relic.battle_bias,
     is_limited: relic.is_limited,
+    purchasable,
+    purchase_window: purchaseWindow,
     ask_price: askPrice,
     bid_price: bidPrice,
     spread,
@@ -89,40 +93,24 @@ function buildDemoRelicListing(
   };
 }
 
-function buildDemoBrokerOffer(hero: SavedHero, index: number): MarketBrokerOffer {
-  const bp = Math.max(0, toNumber(hero.character.BP, 0));
-  const rarity = calculateRarity(bp);
-  const askPrice = Math.round(bp * (rarity === 'mythic' ? 0.61 : rarity === 'epic' ? 0.54 : 0.46) + 220 + index * 35);
-
-  return {
-    id: hero.id,
-    name: hero.character.name,
-    image_url: hero.image || CARD_FALLBACK_SRC,
-    rarity,
-    ask_price: askPrice,
-    bp,
-    type_label: normalizeCardType(hero.character.state.TYPE).toUpperCase(),
-    title: hero.character.state.TYPE,
-    primary_skill: hero.character.skill.s1?.name || 'Unbound Skill',
-    secondary_skill: hero.character.skill.s2?.name || 'Unbound Skill',
-  };
-}
-
-function buildDemoMarketBoard(heroes: SavedHero[], economy: EconomySnapshot | null): MarketBoardSnapshot {
-  const sourceHeroes = heroes.length > 0 ? heroes : mockHeroes;
+function buildDemoMarketBoard(_heroes: SavedHero[], economy: EconomySnapshot | null): MarketBoardSnapshot {
   const sourceCatalog = economy?.relic_catalog?.length ? economy.relic_catalog : mockRelicCatalog;
   const ownedAmounts = new Map((economy?.relics ?? []).map((entry) => [entry.relic_type, entry.amount]));
-  const relicListings = sourceCatalog
-    .map((relic, index) => buildDemoRelicListing(relic, index, ownedAmounts.get(relic.relic_type) ?? 0))
-    .sort((a, b) => b.ask_price - a.ask_price);
-  const featuredRelics = relicListings.filter((listing) => listing.is_limited || listing.rarity === 'mythic').slice(0, 3);
-  const brokerOffers = [...sourceHeroes]
-    .sort((a, b) => toNumber(b.character.BP, 0) - toNumber(a.character.BP, 0))
-    .slice(0, 5)
-    .map(buildDemoBrokerOffer);
+  const allListings = sourceCatalog.map((relic, index) =>
+    buildDemoRelicListing(relic, index, ownedAmounts.get(relic.relic_type) ?? 0)
+  );
+  const shardListings = allListings
+    .filter((listing) => getRelicKind({ relic_type: listing.relic_type, kind: listing.kind }) === 'shard')
+    .sort((a, b) => a.ask_price - b.ask_price);
+  const relicListings = allListings
+    .filter((listing) => getRelicKind({ relic_type: listing.relic_type, kind: listing.kind }) === 'relic' && listing.purchasable)
+    .sort((a, b) => (a.purchase_window === 'weekly' ? 0 : 1) - (b.purchase_window === 'weekly' ? 0 : 1) || b.ask_price - a.ask_price);
+  const featuredRelics = relicListings.filter((listing) => listing.purchase_window === 'weekly');
+  const weekKey = currentIsoWeekKey();
   const marketTransactions = (economy?.transactions ?? [])
     .filter((entry) => entry.reason === 'market_buy_relic' || entry.reason === 'market_sell_relic')
     .slice(0, 6);
+  const tapeSource = [...shardListings, ...relicListings];
   const orderTape =
     marketTransactions.length > 0
       ? marketTransactions.map((entry) => {
@@ -135,7 +123,7 @@ function buildDemoMarketBoard(heroes: SavedHero[], economy: EconomySnapshot | nu
             note: `${formatNumber(quantityLabel)} unit / dust ${formatNumber(Math.abs(Number(meta.total_price ?? 0) || 0))}`,
           };
         })
-      : relicListings.slice(0, 6).map((listing, index) => ({
+      : tapeSource.slice(0, 6).map((listing, index) => ({
           id: listing.relic_type,
           label: `${listing.display_name} / ${listing.family}`,
           action: index % 2 === 0 ? 'Bid stack forming' : 'Offer stack refreshed',
@@ -144,14 +132,19 @@ function buildDemoMarketBoard(heroes: SavedHero[], economy: EconomySnapshot | nu
 
   return {
     generated_at: new Date().toISOString(),
+    week_key: weekKey,
+    shard_listings: shardListings,
     relic_listings: relicListings,
     featured_relics: featuredRelics,
-    broker_offers: brokerOffers,
+    weekly_special_types: featuredRelics.map((row) => row.relic_type),
+    stock_relic_types: relicListings.filter((row) => row.purchase_window === 'stock').map((row) => row.relic_type),
+    broker_offers: [],
     order_tape: orderTape,
     notes: [
-      'Relic exchange settles directly against your internal dust balance.',
-      'Card brokerage stays read-only until ownership transfer and listing rules are formalized.',
-      'Equipped relic references are cosmetic right now, so only actual relic inventory counts can be traded.',
+      'Shards are always available and settle instantly in dust.',
+      'Equipment relics are limited to a small stock shelf plus weekly specials.',
+      'Cards cannot be bought or sold on the market.',
+      `Weekly special window: ${weekKey}.`,
     ],
   };
 }
@@ -178,11 +171,15 @@ function ListingTile({
 }) {
   const tone = rarityTone[listing.rarity];
   const trendTone =
-    listing.trend === 'hot'
-      ? 'text-[#f0d8ad]'
-      : listing.trend === 'firm'
-        ? 'text-sky-200'
-        : 'text-stone-400';
+    listing.trend === 'hot' ? 'text-[#f0d8ad]' : listing.trend === 'firm' ? 'text-sky-200' : 'text-stone-400';
+  const windowLabel =
+    listing.purchase_window === 'weekly'
+      ? 'Weekly'
+      : listing.purchase_window === 'stock'
+        ? 'Stock'
+        : listing.kind === 'shard'
+          ? 'Open'
+          : null;
 
   return (
     <button
@@ -200,13 +197,20 @@ function ListingTile({
               ) : (
                 <div className="flex h-full items-center justify-center text-[10px] uppercase tracking-[0.22em] text-stone-500">{listing.family}</div>
               )}
-              {listing.is_limited && <div className="absolute left-2 top-2 border border-[#b49664]/40 bg-black/65 px-1.5 py-0.5 text-[8px] uppercase tracking-[0.18em] text-[#f0d8ad]">Limited</div>}
+              {windowLabel && (
+                <div className="absolute left-2 top-2 border border-[#b49664]/40 bg-black/65 px-1.5 py-0.5 text-[8px] uppercase tracking-[0.18em] text-[#f0d8ad]">
+                  {windowLabel}
+                </div>
+              )}
             </div>
             <div className="min-w-0">
               <div className={`text-[9px] font-semibold uppercase tracking-[0.2em] ${tone.text}`}>{listing.family}</div>
               <h3 className="mt-1 truncate font-body text-lg font-light uppercase tracking-[0.12em] text-stone-100">{listing.display_name}</h3>
               <div className="mt-2 flex flex-wrap items-center gap-2 text-[9px] uppercase tracking-[0.18em] text-stone-500">
                 <span className={`border px-2 py-1 ${tone.chip}`}>{listing.tier}</span>
+                <span className="border border-white/10 px-2 py-1 text-stone-400">
+                  {getRelicKind({ relic_type: listing.relic_type, kind: listing.kind }) === 'shard' ? 'Shard' : 'Relic'}
+                </span>
                 <span>{listing.category}</span>
                 <span className={trendTone}>{listing.trend}</span>
               </div>
@@ -231,48 +235,17 @@ function ListingTile({
   );
 }
 
-function HeroOfferRow({ offer }: { offer: MarketBrokerOffer }) {
-  const tone = rarityTone[offer.rarity];
-  return (
-    <article className={`grid gap-4 border bg-[#090909] p-4 md:grid-cols-[96px_minmax(0,1fr)_140px] ${tone.border}`}>
-      <div className="relative h-28 overflow-hidden border border-white/10 bg-black">
-        <img src={offer.image_url || CARD_FALLBACK_SRC} alt={offer.name} className="absolute inset-0 h-full w-full object-cover object-top opacity-85" />
-        <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(0,0,0,0.08),rgba(0,0,0,0.16)_34%,rgba(0,0,0,0.88)_100%)]" />
-        <div className="absolute inset-x-2 bottom-2 text-[9px] uppercase tracking-[0.18em] text-stone-300">{offer.type_label}</div>
-      </div>
-      <div className="min-w-0">
-        <div className={`text-[9px] font-semibold uppercase tracking-[0.2em] ${tone.text}`}>{offer.rarity}</div>
-        <h3 className="mt-1 font-body text-lg font-light uppercase tracking-[0.12em] text-stone-100">{offer.name}</h3>
-        <div className="mt-1 text-[11px] uppercase tracking-[0.18em] text-stone-500">{offer.title}</div>
-        <div className="mt-3 grid gap-2 text-sm text-stone-400">
-          <div>{offer.primary_skill}</div>
-          <div className="text-stone-600">{offer.secondary_skill}</div>
-        </div>
-      </div>
-      <div className="flex flex-col justify-between border-l border-white/8 pl-4">
-        <div>
-          <div className="text-[9px] uppercase tracking-[0.18em] text-stone-500">Ask</div>
-          <div className="mt-1 text-2xl font-light leading-none tracking-[0.04em] text-stone-100">{formatNumber(offer.ask_price)}</div>
-          <div className="mt-2 text-[10px] uppercase tracking-[0.18em] text-stone-500">BP {formatNumber(offer.bp)}</div>
-        </div>
-        <button type="button" className="mt-4 inline-flex items-center justify-center gap-2 border border-white/10 bg-black/40 px-3 py-2 text-[10px] uppercase tracking-[0.18em] text-stone-300 transition hover:border-[#b49664]/45 hover:text-[#f0d8ad]">
-          Review
-          <ArrowUpRight size={13} />
-        </button>
-      </div>
-    </article>
-  );
-}
-
 export function MarketPage({ heroes, economy, token, demoMode = false, onEconomyChange }: MarketPageProps) {
   const [board, setBoard] = useState<MarketBoardSnapshot | null>(demoMode ? buildDemoMarketBoard(heroes, economy) : null);
   const [boardError, setBoardError] = useState<string | null>(null);
   const [loadingBoard, setLoadingBoard] = useState(!demoMode);
+  const [boardTab, setBoardTab] = useState<MarketBoardTab>('shards');
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState<RelicCategory | 'all'>('all');
   const [selectedListingId, setSelectedListingId] = useState('');
   const [quantity, setQuantity] = useState(1);
   const [busySide, setBusySide] = useState<'buy' | 'sell' | null>(null);
+  const [busyPack, setBusyPack] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
@@ -310,15 +283,16 @@ export function MarketPage({ heroes, economy, token, demoMode = false, onEconomy
     void loadLiveBoard(token);
   }, [demoMode, token]);
 
+  const shardListings = board?.shard_listings ?? [];
   const relicListings = board?.relic_listings ?? [];
+  const activeListings = boardTab === 'shards' ? shardListings : relicListings;
   const filteredListings = useMemo(
-    () => relicListings.filter((listing) => listingMatches(listing, normalizedQuery, category)),
-    [category, normalizedQuery, relicListings]
+    () => activeListings.filter((listing) => listingMatches(listing, normalizedQuery, boardTab === 'shards' ? 'all' : category)),
+    [activeListings, boardTab, category, normalizedQuery]
   );
   const featuredListings = board?.featured_relics ?? [];
-  const brokerOffers = board?.broker_offers ?? [];
-  const orderFeed = board?.order_tape ?? [];
   const marketNotes = board?.notes ?? [];
+  const weekKey = board?.week_key ?? currentIsoWeekKey();
 
   useEffect(() => {
     if (!filteredListings.length) {
@@ -331,12 +305,18 @@ export function MarketPage({ heroes, economy, token, demoMode = false, onEconomy
   }, [filteredListings, selectedListingId]);
 
   const walletDust = economy?.wallet?.dust_balance ?? economy?.starter.dust_balance ?? 0;
-  const sortedByAsk = [...relicListings].sort((a, b) => a.ask_price - b.ask_price);
-  const medianAsk = sortedByAsk.length > 0 ? sortedByAsk[Math.floor(sortedByAsk.length / 2)]?.ask_price ?? 0 : 0;
-  const selectedListing = filteredListings.find((listing) => listing.relic_type === selectedListingId) ?? filteredListings[0] ?? relicListings[0] ?? null;
+  const walletDiamonds = economy?.wallet?.diamond_balance ?? 0;
+  const currencyShop = economy?.shop ?? null;
+  const pricedPool = [...shardListings, ...relicListings].sort((a, b) => a.ask_price - b.ask_price);
+  const medianAsk = pricedPool.length > 0 ? pricedPool[Math.floor(pricedPool.length / 2)]?.ask_price ?? 0 : 0;
+  const selectedListing =
+    filteredListings.find((listing) => listing.relic_type === selectedListingId)
+    ?? filteredListings[0]
+    ?? null;
   const safeQuantity = Math.max(1, Math.min(99, Math.floor(quantity || 1)));
   const buyTotal = selectedListing ? selectedListing.ask_price * safeQuantity : 0;
   const sellTotal = selectedListing ? selectedListing.bid_price * safeQuantity : 0;
+  const canBuy = Boolean(selectedListing?.purchasable !== false);
 
   async function refreshBoardAfterTrade() {
     if (!demoMode && token) {
@@ -344,8 +324,70 @@ export function MarketPage({ heroes, economy, token, demoMode = false, onEconomy
     }
   }
 
-  async function handleTrade(side: 'buy' | 'sell') {
-    if (!selectedListing) return;
+  async function handleBuyDiamondPack(pack: CurrencyDiamondPack) {
+    if (busyPack) return;
+    setBusyPack(pack.id);
+    setError(null);
+    setMessage(null);
+    try {
+      if (demoMode) {
+        const base = economy;
+        if (!base?.wallet) throw new Error('Sandbox economy is unavailable.');
+        onEconomyChange?.({
+          ...base,
+          wallet: { ...base.wallet, diamond_balance: (base.wallet.diamond_balance ?? 0) + pack.diamonds, updated_at: new Date().toISOString() },
+        });
+      } else {
+        if (!token) throw new Error('Sign in to purchase currency.');
+        const result = await buyDiamondPack(pack.id, token);
+        onEconomyChange?.(result.economy);
+      }
+      setMessage(`Test purchase complete: +${formatNumber(pack.diamonds)} Gems (${pack.title}).`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Gem purchase failed');
+    } finally {
+      setBusyPack(null);
+    }
+  }
+
+  async function handleBuyDustPack(pack: CurrencyDustPack) {
+    if (busyPack) return;
+    setBusyPack(pack.id);
+    setError(null);
+    setMessage(null);
+    try {
+      if (demoMode) {
+        const base = economy;
+        if (!base?.wallet) throw new Error('Sandbox economy is unavailable.');
+        const diamonds = base.wallet.diamond_balance ?? 0;
+        if (diamonds < pack.diamonds) throw new Error('Not enough Gems in the sandbox.');
+        onEconomyChange?.({
+          ...base,
+          wallet: {
+            ...base.wallet,
+            diamond_balance: diamonds - pack.diamonds,
+            dust_balance: base.wallet.dust_balance + pack.dust,
+            updated_at: new Date().toISOString(),
+          },
+        });
+      } else {
+        if (!token) throw new Error('Sign in to purchase currency.');
+        const result = await buyDustPack(pack.id, token);
+        onEconomyChange?.(result.economy);
+      }
+      setMessage(`Converted ${pack.diamonds} Gems into ${formatNumber(pack.dust)} Dust (${pack.title}).`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Dust purchase failed');
+    } finally {
+      setBusyPack(null);
+    }
+  }
+
+  async function handleTrade(side: 'buy' | 'sell') {    if (!selectedListing) return;
+    if (side === 'buy' && selectedListing.purchasable === false) {
+      setError('This item is not currently available for purchase.');
+      return;
+    }
     if (demoMode) {
       const totalPrice = side === 'buy' ? buyTotal : sellTotal;
       const ownedAmount = selectedListing.owned_amount;
@@ -354,7 +396,7 @@ export function MarketPage({ heroes, economy, token, demoMode = false, onEconomy
         return;
       }
       if (side === 'sell' && ownedAmount < safeQuantity) {
-        setError('Not enough relics in the sandbox inventory.');
+        setError('Not enough inventory in the sandbox.');
         return;
       }
       setBusySide(side);
@@ -371,22 +413,38 @@ export function MarketPage({ heroes, economy, token, demoMode = false, onEconomy
       }
       const matchingRelic = base.relics.find((relic) => relic.relic_type === selectedListing.relic_type);
       const nextRelics = matchingRelic
-        ? base.relics.map((relic) => relic.relic_type === selectedListing.relic_type ? { ...relic, amount: Math.max(0, relic.amount + delta), updated_at: timestamp } : relic)
-        : [...base.relics, { user_id: base.wallet.user_id, relic_type: selectedListing.relic_type, amount: Math.max(0, delta), created_at: timestamp, updated_at: timestamp }];
+        ? base.relics.map((relic) =>
+            relic.relic_type === selectedListing.relic_type
+              ? { ...relic, amount: Math.max(0, relic.amount + delta), updated_at: timestamp }
+              : relic
+          )
+        : [
+            ...base.relics,
+            {
+              user_id: base.wallet.user_id,
+              relic_type: selectedListing.relic_type,
+              amount: Math.max(0, delta),
+              created_at: timestamp,
+              updated_at: timestamp,
+            },
+          ];
       const nextDust = Math.max(0, base.wallet.dust_balance + dustDelta);
       onEconomyChange?.({
         ...base,
         wallet: { ...base.wallet, dust_balance: nextDust, updated_at: timestamp },
         relics: nextRelics,
-        transactions: [{
-          id: `mock-market-${Date.now()}`,
-          resource_type: 'dust',
-          delta: dustDelta,
-          balance_after: nextDust,
-          reason: side === 'buy' ? 'market_buy_relic' : 'market_sell_relic',
-          metadata: { relic_type: selectedListing.relic_type, quantity: safeQuantity, total_price: totalPrice },
-          created_at: timestamp,
-        }, ...base.transactions],
+        transactions: [
+          {
+            id: `mock-market-${Date.now()}`,
+            resource_type: 'dust',
+            delta: dustDelta,
+            balance_after: nextDust,
+            reason: side === 'buy' ? 'market_buy_relic' : 'market_sell_relic',
+            metadata: { relic_type: selectedListing.relic_type, quantity: safeQuantity, total_price: totalPrice },
+            created_at: timestamp,
+          },
+          ...base.transactions,
+        ],
       });
       setMessage(
         side === 'buy'
@@ -427,14 +485,14 @@ export function MarketPage({ heroes, economy, token, demoMode = false, onEconomy
       <PageHeader
         title="Market"
         eyebrow="Exchange"
-        subtitle="Relic & Broker Board"
+        subtitle="Shard & Relic Shop"
         titleClassName="xl:w-[421px] xl:tracking-[0.2em]"
-        description="The board is now sourced from the backend. Frontend filtering stays local, but pricing, depth, featured windows, broker offers, and tape are all server-authored."
+        description="Shards stay open for purchase. Equipment relics appear only as a small stock shelf and rotating weekly specials. Currency covers Gem top-ups and Dust packs. Cards are not sold here."
         stats={
           <>
-            <PageHeaderStat label="Active Listings" value={filteredListings.length} />
-            <PageHeaderStat label="Limited Windows" value={featuredListings.length} />
-            <PageHeaderStat label="Median Ask" value={formatNumber(medianAsk)} />
+            <PageHeaderStat label="Shard SKUs" value={shardListings.length} />
+            <PageHeaderStat label="Relic SKUs" value={relicListings.length} />
+            <PageHeaderStat label="Weekly Window" value={weekKey.replace(/^\d+-W/, 'W')} />
             <PageHeaderStat label="Dust Reserve" value={formatNumber(walletDust)} />
           </>
         }
@@ -446,63 +504,187 @@ export function MarketPage({ heroes, economy, token, demoMode = false, onEconomy
             <div className="flex flex-wrap items-center gap-x-8 gap-y-4">
               <div>
                 <div className="text-[10px] uppercase tracking-[0.24em] text-stone-500">Exchange Board</div>
-                <h2 className="mt-2 font-body text-xl font-light uppercase tracking-[0.18em] text-stone-100">Relic Listings</h2>
+                <h2 className="mt-2 font-body text-xl font-light uppercase tracking-[0.18em] text-stone-100">
+                  {boardTab === 'shards' ? 'Shard Stall' : boardTab === 'relics' ? 'Relic Counter' : 'Currency Exchange'}
+                </h2>
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                {(['all', 'weapon', 'armor', 'accessory', 'artifact'] as Array<RelicCategory | 'all'>).map((item) => (
-                  <button key={item} type="button" onClick={() => setCategory(item)} className={`border px-3 py-2 text-[10px] uppercase tracking-[0.18em] transition ${sectionButton(category === item)}`}>
-                    {item}
-                  </button>
-                ))}
+                <button type="button" onClick={() => setBoardTab('shards')} className={`border px-3 py-2 text-[10px] uppercase tracking-[0.18em] transition ${sectionButton(boardTab === 'shards')}`}>
+                  Shards
+                </button>
+                <button type="button" onClick={() => setBoardTab('relics')} className={`border px-3 py-2 text-[10px] uppercase tracking-[0.18em] transition ${sectionButton(boardTab === 'relics')}`}>
+                  Relics
+                </button>
+                <button type="button" onClick={() => setBoardTab('currency')} className={`border px-3 py-2 text-[10px] uppercase tracking-[0.18em] transition ${sectionButton(boardTab === 'currency')}`}>
+                  Currency
+                </button>
               </div>
+              {boardTab === 'relics' && (
+                <div className="flex flex-wrap items-center gap-2">
+                  {(['all', 'weapon', 'armor', 'accessory', 'artifact'] as Array<RelicCategory | 'all'>).map((item) => (
+                    <button key={item} type="button" onClick={() => setCategory(item)} className={`border px-3 py-2 text-[10px] uppercase tracking-[0.18em] transition ${sectionButton(category === item)}`}>
+                      {item}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
 
+            {boardTab !== 'currency' && (
             <div className="flex h-10 min-w-[260px] items-center border border-white/10 bg-black/35 px-3">
               <Search size={15} className="mr-2 text-stone-600" />
               <input
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
-                placeholder="Search relic, family, or effect..."
+                placeholder={boardTab === 'shards' ? 'Search shard or family...' : 'Search relic, family, or effect...'}
                 className="w-full bg-transparent text-sm text-stone-300 outline-none placeholder:text-stone-600"
               />
             </div>
+            )}
           </div>
 
+          {boardTab !== 'currency' && (
           <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-4 text-[10px] uppercase tracking-[0.18em] text-stone-600">
-            <span>{filteredListings.length} listings visible</span>
-            <span>{demoMode ? 'Sandbox market settles locally in Dust.' : 'System market settles directly in dust.'}</span>
+            <span>
+              {filteredListings.length} {boardTab === 'shards' ? 'shards' : 'relics'} visible · median ask {formatNumber(medianAsk)}
+            </span>
+            <span>
+              {boardTab === 'shards'
+                ? 'All shards are buyable.'
+                : 'Stock shelf + weekly specials only.'}
+            </span>
           </div>
+          )}
 
-          {boardError && !board && (
+          {boardError && !board && boardTab !== 'currency' && (
             <div className="px-6 pb-4">
               <div className="border border-red-400/20 bg-red-500/10 px-3 py-3 text-sm text-red-100">{boardError}</div>
             </div>
           )}
 
+          {boardTab === 'currency' ? (
+            <div className="space-y-6 px-6 pb-6">
+              <div className="border border-sky-300/15 bg-sky-400/5 px-4 py-3 text-xs leading-5 text-sky-100/80">
+                Simulated checkout while real payments are deferred. Test purchases credit Gems instantly and are logged as test transactions.
+              </div>
+
+              <div>
+                <div className="flex items-end justify-between gap-3">
+                  <div className="text-[10px] uppercase tracking-[0.24em] text-sky-300">Gem Top-Up</div>
+                  <div className="text-[10px] uppercase tracking-[0.18em] text-stone-600">Balance {formatNumber(walletDiamonds)} Gems</div>
+                </div>
+                <div className="mt-3 grid gap-4 md:grid-cols-3">
+                  {(currencyShop?.diamond_packs ?? []).map((pack) => (
+                    <div key={pack.id} className="flex flex-col border border-white/8 bg-black/30 p-4">
+                      <Gem size={18} className="text-sky-300" />
+                      <div className="mt-3 text-sm uppercase tracking-[0.14em] text-stone-100">{pack.title}</div>
+                      <div className="mt-2 text-2xl font-light text-stone-100">{formatNumber(pack.diamonds)}</div>
+                      <div className="mt-1 text-[10px] uppercase tracking-[0.18em] text-stone-500">Gems</div>
+                      <button
+                        type="button"
+                        onClick={() => void handleBuyDiamondPack(pack)}
+                        disabled={busyPack !== null}
+                        className="mt-4 border border-sky-300/30 bg-sky-400/10 px-4 py-2.5 text-[10px] font-semibold uppercase tracking-[0.2em] text-sky-100 transition hover:bg-sky-400/20 disabled:cursor-not-allowed disabled:opacity-45"
+                      >
+                        {busyPack === pack.id ? 'Processing' : `¥${pack.price_cny} · Test Buy`}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <div className="flex items-end justify-between gap-3">
+                  <div className="text-[10px] uppercase tracking-[0.24em] text-[#b49664]">Dust Packs</div>
+                  <div className="text-[10px] uppercase tracking-[0.18em] text-stone-600">
+                    1 Gem = {formatNumber(currencyShop?.dust_per_diamond ?? 100)} Dust
+                  </div>
+                </div>
+                <div className="mt-3 grid gap-4 md:grid-cols-3">
+                  {(currencyShop?.dust_packs ?? []).map((pack) => {
+                    const affordable = walletDiamonds >= pack.diamonds;
+                    return (
+                      <div key={pack.id} className="flex flex-col border border-white/8 bg-black/30 p-4">
+                        <DustIcon size={18} className="text-[#c4a574]" />
+                        <div className="mt-3 text-sm uppercase tracking-[0.14em] text-stone-100">{pack.title}</div>
+                        <div className="mt-2 text-2xl font-light text-stone-100">{formatNumber(pack.dust)}</div>
+                        <div className="mt-1 text-[10px] uppercase tracking-[0.18em] text-stone-500">Dust</div>
+                        <button
+                          type="button"
+                          onClick={() => void handleBuyDustPack(pack)}
+                          disabled={busyPack !== null || !affordable}
+                          className="mt-4 border border-[#b49664]/40 bg-[#b49664]/10 px-4 py-2.5 text-[10px] font-semibold uppercase tracking-[0.2em] text-[#f0d8ad] transition hover:bg-[#b49664]/20 disabled:cursor-not-allowed disabled:opacity-45"
+                        >
+                          {busyPack === pack.id ? 'Processing' : `${pack.diamonds} Gems`}
+                        </button>
+                        {!affordable && <div className="mt-2 text-[10px] uppercase tracking-[0.16em] text-stone-600">Not enough Gems</div>}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          ) : (
           <div className="px-6 pb-6">
             {loadingBoard && !board ? (
               <div className="flex min-h-[260px] flex-col items-center justify-center border border-dashed border-white/10 bg-black/25 text-center">
                 <ShoppingBag size={32} className="text-stone-600" />
                 <div className="mt-4 text-sm uppercase tracking-[0.22em] text-stone-400">Loading market board</div>
-                <div className="mt-2 max-w-sm text-sm leading-6 text-stone-600">Fetching authoritative listings, price bands, and tape from the server.</div>
+                <div className="mt-2 max-w-sm text-sm leading-6 text-stone-600">Fetching shard and relic shop listings from the server.</div>
               </div>
             ) : filteredListings.length > 0 ? (
               <div className="grid gap-4 2xl:grid-cols-2">
                 {filteredListings.map((listing) => (
-                  <ListingTile key={listing.relic_type} listing={listing} active={selectedListing?.relic_type === listing.relic_type} onSelect={() => setSelectedListingId(listing.relic_type)} />
+                  <ListingTile
+                    key={listing.relic_type}
+                    listing={listing}
+                    active={selectedListing?.relic_type === listing.relic_type}
+                    onSelect={() => setSelectedListingId(listing.relic_type)}
+                  />
                 ))}
               </div>
             ) : (
               <div className="flex min-h-[260px] flex-col items-center justify-center border border-dashed border-white/10 bg-black/25 text-center">
                 <ShoppingBag size={32} className="text-stone-600" />
                 <div className="mt-4 text-sm uppercase tracking-[0.22em] text-stone-400">No matching listings</div>
-                <div className="mt-2 max-w-sm text-sm leading-6 text-stone-600">Adjust your search terms or switch the item category filter.</div>
+                <div className="mt-2 max-w-sm text-sm leading-6 text-stone-600">
+                  {boardTab === 'relics'
+                    ? 'Only stock and weekly special relics appear here.'
+                    : 'Adjust your search terms.'}
+                </div>
               </div>
             )}
           </div>
+          )}
         </section>
 
         <aside className="space-y-5">
+          {boardTab === 'currency' ? (
+            <section className="border border-white/8 bg-black/20 p-5">
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-[10px] uppercase tracking-[0.24em] text-[#b49664]">Balances</div>
+                  <h3 className="mt-2 font-body text-xl font-light uppercase tracking-[0.16em] text-stone-100">Currency</h3>
+                </div>
+                <Gem size={18} className="text-sky-300" />
+              </div>
+              <div className="mt-5 grid grid-cols-2 gap-3 text-[10px] uppercase tracking-[0.18em]">
+                <div className="border border-white/8 bg-black/30 px-3 py-3 text-stone-500">
+                  <div>Gems</div>
+                  <div className="mt-2 text-sky-200">{formatNumber(walletDiamonds)}</div>
+                </div>
+                <div className="border border-white/8 bg-black/30 px-3 py-3 text-stone-500">
+                  <div>Dust</div>
+                  <div className="mt-2 text-stone-100">{formatNumber(walletDust)}</div>
+                </div>
+              </div>
+              <p className="mt-4 text-xs leading-5 text-stone-500">
+                Gems are the premium currency. Convert them into Dust here; the exchange never sells Gems for Dust.
+              </p>
+              {message && <div className="mt-4 border border-[#b49664]/30 bg-[#b49664]/8 px-3 py-3 text-xs text-[#f0d8ad]">{message}</div>}
+              {error && <div className="mt-4 border border-red-400/20 bg-red-500/10 px-3 py-3 text-xs text-red-100">{error}</div>}
+            </section>
+          ) : (
           <section className="border border-white/8 bg-black/20 p-5">
             <div className="flex items-center justify-between">
               <div>
@@ -511,7 +693,7 @@ export function MarketPage({ heroes, economy, token, demoMode = false, onEconomy
                   {selectedListing?.display_name ?? 'No Listing'}
                 </h3>
               </div>
-              <Gem size={18} className="text-[#d7a852]" />
+              <ShoppingBag size={18} className="text-[#d7a852]" />
             </div>
 
             {selectedListing ? (
@@ -530,8 +712,8 @@ export function MarketPage({ heroes, economy, token, demoMode = false, onEconomy
                     <div className="mt-2 text-stone-100">{formatNumber(selectedListing.owned_amount)}</div>
                   </div>
                   <div className="border border-white/8 bg-black/30 px-3 py-3 text-stone-500">
-                    <div>Depth</div>
-                    <div className="mt-2 text-stone-100">{formatNumber(selectedListing.market_depth)}</div>
+                    <div>Window</div>
+                    <div className="mt-2 text-stone-100">{selectedListing.purchase_window ?? 'closed'}</div>
                   </div>
                 </div>
 
@@ -561,7 +743,7 @@ export function MarketPage({ heroes, economy, token, demoMode = false, onEconomy
                 <div className="mt-5 grid grid-cols-2 gap-3">
                   <button
                     type="button"
-                    disabled={busySide !== null || (!demoMode && !token) || walletDust < buyTotal}
+                    disabled={busySide !== null || (!demoMode && !token) || !canBuy || walletDust < buyTotal}
                     onClick={() => void handleTrade('buy')}
                     className="border border-[#b49664]/45 bg-[#b49664]/10 px-3 py-3 text-[10px] uppercase tracking-[0.18em] text-stone-100 transition hover:border-[#f0d8ad]/70 hover:bg-[#b49664]/16 disabled:cursor-not-allowed disabled:opacity-45"
                   >
@@ -580,7 +762,7 @@ export function MarketPage({ heroes, economy, token, demoMode = false, onEconomy
                 <div className="mt-4 text-xs leading-6 text-stone-500">{selectedListing.settlement}</div>
               </>
             ) : (
-              <div className="mt-5 text-sm leading-6 text-stone-500">Select a relic listing to open the trade desk.</div>
+              <div className="mt-5 text-sm leading-6 text-stone-500">Select a listing to open the trade desk.</div>
             )}
 
             {message && (
@@ -592,30 +774,45 @@ export function MarketPage({ heroes, economy, token, demoMode = false, onEconomy
             {error && <div className="mt-4 border border-red-400/20 bg-red-500/10 px-3 py-3 text-sm text-red-100">{error}</div>}
             {boardError && board && <div className="mt-4 border border-amber-400/20 bg-amber-500/10 px-3 py-3 text-sm text-amber-100">{boardError}</div>}
           </section>
+          )}
 
           <section className="border border-white/8 bg-black/20 p-5">
             <div className="flex items-center justify-between">
               <div>
-                <div className="text-[10px] uppercase tracking-[0.24em] text-[#b49664]">Season Window</div>
-                <h3 className="mt-2 font-body text-xl font-light uppercase tracking-[0.16em] text-stone-100">Featured</h3>
+                <div className="text-[10px] uppercase tracking-[0.24em] text-[#b49664]">Weekly Specials</div>
+                <h3 className="mt-2 font-body text-xl font-light uppercase tracking-[0.16em] text-stone-100">{weekKey}</h3>
               </div>
               <Crown size={18} className="text-[#d7a852]" />
             </div>
             <div className="mt-5 space-y-3">
-              {featuredListings.map((listing) => (
-                <div key={listing.relic_type} className="border border-white/8 bg-black/30 p-3">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <div className="text-[9px] uppercase tracking-[0.18em] text-stone-500">{listing.family}</div>
-                      <div className="mt-1 text-sm uppercase tracking-[0.12em] text-stone-100">{listing.display_name}</div>
+              {featuredListings.length > 0 ? (
+                featuredListings.map((listing) => (
+                  <button
+                    key={listing.relic_type}
+                    type="button"
+                    onClick={() => {
+                      setBoardTab('relics');
+                      setSelectedListingId(listing.relic_type);
+                    }}
+                    className="w-full border border-white/8 bg-black/30 p-3 text-left transition hover:border-[#b49664]/40"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="text-[9px] uppercase tracking-[0.18em] text-stone-500">{listing.family}</div>
+                        <div className="mt-1 text-sm uppercase tracking-[0.12em] text-stone-100">{listing.display_name}</div>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-[9px] uppercase tracking-[0.18em] text-stone-500">Ask</div>
+                        <div className="mt-1 text-sm text-stone-200">{formatNumber(listing.ask_price)}</div>
+                      </div>
                     </div>
-                    <div className="text-right">
-                      <div className="text-[9px] uppercase tracking-[0.18em] text-stone-500">Ask</div>
-                      <div className="mt-1 text-sm text-stone-200">{formatNumber(listing.ask_price)}</div>
-                    </div>
-                  </div>
+                  </button>
+                ))
+              ) : (
+                <div className="border border-dashed border-white/10 px-3 py-6 text-center text-xs uppercase tracking-[0.18em] text-stone-600">
+                  No weekly specials loaded
                 </div>
-              ))}
+              )}
             </div>
           </section>
 
@@ -645,64 +842,46 @@ export function MarketPage({ heroes, economy, token, demoMode = false, onEconomy
       </div>
 
       <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1fr)_320px]">
-        <section className="border border-white/8 bg-[#0a0a0a]/92">
-          <div className="flex flex-wrap items-center justify-between gap-4 border-b border-white/8 px-6 py-5">
+        <section className="border border-white/8 bg-[#0a0a0a]/92 px-6 py-6">
+          <div className="flex items-center justify-between border-b border-white/8 pb-5">
             <div>
-              <div className="text-[10px] uppercase tracking-[0.24em] text-stone-500">Broker Lane</div>
-              <h2 className="mt-2 font-body text-xl font-light uppercase tracking-[0.18em] text-stone-100">Card Offers</h2>
+              <div className="text-[10px] uppercase tracking-[0.24em] text-stone-500">Market Policy</div>
+              <h2 className="mt-2 font-body text-xl font-light uppercase tracking-[0.18em] text-stone-100">No Card Sales</h2>
             </div>
-            <div className="flex items-center gap-5 text-[10px] uppercase tracking-[0.18em] text-stone-600">
-              <span className="inline-flex items-center gap-2"><Shield size={14} /> Read-only for now</span>
-              <span className="inline-flex items-center gap-2"><Swords size={14} /> Dust settlement later</span>
-            </div>
+            <ShoppingBag size={18} className="text-stone-500" />
           </div>
-          <div className="space-y-4 px-6 py-6">
-            {brokerOffers.length > 0 ? brokerOffers.map((offer) => (
-              <HeroOfferRow key={offer.id} offer={offer} />
-            )) : (
-              <div className="flex min-h-[220px] flex-col items-center justify-center border border-dashed border-white/10 bg-black/25 text-center">
-                <Swords size={30} className="text-stone-600" />
-                <div className="mt-4 text-sm uppercase tracking-[0.22em] text-stone-400">No broker offers</div>
-                <div className="mt-2 max-w-sm text-sm leading-6 text-stone-600">Forge or unlock more cards before the broker lane has enough stock to surface.</div>
-              </div>
-            )}
+          <div className="mt-5 grid gap-4 md:grid-cols-3">
+            <div className="border border-white/8 bg-black/25 p-4">
+              <div className="text-[10px] uppercase tracking-[0.18em] text-[#d8b06c]">Shards</div>
+              <p className="mt-3 text-sm leading-6 text-stone-400">All enchant materials stay listed and buyable at any time.</p>
+            </div>
+            <div className="border border-white/8 bg-black/25 p-4">
+              <div className="text-[10px] uppercase tracking-[0.18em] text-[#d8b06c]">Relics</div>
+              <p className="mt-3 text-sm leading-6 text-stone-400">Only a stock shelf plus weekly specials can be purchased. Equip them from Vault.</p>
+            </div>
+            <div className="border border-white/8 bg-black/25 p-4">
+              <div className="text-[10px] uppercase tracking-[0.18em] text-[#d8b06c]">Cards</div>
+              <p className="mt-3 text-sm leading-6 text-stone-400">Hero cards are forged, not bought. Market never opens a card purchase desk.</p>
+            </div>
           </div>
         </section>
 
         <aside className="border border-white/8 bg-black/20 p-5">
           <div className="flex items-center justify-between">
             <div>
-              <div className="text-[10px] uppercase tracking-[0.24em] text-[#b49664]">Order Tape</div>
-              <h3 className="mt-2 font-body text-xl font-light uppercase tracking-[0.16em] text-stone-100">Recent Flow</h3>
+              <div className="text-[10px] uppercase tracking-[0.24em] text-[#b49664]">Market Notes</div>
+              <h3 className="mt-2 font-body text-xl font-light uppercase tracking-[0.16em] text-stone-100">Trading Rules</h3>
             </div>
             <Sparkles size={17} className="text-[#d7a852]" />
           </div>
 
-          <div className="mt-5 space-y-3">
-            {orderFeed.map((entry) => (
-              <div key={entry.id} className="border border-white/8 bg-black/30 p-3">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="truncate text-[10px] uppercase tracking-[0.18em] text-stone-300">{entry.label}</div>
-                    <div className="mt-2 text-[11px] uppercase tracking-[0.16em] text-stone-500">{entry.action}</div>
-                  </div>
-                  <Gem size={14} className="mt-0.5 shrink-0 text-stone-600" />
-                </div>
-                <div className="mt-3 text-xs leading-5 text-stone-500">{entry.note}</div>
-              </div>
+          <div className="mt-5 space-y-3 text-sm leading-6 text-stone-500">
+            {marketNotes.map((note) => (
+              <p key={note}>{note}</p>
             ))}
           </div>
-
-          <div className="mt-5 border-t border-white/8 pt-5">
-            <div className="flex items-center gap-2 text-[10px] uppercase tracking-[0.24em] text-stone-500">
-              <Clock3 size={15} />
-              Market Notes
-            </div>
-            <div className="mt-4 space-y-3 text-sm leading-6 text-stone-500">
-              {marketNotes.map((note) => (
-                <p key={note}>{note}</p>
-              ))}
-            </div>
+          <div className="mt-5 border-t border-white/8 pt-5 text-xs leading-5 text-stone-600">
+            Your personal trade history lives in Profile · Recent Activity.
           </div>
         </aside>
       </div>

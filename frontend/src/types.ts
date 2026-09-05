@@ -127,6 +127,8 @@ export interface EconomyTransaction {
   created_at: string;
 }
 
+export type RelicKind = 'shard' | 'relic';
+
 export interface RelicDefinition {
   relic_type: string;
   display_name: string;
@@ -138,12 +140,35 @@ export interface RelicDefinition {
   battle_bias: string;
   icon_prompt: string;
   is_limited: boolean;
+  /** shard = consumable enchant material; relic = card equipment (one slot per card). */
+  kind?: RelicKind;
+}
+
+export interface CurrencyDiamondPack {
+  id: string;
+  diamonds: number;
+  price_cny: number;
+  title: string;
+}
+
+export interface CurrencyDustPack {
+  id: string;
+  dust: number;
+  diamonds: number;
+  title: string;
+}
+
+export interface CurrencyShopSnapshot {
+  dust_per_diamond: number;
+  diamond_packs: CurrencyDiamondPack[];
+  dust_packs: CurrencyDustPack[];
 }
 
 export interface EconomySnapshot {
   wallet: {
     user_id: string;
     dust_balance: number;
+    diamond_balance?: number;
     created_at: string;
     updated_at: string;
   } | null;
@@ -163,6 +188,7 @@ export interface EconomySnapshot {
     pvp_entry: number;
     pvp_revive: number;
     pvp_stake: number;
+    decompose_bp_percent?: number;
   };
   starter: {
     dust_balance: number;
@@ -172,12 +198,14 @@ export interface EconomySnapshot {
     low_tier_relic_drop_pct: number;
     queue_ttl_minutes: number;
   };
+  shop?: CurrencyShopSnapshot;
 }
 
 export interface MarketRelicListing {
   relic_type: string;
   display_name: string;
   family: string;
+  kind?: RelicKind;
   tier: 'common' | 'rare' | 'epic' | 'legendary' | 'limited';
   rarity: 'common' | 'rare' | 'epic' | 'mythic';
   category: 'weapon' | 'armor' | 'accessory' | 'artifact';
@@ -187,6 +215,8 @@ export interface MarketRelicListing {
   forge_bias?: string;
   battle_bias?: string;
   is_limited: boolean;
+  purchasable?: boolean;
+  purchase_window?: 'open' | 'stock' | 'weekly' | null;
   ask_price: number;
   bid_price: number;
   spread: number;
@@ -218,8 +248,12 @@ export interface MarketOrderTapeEntry {
 
 export interface MarketBoardSnapshot {
   generated_at: string;
+  week_key?: string;
+  shard_listings?: MarketRelicListing[];
   relic_listings: MarketRelicListing[];
   featured_relics: MarketRelicListing[];
+  weekly_special_types?: string[];
+  stock_relic_types?: string[];
   broker_offers: MarketBrokerOffer[];
   order_tape: MarketOrderTapeEntry[];
   notes: string[];
@@ -248,6 +282,9 @@ export interface DailySnapshot {
     claimed_at?: string | null;
   };
   tasks: DailyTask[];
+  tasks_per_day?: number;
+  tasks_capacity?: number;
+  all_completed?: boolean;
   economy: EconomySnapshot;
 }
 
@@ -442,4 +479,45 @@ export interface PvpEntryStatusResponse {
   entry: PvpQueueEntry;
   match?: PvpMatchRecord | null;
   battle_session?: BattleSessionSnapshot | null;
+}
+
+export interface FriendProfile {
+  id: string;
+  email: string;
+  friends_since?: string;
+}
+
+export interface FriendRequestRecord {
+  id: string;
+  status: 'pending' | 'accepted' | 'declined' | 'cancelled';
+  user_id: string;
+  email: string;
+  created_at: string;
+}
+
+export interface FriendChallengeRecord {
+  id: string;
+  challenger_user_id: string;
+  challenged_user_id: string;
+  status: 'pending' | 'accepted' | 'declined' | 'cancelled' | 'resolved' | 'expired';
+  challenger_email?: string;
+  challenged_email?: string;
+  challenger_formation?: ArenaFormationSnapshot | Record<string, unknown>;
+  challenged_formation?: ArenaFormationSnapshot | Record<string, unknown>;
+  challenger_team_snapshot?: PvpTeamSnapshot | Record<string, unknown>;
+  challenged_team_snapshot?: PvpTeamSnapshot | Record<string, unknown>;
+  battle_result?: BattleResult | null;
+  battle_session_id?: string | null;
+  winner_user_id?: string | null;
+  expires_at: string;
+  created_at: string;
+  resolved_at?: string | null;
+}
+
+export interface FriendsSnapshot {
+  friends: FriendProfile[];
+  incoming_requests: FriendRequestRecord[];
+  outgoing_requests: FriendRequestRecord[];
+  incoming_challenges: FriendChallengeRecord[];
+  outgoing_challenges: FriendChallengeRecord[];
 }

@@ -96,11 +96,13 @@ class BattleSession:
             self.team_b_units.append(None)
 
         self.control_mode = str(self.control_mode or "rest").strip().lower() or "rest"
-        if self.control_mode != "rest":
-            raise BattleSessionError("battle sessions currently support rest control only")
+        if self.control_mode not in {"rest", "program"}:
+            raise BattleSessionError("battle session controlMode must be rest or program")
 
         self._begin_round(time.time())
         self._append_board_history()
+        if self.control_mode == "program":
+            self.run_program_to_completion()
 
     def _push_event(
         self,
@@ -477,9 +479,9 @@ class BattleSession:
         self._begin_round(time.time())
 
     def auto_advance_due(self, now_ms: int | None = None) -> bool:
-        if self.status != "awaiting_action" or self.control_mode != "rest" or self.waiting_until_ms is None:
+        if self.status != "awaiting_action" or self.control_mode not in {"rest", "program"}:
             return False
-        if (now_ms or _now_ms()) < self.waiting_until_ms:
+        if self.control_mode == "rest" and (self.waiting_until_ms is None or (now_ms or _now_ms()) < self.waiting_until_ms):
             return False
 
         actor = self.current_actor
@@ -515,7 +517,19 @@ class BattleSession:
         self._resolve_turn(payload, "program")
         return True
 
+    def run_program_to_completion(self, max_steps: int = 1000) -> None:
+        """Resolve a server-controlled battle immediately while preserving every replay frame."""
+        steps = 0
+        while self.status != "resolved" and steps < max_steps:
+            if not self.auto_advance_due():
+                break
+            steps += 1
+        if self.status != "resolved":
+            raise BattleSessionError("program battle did not resolve within the step limit")
+
     def submit_action(self, action: Dict[str, Any]) -> Dict[str, Any]:
+        if self.control_mode != "rest":
+            raise BattleSessionError("program-controlled battle sessions do not accept manual actions")
         if self.status == "resolved":
             raise BattleSessionError("battle session already resolved")
         self._resolve_turn(action, "rest")

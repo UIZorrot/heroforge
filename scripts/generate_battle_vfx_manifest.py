@@ -29,7 +29,7 @@ VISUAL_PRESETS: dict[str, dict[str, str | None]] = {
     "Grave Hex": {"assetId": "grave-hex", "timingPreset": "control-bloom"},
     "Rending Claw": {"assetId": "rending-claw", "timingPreset": "melee-heavy"},
     "Blood Banner": {"assetId": "blood-banner", "timingPreset": "support-bloom"},
-    "Shieldbreaker Slash": {"assetId": "shieldbreaker-slash", "timingPreset": "melee-heavy"},
+    "Shieldbreaker Strike": {"assetId": "shieldbreaker-strike", "timingPreset": "melee-heavy"},
     "Storm Oath": {"assetId": "storm-oath", "timingPreset": "control-snap"},
 }
 

@@ -9,20 +9,23 @@ import {
   RefreshCw,
   Search,
   Swords,
+  Trash2,
+  UserPlus,
+  Users,
   X,
   Zap,
 } from 'lucide-react';
 import { BattleVisualizer } from './BattleVisualizer';
-import { cancelPvpEntry, createBattleSession, fetchBattleSession, fetchPvpEntryStatus, getStoredToken, joinArenaQueue, submitBattleSessionAction } from '../lib/api';
-import { calculateRarity, normalizeCardType, toNumber, type Rarity } from '../lib/gameLogic';
+import { cancelPvpEntry, createBattleSession, createFriendChallenge, fetchBattleSession, fetchFriends, fetchPvpEntryStatus, getStoredToken, joinArenaQueue, removeFriend, respondFriendChallenge, respondFriendRequest, sendFriendRequest, submitBattleSessionAction } from '../lib/api';
+import { resolveRarity, normalizeCardType, toNumber, type Rarity } from '../lib/gameLogic';
 import { CARD_FALLBACK_SRC } from '../lib/cards';
 import { mockHeroes } from '../lib/mockContent';
 import { cn } from '../lib/utils';
 import { STORAGE_NAMESPACE } from '../lib/runtimeMode';
 import type { BattleBoardUnit } from '../lib/battleTypes';
-import type { ArenaFormation, ArenaSlotKey, BattleHistoryRecord, BattleResult, BattleSessionAction, BattleSessionObservation, BattleSessionSnapshot, EconomySnapshot, PvpBattleMode, PvpMatchRecord, PvpQueueEntry, SavedHero } from '../types';
+import type { ArenaFormation, ArenaSlotKey, BattleHistoryRecord, BattleResult, BattleSessionAction, BattleSessionObservation, BattleSessionSnapshot, EconomySnapshot, FriendsSnapshot, PvpBattleMode, PvpMatchRecord, PvpQueueEntry, SavedHero } from '../types';
 
-type ArenaTab = 'queue' | 'train' | 'battle';
+type ArenaTab = 'queue' | 'train' | 'friends' | 'battle';
 
 type StoredArenaState = {
   selectedHeroIds: string[];
@@ -57,6 +60,16 @@ const ARENA_ROWS: Array<{ label: string; slots: ArenaSlotKey[] }> = [
 const ARENA_SLOT_ORDER: ArenaSlotKey[] = ['front_0', 'front_1', 'front_2', 'back_0', 'back_1', 'back_2'];
 
 const demoHeroes: SavedHero[] = mockHeroes;
+const demoFriends: FriendsSnapshot = {
+  friends: [{ id: 'demo-friend-rival', email: 'rival@example.com', friends_since: new Date().toISOString() }],
+  incoming_requests: [{ id: 'demo-request', status: 'pending', user_id: 'demo-scout', email: 'scout@example.com', created_at: new Date().toISOString() }],
+  outgoing_requests: [],
+  incoming_challenges: [{
+    id: 'demo-challenge', challenger_user_id: 'demo-friend-rival', challenged_user_id: 'simulation-player', status: 'pending',
+    challenger_email: 'rival@example.com', expires_at: new Date(Date.now() + 600_000).toISOString(), created_at: new Date().toISOString(),
+  }],
+  outgoing_challenges: [],
+};
 
 const arenaRarityTone: Record<Rarity, { text: string; border: string; label: string }> = {
   mythic: { text: 'text-[#d7a852]', border: 'border-[#b49664]/70', label: 'MYTHIC' },
@@ -117,7 +130,7 @@ function readStoredArenaState(): StoredArenaState | null {
     const parsed = JSON.parse(raw) as Partial<StoredArenaState>;
     return {
       selectedHeroIds: Array.isArray(parsed.selectedHeroIds) ? parsed.selectedHeroIds.map(String) : [],
-      queueKey: typeof parsed.queueKey === 'string' && parsed.queueKey.trim() ? parsed.queueKey.trim() : DEFAULT_QUEUE_KEY,
+      queueKey: DEFAULT_QUEUE_KEY,
       resumeEntryId: typeof parsed.resumeEntryId === 'string' && parsed.resumeEntryId.trim() ? parsed.resumeEntryId.trim() : null,
     };
   } catch {
@@ -486,9 +499,9 @@ function enrichBattleResultImages(result: BattleResult, teamA: SavedHero[], team
   };
 }
 
-function createPreviewBattleResult(heroes: SavedHero[]): BattleResult {
+function createPreviewBattleResult(heroes: SavedHero[], rivals = createPreviewRivals()): BattleResult {
   const attackers = rankHeroes(heroes).slice(0, 4);
-  const defenders = createPreviewRivals();
+  const defenders = rivals;
   const bottom = Array.from({ length: 4 }, (_, index) => attackers[index] ? unitFromHero(attackers[index], 'A', index) : null);
   const top = Array.from({ length: 4 }, (_, index) => defenders[index] ? unitFromHero(defenders[index], 'B', index) : null);
   const { events, logs, boardHistory } = simulateTrainingBattle(bottom, top, 'Arena');
@@ -649,7 +662,7 @@ function ArenaHeroTile({
   onSelectRival?: () => void;
   mode: 'queue' | 'train';
 }) {
-  const rarity = calculateRarity(heroTotalBp(hero));
+  const rarity = resolveRarity(hero.character);
   const tone = arenaRarityTone[rarity];
   const borderClass = selectedRival && !selectedForger
     ? 'border-rose-500/60 shadow-[0_0_24px_rgba(127,29,29,0.22)]'
@@ -821,18 +834,25 @@ export function ArenaPage({ heroes, economy, token, demoMode = false, activeTab,
   const [, setMatchRecord] = useState<PvpMatchRecord | null>(null);
   const [battleResult, setBattleResult] = useState<BattleResult | null>(null);
   const [battleSession, setBattleSession] = useState<BattleSessionSnapshot | null>(null);
+  const [friends, setFriends] = useState<FriendsSnapshot | null>(demoMode ? demoFriends : null);
+  const [friendEmail, setFriendEmail] = useState('');
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const initializedRef = useRef(false);
+  const mockQueueTimerRef = useRef<number | null>(null);
   const currentToken = token ?? getStoredToken();
+
+  useEffect(() => () => {
+    if (mockQueueTimerRef.current !== null) window.clearTimeout(mockQueueTimerRef.current);
+  }, []);
 
   useEffect(() => {
     if (initializedRef.current || !displayHeroes.length) return;
     initializedRef.current = true;
     const stored = readStoredArenaState();
     if (stored && !demoMode) {
-      setQueueKey(stored.queueKey || DEFAULT_QUEUE_KEY);
+      setQueueKey(DEFAULT_QUEUE_KEY);
       setResumeEntryId(stored.resumeEntryId);
     }
   }, [demoMode, displayHeroes]);
@@ -910,6 +930,164 @@ export function ArenaPage({ heroes, economy, token, demoMode = false, activeTab,
     [battleResult, battleSession, replayRecord]
   );
   const battleLoaded = activeTab === 'battle' && Boolean(liveBattleResult ?? replayResult);
+
+  const refreshFriends = useCallback(async () => {
+    if (demoMode) {
+      setFriends((current) => current ?? demoFriends);
+      return;
+    }
+    if (!currentToken || currentToken === 'mock-token') {
+      setError('Please login to use friends.');
+      return;
+    }
+    try {
+      setFriends(await fetchFriends(currentToken));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load friends.');
+    }
+  }, [currentToken, demoMode]);
+
+  useEffect(() => {
+    if (activeTab !== 'friends') return;
+    void refreshFriends();
+    if (demoMode) return;
+    const interval = window.setInterval(() => void refreshFriends(), 5000);
+    return () => window.clearInterval(interval);
+  }, [activeTab, demoMode, refreshFriends]);
+
+  const handleSendFriendRequest = async () => {
+    const email = friendEmail.trim();
+    if (!email) return;
+    setBusy(true);
+    setError('');
+    try {
+      if (demoMode) {
+        setFriends((current) => ({
+          ...(current ?? demoFriends),
+          outgoing_requests: [...(current ?? demoFriends).outgoing_requests, {
+            id: `demo-request-${Date.now()}`, status: 'pending', user_id: `demo-user-${Date.now()}`, email, created_at: new Date().toISOString(),
+          }],
+        }));
+      } else {
+        setFriends(await sendFriendRequest(email, currentToken));
+      }
+      setFriendEmail('');
+      setMessage(`Friend request sent to ${email}.`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to send friend request.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleFriendRequest = async (requestId: string, action: 'accept' | 'decline') => {
+    setBusy(true);
+    setError('');
+    try {
+      if (demoMode) {
+        setFriends((current) => {
+          const snapshot = current ?? demoFriends;
+          const selected = snapshot.incoming_requests.find((item) => item.id === requestId);
+          return {
+            ...snapshot,
+            incoming_requests: snapshot.incoming_requests.filter((item) => item.id !== requestId),
+            friends: action === 'accept' && selected
+              ? [...snapshot.friends, { id: selected.user_id, email: selected.email, friends_since: new Date().toISOString() }]
+              : snapshot.friends,
+          };
+        });
+      } else {
+        setFriends(await respondFriendRequest(requestId, action, currentToken));
+      }
+      setMessage(action === 'accept' ? 'Friend request accepted.' : 'Friend request declined.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update friend request.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleRemoveFriend = async (friendId: string) => {
+    setBusy(true);
+    setError('');
+    try {
+      if (demoMode) {
+        setFriends((current) => ({ ...(current ?? demoFriends), friends: (current ?? demoFriends).friends.filter((item) => item.id !== friendId) }));
+      } else {
+        setFriends(await removeFriend(friendId, currentToken));
+      }
+      setMessage('Friend removed.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to remove friend.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleChallengeFriend = async (friendId: string) => {
+    if (!selectedHeroes.length) {
+      setError('Select your friendly battle squad in Queue first.');
+      return;
+    }
+    setBusy(true);
+    setError('');
+    try {
+      if (demoMode) {
+        setFriends((current) => ({
+          ...(current ?? demoFriends),
+          outgoing_challenges: [{
+            id: `demo-outgoing-${Date.now()}`, challenger_user_id: 'simulation-player', challenged_user_id: friendId,
+            challenged_email: (current ?? demoFriends).friends.find((item) => item.id === friendId)?.email,
+            status: 'pending', expires_at: new Date(Date.now() + 600_000).toISOString(), created_at: new Date().toISOString(),
+          }, ...(current ?? demoFriends).outgoing_challenges],
+        }));
+      } else {
+        setFriends(await createFriendChallenge(friendId, arenaFormation, currentToken));
+      }
+      setMessage('Friendly challenge sent. No Dust stake or card death applies.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to send friendly challenge.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleFriendChallenge = async (challengeId: string, action: 'accept' | 'decline' | 'cancel') => {
+    if (action === 'accept' && !selectedHeroes.length) {
+      setError('Select your friendly battle squad in Queue first.');
+      return;
+    }
+    setBusy(true);
+    setError('');
+    try {
+      if (demoMode) {
+        if (action === 'accept') {
+          setBattleResult(createPreviewBattleResult(selectedHeroes));
+          setMessage('Friendly simulation resolved. No stake or card death was applied.');
+          onTabChange('battle');
+        } else {
+          setFriends((current) => ({
+            ...(current ?? demoFriends),
+            incoming_challenges: (current ?? demoFriends).incoming_challenges.filter((item) => item.id !== challengeId),
+            outgoing_challenges: (current ?? demoFriends).outgoing_challenges.filter((item) => item.id !== challengeId),
+          }));
+        }
+      } else {
+        const response = await respondFriendChallenge(challengeId, action, action === 'accept' ? arenaFormation : null, currentToken);
+        if (response.battle) {
+          setBattleResult(enrichBattleResultImages(response.battle, selectedHeroes, []));
+          setMessage('Friendly battle resolved. No stake or card death was applied.');
+          onTabChange('battle');
+        } else if (response.snapshot) {
+          setFriends(response.snapshot);
+        }
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to respond to friendly challenge.');
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const moveBattleHero = (heroId: string, direction: -1 | 1) => {
     setBattleOrder((current) => {
@@ -1019,13 +1197,45 @@ export function ArenaPage({ heroes, economy, token, demoMode = false, activeTab,
     setMessage('');
     try {
       if (demoMode) {
-        setBattleResult(createPreviewBattleResult(selectedHeroes));
+        const now = new Date();
+        const entryId = `sim-${now.getTime().toString(36)}`;
+        const simulatedEntry: PvpQueueEntry = {
+          id: entryId,
+          user_id: 'simulation-player',
+          queue_key: queueKey,
+          battle_mode: 'arena_2x3',
+          stake_dust: stakeDust,
+          bp_value: totalBp,
+          status: 'waiting',
+          team_snapshot: {
+            hero_ids: selectedHeroes.map((hero) => hero.id),
+            team: selectedHeroes.map((hero) => ({ id: hero.id, hero_payload: hero.character, created_at: now.toISOString() })),
+            total_bp: totalBp,
+          },
+          formation_snapshot: { mode: 'arena_2x3', board: arenaFormation },
+          expires_at: new Date(now.getTime() + 60_000).toISOString(),
+          created_at: now.toISOString(),
+        };
+        setQueueEntry(simulatedEntry);
         setMatchRecord(null);
-        setQueueEntry(null);
+        setBattleResult(null);
         setBattleSession(null);
-        setResumeEntryId(null);
-        setMessage('Simulation match resolved locally by program control.');
-        onTabChange('battle');
+        setMessage(`Simulated ladder queue entered. Searching within the ${tolerancePct}% BP window.`);
+        mockQueueTimerRef.current = window.setTimeout(() => {
+          const opponents = createPreviewRivals();
+          const opponentBp = opponents.reduce((sum, hero) => sum + heroTotalBp(hero), 0);
+          setQueueEntry({
+            ...simulatedEntry,
+            status: 'matched',
+            opponent_entry_id: `sim-rival-${entryId}`,
+            match_id: `sim-match-${entryId}`,
+            matched_at: new Date().toISOString(),
+          });
+          setBattleResult(createPreviewBattleResult(selectedHeroes, opponents));
+          setMessage(`Rival found at ${formatNumber(opponentBp)} BP. Simulated ranked battle resolved by server-style program control.`);
+          mockQueueTimerRef.current = null;
+          onTabChange('battle');
+        }, 1800);
         return;
       }
       const response = await joinArenaQueue(arenaFormation, queueKey, currentToken);
@@ -1059,6 +1269,13 @@ export function ArenaPage({ heroes, economy, token, demoMode = false, activeTab,
   };
 
   const handleCancel = async () => {
+    if (demoMode && queueEntry && waiting) {
+      if (mockQueueTimerRef.current !== null) window.clearTimeout(mockQueueTimerRef.current);
+      mockQueueTimerRef.current = null;
+      clearQueueArtifacts();
+      setMessage('Simulated ladder search cancelled.');
+      return;
+    }
     if (!currentToken || !queueEntry || !waiting) {
       clearQueueArtifacts();
       return;
@@ -1200,7 +1417,7 @@ export function ArenaPage({ heroes, economy, token, demoMode = false, activeTab,
       cancelled = true;
       window.clearInterval(interval);
     };
-  }, [currentToken, demoMode, resumeEntryId, syncResolvedMatch]);
+  }, [currentToken, demoMode, onTabChange, resumeEntryId, syncResolvedMatch]);
 
   useEffect(() => {
     const loadedResult = liveBattleResult ?? replayResult;
@@ -1221,13 +1438,13 @@ export function ArenaPage({ heroes, economy, token, demoMode = false, activeTab,
           <div className="hidden h-14 border-l border-white/10 xl:block" />
           <div className="pb-1">
             <div className="text-[10px] font-semibold uppercase tracking-[0.32em] text-[#b49664]">
-              {activeTab === 'train' ? 'Simulation' : activeTab === 'queue' ? 'Matchmaking' : 'Combat'}
+              {activeTab === 'train' ? 'Simulation' : activeTab === 'queue' ? 'Matchmaking' : activeTab === 'friends' ? 'Social Arena' : 'Combat'}
             </div>
             <div className="mt-2 flex flex-wrap items-center gap-5">
               <h2 className="font-display text-3xl font-light uppercase tracking-[0.24em] text-stone-100">{activeTab}</h2>
               <div className="h-7 border-l border-white/10" />
               <p className="text-sm text-stone-500">
-                {activeTab === 'train' ? 'Build both lineups and test the clash.' : activeTab === 'queue' ? 'Select a squad and enter ranked matchmaking.' : 'Resolve the prepared battle.'}
+                {activeTab === 'train' ? 'Build both lineups and test the clash.' : activeTab === 'queue' ? 'Select a squad and enter ranked matchmaking.' : activeTab === 'friends' ? 'Manage friends and send stake-free battle invitations.' : 'Resolve the prepared battle.'}
               </p>
             </div>
           </div>
@@ -1407,6 +1624,172 @@ export function ArenaPage({ heroes, economy, token, demoMode = false, activeTab,
             </div>
           </aside>
         </section>
+      ) : activeTab === 'friends' ? (
+        <section className="mt-5 grid gap-6 xl:grid-cols-[minmax(0,1fr)_420px]">
+          <main className="border border-white/8 bg-black/20">
+            <div className="flex flex-col gap-5 border-b border-white/8 p-6 lg:flex-row lg:items-end lg:justify-between">
+              <PanelTitle eyebrow="Warband" title="Friends" />
+              <div className="flex w-full max-w-xl gap-2">
+                <input
+                  type="email"
+                  value={friendEmail}
+                  onChange={(event) => setFriendEmail(event.target.value)}
+                  onKeyDown={(event) => { if (event.key === 'Enter') void handleSendFriendRequest(); }}
+                  placeholder="player@example.com"
+                  className="h-11 min-w-0 flex-1 border border-white/10 bg-black/45 px-4 text-sm text-stone-200 outline-none placeholder:text-stone-600 focus:border-[#b49664]/50"
+                />
+                <button
+                  type="button"
+                  onClick={handleSendFriendRequest}
+                  disabled={busy || !friendEmail.trim()}
+                  className="inline-flex h-11 items-center gap-2 bg-[#806838] px-5 text-[10px] font-semibold uppercase tracking-[0.2em] text-stone-100 transition hover:bg-[#9a7d4a] disabled:opacity-40"
+                >
+                  <UserPlus size={15} /> Add
+                </button>
+              </div>
+            </div>
+
+            <div className="p-6">
+              <div className="mb-4 flex items-center justify-between">
+                <div className="text-[10px] uppercase tracking-[0.24em] text-stone-500">Your allies</div>
+                <div className="text-[10px] uppercase tracking-[0.2em] text-stone-600">{friends?.friends.length ?? 0} total</div>
+              </div>
+              <div className="grid gap-3 md:grid-cols-2">
+                {(friends?.friends ?? []).map((friend) => (
+                  <div key={friend.id} className="border border-white/8 bg-black/30 p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex min-w-0 items-center gap-3">
+                        <div className="flex h-11 w-11 shrink-0 items-center justify-center border border-[#b49664]/30 bg-[#b49664]/8 text-[#d8b06c]">
+                          <Users size={18} />
+                        </div>
+                        <div className="min-w-0">
+                          <div className="truncate text-sm text-stone-100">{friend.email.split('@')[0]}</div>
+                          <div className="mt-1 truncate text-[10px] text-stone-600">{friend.email}</div>
+                        </div>
+                      </div>
+                      <button type="button" onClick={() => handleRemoveFriend(friend.id)} disabled={busy} className="p-2 text-stone-600 hover:text-rose-300" aria-label={`Remove ${friend.email}`}>
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleChallengeFriend(friend.id)}
+                      disabled={busy || selectedHeroes.length === 0}
+                      className="mt-4 inline-flex h-10 w-full items-center justify-center gap-2 border border-[#b49664]/35 bg-[#b49664]/8 text-[10px] font-semibold uppercase tracking-[0.22em] text-[#e8c98d] transition hover:bg-[#b49664]/15 disabled:opacity-35"
+                    >
+                      <Swords size={14} /> Challenge
+                    </button>
+                  </div>
+                ))}
+                {!friends?.friends.length && (
+                  <div className="col-span-full border border-dashed border-white/10 p-8 text-center text-sm text-stone-600">
+                    Add a player by their exact account email to begin your warband.
+                  </div>
+                )}
+              </div>
+            </div>
+          </main>
+
+          <aside className="space-y-5">
+            <div className="border border-white/8 bg-black/20 p-5">
+              <PanelTitle eyebrow="Friendly Battle" title="Squad" />
+              <div className="mt-5 grid grid-cols-2 gap-3">
+                <SmallStat label="Selected" value={`${selectedHeroes.length}/${MAX_TEAM_SIZE}`} tone="gold" />
+                <SmallStat label="Power" value={formatNumber(totalBp)} />
+              </div>
+              <p className="mt-4 text-xs leading-6 text-stone-500">
+                Friendly invitations use the squad selected in Queue. They never charge Dust, change ladder rating, or kill cards.
+              </p>
+              {!selectedHeroes.length && (
+                <button type="button" onClick={() => onTabChange('queue')} className="mt-4 h-10 w-full border border-white/10 text-[10px] uppercase tracking-[0.22em] text-stone-400 hover:text-stone-100">
+                  Select squad in Queue
+                </button>
+              )}
+            </div>
+
+            {!!friends?.incoming_requests.length && (
+              <div className="border border-white/8 bg-black/20 p-5">
+                <div className="text-[10px] font-semibold uppercase tracking-[0.24em] text-[#b49664]">Friend Requests</div>
+                <div className="mt-4 space-y-3">
+                  {friends.incoming_requests.map((item) => (
+                    <div key={item.id} className="border border-white/8 bg-black/30 p-3">
+                      <div className="truncate text-sm text-stone-200">{item.email}</div>
+                      <div className="mt-3 grid grid-cols-2 gap-2">
+                        <button type="button" onClick={() => handleFriendRequest(item.id, 'accept')} disabled={busy} className="h-9 bg-[#806838] text-[9px] uppercase tracking-[0.2em] text-white">Accept</button>
+                        <button type="button" onClick={() => handleFriendRequest(item.id, 'decline')} disabled={busy} className="h-9 border border-white/10 text-[9px] uppercase tracking-[0.2em] text-stone-500">Decline</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {!!friends?.incoming_challenges.length && (
+              <div className="border border-[#b49664]/25 bg-[#b49664]/[0.04] p-5">
+                <div className="text-[10px] font-semibold uppercase tracking-[0.24em] text-[#e8c98d]">Battle Invitations</div>
+                <div className="mt-4 space-y-3">
+                  {friends.incoming_challenges.map((challenge) => (
+                    <div key={challenge.id} className="border border-[#b49664]/20 bg-black/35 p-3">
+                      <div className="text-sm text-stone-200">{challenge.challenger_email ?? 'A friend'} challenges you</div>
+                      <div className="mt-3 grid grid-cols-2 gap-2">
+                        <button type="button" onClick={() => handleFriendChallenge(challenge.id, 'accept')} disabled={busy || !selectedHeroes.length} className="h-9 bg-[#806838] text-[9px] uppercase tracking-[0.2em] text-white disabled:opacity-35">Fight</button>
+                        <button type="button" onClick={() => handleFriendChallenge(challenge.id, 'decline')} disabled={busy} className="h-9 border border-white/10 text-[9px] uppercase tracking-[0.2em] text-stone-500">Decline</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {!!friends?.outgoing_challenges.length && (
+              <div className="border border-white/8 bg-black/20 p-5">
+                <div className="text-[10px] uppercase tracking-[0.24em] text-stone-500">Sent Invitations</div>
+                <div className="mt-3 space-y-3">
+                  {friends.outgoing_challenges.map((challenge) => (
+                    <div key={challenge.id} className="border border-white/8 bg-black/30 p-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="min-w-0 truncate text-xs text-stone-300">{challenge.challenged_email ?? 'Friend'}</div>
+                        <div className={cn('text-[9px] uppercase tracking-[0.18em]', challenge.status === 'resolved' ? 'text-emerald-300' : 'text-[#d8b06c]')}>{challenge.status}</div>
+                      </div>
+                      {challenge.status === 'pending' ? (
+                        <button type="button" onClick={() => handleFriendChallenge(challenge.id, 'cancel')} disabled={busy} className="mt-3 h-8 w-full border border-white/10 text-[9px] uppercase tracking-[0.2em] text-stone-500 hover:text-stone-200">Cancel invite</button>
+                      ) : challenge.status === 'resolved' && challenge.battle_result ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setBattleResult(enrichBattleResultImages(challenge.battle_result!, selectedHeroes, []));
+                            setMessage('Friendly battle replay loaded.');
+                            onTabChange('battle');
+                          }}
+                          className="mt-3 h-8 w-full border border-emerald-400/25 bg-emerald-400/5 text-[9px] uppercase tracking-[0.2em] text-emerald-200"
+                        >
+                          View battle
+                        </button>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {!!friends?.outgoing_requests.length && (
+              <div className="border border-white/8 bg-black/20 p-5">
+                <div className="text-[10px] uppercase tracking-[0.24em] text-stone-500">Pending Requests</div>
+                <div className="mt-3 space-y-2 text-xs text-stone-500">
+                  {friends.outgoing_requests.map((item) => <div key={item.id} className="truncate border-b border-white/6 pb-2">{item.email}</div>)}
+                </div>
+              </div>
+            )}
+
+            <AnimatePresence mode="wait">
+              {(error || message) && (
+                <motion.div key={error || message} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} className={cn('border px-4 py-3 text-sm leading-6', error ? 'border-amber-400/20 bg-amber-400/10 text-amber-100' : 'border-emerald-400/20 bg-emerald-400/10 text-emerald-100')}>
+                  {error || message}
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </aside>
+        </section>
       ) : activeTab === 'queue' ? (
         <section className="mt-5 grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_420px]">
           <main className="border border-white/8 bg-black/20">
@@ -1414,30 +1797,7 @@ export function ArenaPage({ heroes, economy, token, demoMode = false, activeTab,
               search={search}
               onSearchChange={setSearch}
               onClear={() => setSearch('')}
-              right={
-                <div className="flex flex-wrap gap-2">
-                  {[
-                    { key: 'ranked', label: 'Ranked' },
-                    { key: 'friendly', label: 'Friendly' },
-                  ].map((mode) => {
-                    const active = queueKey === mode.key;
-                    return (
-                      <button
-                        key={mode.key}
-                        type="button"
-                        onClick={() => !waiting && setQueueKey(mode.key)}
-                        disabled={waiting}
-                        className={cn(
-                          'h-10 border px-3 text-[10px] font-semibold uppercase tracking-[0.2em] transition disabled:cursor-not-allowed disabled:opacity-50',
-                          active ? 'border-[#b49664]/55 bg-[#b49664]/10 text-[#e8c98d]' : 'border-white/10 bg-black/45 text-stone-500 hover:text-stone-200'
-                        )}
-                      >
-                        {mode.label}
-                      </button>
-                    );
-                  })}
-                </div>
-              }
+              right={<div className="flex h-10 items-center border border-[#b49664]/45 bg-[#b49664]/8 px-4 text-[10px] font-semibold uppercase tracking-[0.22em] text-[#e8c98d]">Ranked Ladder</div>}
             />
 
             <div className="flex min-h-[690px] flex-col p-5">
@@ -1491,11 +1851,13 @@ export function ArenaPage({ heroes, economy, token, demoMode = false, activeTab,
               {waiting && queueEntry && (
                 <div className="mt-5 border border-[#b49664]/25 bg-[#b49664]/[0.055] px-4 py-3">
                   <div className="flex items-center justify-between gap-3">
-                    <span className="text-[10px] font-semibold uppercase tracking-[0.24em] text-[#e8c98d]">Live Queue</span>
+                    <span className="text-[10px] font-semibold uppercase tracking-[0.24em] text-[#e8c98d]">{demoMode ? 'Simulated Ladder' : 'Live Queue'}</span>
                     <span className="text-[10px] uppercase tracking-[0.2em] text-stone-500">Searching</span>
                   </div>
                   <p className="mt-2 text-xs leading-5 text-stone-400">
-                    Awaiting an Agent squad in your {tolerancePct}% BP window. The match resolves automatically when one joins.
+                    {demoMode
+                      ? `Searching a simulated ranked population in your ${tolerancePct}% BP window.`
+                      : `Awaiting a rival squad in your ${tolerancePct}% BP window. The server resolves the battle automatically when one joins.`}
                   </p>
                   <div className="mt-2 text-[9px] uppercase tracking-[0.18em] text-stone-600">
                     Entry {queueEntry.id.slice(0, 8)} · Cards locked until match, cancel, or expiry
@@ -1509,7 +1871,7 @@ export function ArenaPage({ heroes, economy, token, demoMode = false, activeTab,
                 className="mt-5 inline-flex h-14 w-full items-center justify-center gap-3 bg-[#9a7338] px-5 text-[13px] font-semibold uppercase tracking-[0.24em] text-stone-100 transition hover:bg-[#b18647] disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {busy ? <RefreshCw size={17} className="animate-spin" /> : <Zap size={17} />}
-                {waiting ? 'Searching' : demoMode ? 'Simulate Match' : 'Find Match'}
+                {waiting ? 'Searching' : 'Find Match'}
               </button>
               <button
                 type="button"

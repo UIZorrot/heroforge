@@ -5,7 +5,7 @@ import os
 import secrets
 import threading
 from functools import wraps
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from uuid import UUID
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -38,7 +38,7 @@ from db import (
     serialize_json,
 )
 from relic_catalog import get_low_tier_relic_types, get_relic_catalog, get_relic_definition
-from market_logic import build_market_board_snapshot, relic_market_quote
+from market_logic import build_market_board_snapshot, is_market_purchasable, relic_market_quote
 from utils import extract_json
 from game_logic import adjust_based_on_bp
 from battle_logic import run_auto_duel, run_team_duel
@@ -77,6 +77,9 @@ class OpenAICompatibleModel:
         response = self._client.chat.completions.create(
             model=self._model_name,
             messages=messages,
+            # Both forge prompts ask for JSON; enforce it at the API level so a
+            # chatty reply cannot slip past extract_json.
+            response_format={"type": "json_object"},
         )
         choice = response.choices[0].message if response.choices else None
         text = (choice.content or "") if choice else ""
@@ -264,6 +267,25 @@ knight, paladin, warrior, berserker, assassin, rogue, mage, sorcerer, cleric, ra
 
 Rules:
 
+[Attack Type Visual Guide]
+TYPE drives the battle VFX, so choose it from the character's visual identity and lore, not from the stat profile.
+"weapon" and "flesh" are melee types (instant close-range hit effects on the target); every other type fires a visible projectile across the board.
+
+- flesh: unarmed bestial melee — claws, fangs, bites, tail swipes. Visual: crimson claw-mark slashes. Typical: beasts, monsters, werewolves, brawlers, feral mutants.
+- weapon: armed melee — swords, axes, hammers, spears, daggers. Visual: steel-white strike slash with metal sparks. Typical: knights, warriors, assassins, duelists, gladiators.
+- fire: burning projectile — fireballs, flame waves, magma. Visual: red-orange fire trail ending in an ember burst. Typical: pyromancers, fire dragons, flame demons, phoenixes.
+- frost: freezing projectile — ice lances, frost bolts, hail. Visual: pale-blue crystalline bolt ending in a freezing burst. Typical: ice mages, winter spirits, frost giants, yetis.
+- thunder: lightning projectile — thunderbolts, storm lances. Visual: violet-blue electric bolt with a storm flash. Typical: storm callers, lightning elementals, thunder gods, tesla-engineered machines.
+- magic: pure arcane projectile — mana bolts, arcane comets, runes. Visual: violet arcane comet with a runic glyph burst. Typical: wizards, sorcerers, warlocks, and any spellcaster without a specific elemental affinity.
+- poison: venomous projectile — poison spit, toxic darts, acid spray. Visual: toxic green bolt ending in a spore burst. Typical: snakes, spiders, scorpions, plague doctors, venom rogues, alchemists.
+- dark: shadow projectile — void orbs, curses, soul siphons. Visual: purple-black void orb with soul wisps. Typical: necromancers, demons, shadow assassins, cultists, liches, void entities.
+- light: holy projectile — radiant spears, sacred beams, consecrated light. Visual: golden-white lance with a halo burst. Typical: paladins, priests, angels, sun deities, holy crusaders.
+- nature: living projectile — thorn volleys, vines, spores, briars. Visual: verdant green bolt with leaves and thorns. Typical: druids, treants, dryads, fae, rangers channeling living magic.
+- water: water projectile — water jets, tidal bolts, crushing waves. Visual: azure water bolt with a bubble burst. Typical: sea creatures, sirens, water mages, krakens, tide spirits.
+- gun: firearm projectile — bullets, shells, cannon shot. Visual: tracer round with muzzle flash and a bullet-impact hit. Typical: gunners, snipers, musketeers, cowboys, artillery mechs.
+
+Pick exactly ONE type for the character's basic attack (state_weights.TYPE). Each skill has its own TYPE from the same list; a skill may differ from the basic attack when its fiction says so (a fire mage can have a frost prison skill). Never invent new types.
+
 [State Weights]
 Output weights from 1 to 10 for each stat.
 1 means very low priority, 10 means the highest priority.
@@ -277,7 +299,7 @@ Output weights from 1 to 10 for each stat.
 "PI": <1-10>,
 "EV": <1-10>,
 "AC": <1-10>,
-"TYPE": "<Attack Type>" (choose ONE canonical type: flesh, magic, thunder, weapon, gun, fire, poison, frost, dark, light, nature, water)
+"TYPE": "<Attack Type>" (choose ONE canonical type from the Attack Type Visual Guide: flesh, magic, thunder, weapon, gun, fire, poison, frost, dark, light, nature, water)
 
 [SKILL]
 Choose 2 out of 3 skill roles for the character:
@@ -294,10 +316,10 @@ The skill object must include:
 "IS_PASSIVE": <true or false>,
 "name": "<Skill Name>",
 "description": "<Skill Description>",
-"TYPE": "<Effect Type>",
-"TARGET": "<Self/ally/Enemy>",
-"TARGET_NUM": "<How many units will be targeted>",
-"RANGE": "<melee|ranged|self|ally|enemy>",
+"TYPE": "<Effect Type>" (ONE canonical type from the Attack Type Visual Guide; it decides this skill's VFX and may differ from the basic attack type),
+"TARGET": "<Self|Ally|Enemy>" (who the skill affects: Self = the caster, Ally = your own team, Enemy = the opposing team),
+"TARGET_NUM": <integer 1-6> (how many units are hit; 1 for single-target strikes, 2-3 for cleaves and volleys, more only for true area attacks),
+"RANGE": "<melee|ranged|self|ally|enemy>" (melee = close-quarters hit, ranged/enemy = projectile across the board, self/ally = cast on your own side; keep it consistent with TARGET),
 "IS_STUN": <true or false>,
 "BUFF_TIME": <turn count, 0 if the effect does not exist>,
 "BUFF_NAME": "<stun, frozen, poison, wound, burn, curse, heal, pray>",
@@ -429,7 +451,7 @@ def session_required(fn):
         if not user:
             return jsonify({"error": "Authentication required"}), 401
         if user.get("auth_type") != "session":
-            return jsonify({"error": "A browser session is required for key management"}), 403
+            return jsonify({"error": "A browser session is required for this account feature"}), 403
         request.current_user = user
         return fn(*args, **kwargs)
 
@@ -709,10 +731,12 @@ def economy_snapshot(user):
             "pvp_entry": settings.dust_cost_pvp_entry,
             "pvp_revive": settings.dust_cost_pvp_revive,
             "pvp_stake": settings.pvp_stake_dust,
+            "decompose_bp_percent": settings.dust_decompose_bp_percent,
         },
         "starter": {
             "dust_balance": settings.starter_dust_balance,
         },
+        "shop": currency_shop_snapshot(),
         "pvp": {
             "match_tolerance_pct": settings.pvp_match_tolerance_pct,
             "low_tier_relic_drop_pct": settings.pvp_low_tier_relic_drop_pct,
@@ -730,8 +754,8 @@ DAILY_TASKS = {
         "reward_dust": 100,
     },
     "use_relic_once": {
-        "title": "Use one relic",
-        "description": "Use a relic to enchant one card.",
+        "title": "Bind one shard",
+        "description": "Bind a shard to enchant one card.",
         "target": 1,
         "reward_dust": 300,
     },
@@ -760,39 +784,20 @@ def _daily_date_iso():
     return datetime.now(timezone.utc).date().isoformat()
 
 
-def _ensure_daily_task_rows(user_id):
-    task_date = _daily_date_iso()
-    rows = []
-    with get_connection() as conn:
-        with conn.cursor() as cur:
-            for key, config in DAILY_TASKS.items():
-                cur.execute(
-                    """
-                    INSERT INTO daily_task_progress (
-                        user_id, task_date, task_key, target, reward_dust
-                    )
-                    VALUES (%s, %s, %s, %s, %s)
-                    ON CONFLICT (user_id, task_date, task_key) DO UPDATE
-                    SET target = EXCLUDED.target,
-                        reward_dust = EXCLUDED.reward_dust,
-                        updated_at = now()
-                    RETURNING id, user_id, task_date, task_key, progress, target,
-                              reward_dust, claimed_at, created_at, updated_at
-                    """,
-                    (
-                        user_id,
-                        task_date,
-                        key,
-                        int(config["target"]),
-                        int(config["reward_dust"]),
-                    ),
-                )
-                rows.append(cur.fetchone())
-        conn.commit()
-    return rows
+DAILY_TASKS_PER_DAY = 2
+DAILY_TASK_MAX_ACTIVE = 5
+_DAILY_ROTATION_EPOCH = date(2026, 1, 1)
 
 
-def _daily_task_payload(row):
+def _daily_rotation_order(day=None):
+    """Deterministic rotation: everyone's offer window starts at the same pool offset each day."""
+    pool = list(DAILY_TASKS)
+    day = day or datetime.now(timezone.utc).date()
+    start = ((day - _DAILY_ROTATION_EPOCH).days * DAILY_TASKS_PER_DAY) % len(pool)
+    return [pool[(start + i) % len(pool)] for i in range(len(pool))]
+
+
+def _offer_payload(row):
     config = DAILY_TASKS.get(row["task_key"], {})
     progress = int(row["progress"])
     target = int(row["target"])
@@ -802,7 +807,7 @@ def _daily_task_payload(row):
         "key": row["task_key"],
         "title": config.get("title", row["task_key"]),
         "description": config.get("description", ""),
-        "task_date": str(row["task_date"]),
+        "task_date": str(row["assigned_on"]),
         "progress": progress,
         "target": target,
         "reward_dust": int(row["reward_dust"]),
@@ -812,8 +817,58 @@ def _daily_task_payload(row):
     }
 
 
+def _active_task_offers(user_id):
+    return fetch_all(
+        """
+        SELECT id, user_id, task_key, assigned_on, progress, target, reward_dust,
+               claimed_at, created_at, updated_at
+        FROM daily_task_offers
+        WHERE user_id = %s AND claimed_at IS NULL
+        ORDER BY assigned_on ASC, created_at ASC
+        """,
+        (user_id,),
+    )
+
+
+def _ensure_daily_task_offers(user_id):
+    """Offer today's tasks once per day; unfinished tasks accumulate up to the cap."""
+    today = _daily_date_iso()
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT daily_tasks_offered_on FROM users WHERE id = %s FOR UPDATE",
+                (user_id,),
+            )
+            user_row = cur.fetchone()
+            if user_row and user_row.get("daily_tasks_offered_on") and str(user_row["daily_tasks_offered_on"]) == today:
+                return
+            cur.execute(
+                "SELECT task_key FROM daily_task_offers WHERE user_id = %s AND claimed_at IS NULL",
+                (user_id,),
+            )
+            active_keys = {row["task_key"] for row in cur.fetchall()}
+            slots = max(0, DAILY_TASK_MAX_ACTIVE - len(active_keys))
+            candidates = [key for key in _daily_rotation_order() if key not in active_keys]
+            for key in candidates[: min(DAILY_TASKS_PER_DAY, slots)]:
+                config = DAILY_TASKS[key]
+                cur.execute(
+                    """
+                    INSERT INTO daily_task_offers (user_id, task_key, assigned_on, target, reward_dust)
+                    VALUES (%s, %s, %s, %s, %s)
+                    ON CONFLICT (user_id, task_key) WHERE claimed_at IS NULL DO NOTHING
+                    """,
+                    (user_id, key, today, int(config["target"]), int(config["reward_dust"])),
+                )
+            cur.execute(
+                "UPDATE users SET daily_tasks_offered_on = %s WHERE id = %s",
+                (today, user_id),
+            )
+        conn.commit()
+
+
 def daily_snapshot(user):
     task_date = _daily_date_iso()
+    _ensure_daily_task_offers(user["id"])
     checkin = fetch_one(
         """
         SELECT id, user_id, claim_date, reward_dust, created_at
@@ -822,7 +877,7 @@ def daily_snapshot(user):
         """,
         (user["id"], task_date),
     )
-    tasks = [_daily_task_payload(row) for row in _ensure_daily_task_rows(user["id"])]
+    tasks = [_offer_payload(row) for row in _active_task_offers(user["id"])]
     tasks.sort(key=lambda item: list(DAILY_TASKS).index(item["key"]) if item["key"] in DAILY_TASKS else 999)
     return {
         "date": task_date,
@@ -833,39 +888,29 @@ def daily_snapshot(user):
             "claimed_at": checkin["created_at"].isoformat() if checkin else None,
         },
         "tasks": tasks,
+        "tasks_per_day": DAILY_TASKS_PER_DAY,
+        "tasks_capacity": DAILY_TASK_MAX_ACTIVE,
+        "all_completed": len(tasks) == 0,
         "economy": economy_snapshot(user),
     }
 
 
 def _record_daily_task_progress(user_id, task_key, amount=1):
+    """Record progress on the active offer for this key; unoffered tasks are ignored."""
     if task_key not in DAILY_TASKS:
         return None
-    task_date = _daily_date_iso()
-    config = DAILY_TASKS[task_key]
     with get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                INSERT INTO daily_task_progress (
-                    user_id, task_date, task_key, progress, target, reward_dust
-                )
-                VALUES (%s, %s, %s, %s, %s, %s)
-                ON CONFLICT (user_id, task_date, task_key) DO UPDATE
-                SET progress = LEAST(daily_task_progress.target, daily_task_progress.progress + EXCLUDED.progress),
-                    target = EXCLUDED.target,
-                    reward_dust = EXCLUDED.reward_dust,
+                UPDATE daily_task_offers
+                SET progress = LEAST(target, progress + %s),
                     updated_at = now()
-                RETURNING id, user_id, task_date, task_key, progress, target,
+                WHERE user_id = %s AND task_key = %s AND claimed_at IS NULL
+                RETURNING id, user_id, task_key, assigned_on, progress, target,
                           reward_dust, claimed_at, created_at, updated_at
                 """,
-                (
-                    user_id,
-                    task_date,
-                    task_key,
-                    max(1, int(amount)),
-                    int(config["target"]),
-                    int(config["reward_dust"]),
-                ),
+                (max(1, int(amount)), user_id, task_key),
             )
             row = cur.fetchone()
         conn.commit()
@@ -1734,11 +1779,15 @@ def _join_pvp_queue(user, data, require_team_payload: bool = False):
     team_b = entry_b["team_snapshot"].get("team", []) if isinstance(entry_b.get("team_snapshot"), dict) else []
     label_a = "Player A"
     label_b = "Player B"
+    # The browser Arena is a fully server-authoritative auto battler. REST
+    # control remains available for explicit agent 1v1/4v4 queues, while the
+    # normal 2x3 ladder resolves immediately and returns a complete replay.
+    session_control_mode = "program" if battle_mode == "arena_2x3" else "rest"
 
     try:
         session = battle_sessions.create_battle_session(
             battle_mode=battle_mode,
-            control_mode="rest",
+            control_mode=session_control_mode,
             label_a=label_a,
             label_b=label_b,
             team_a=[item["hero_payload"] for item in team_a],
@@ -1759,14 +1808,14 @@ def _join_pvp_queue(user, data, require_team_payload: bool = False):
                 serialize_json(
                     {
                         "battle_session_id": session.session_id,
-                        "control_mode": "rest",
+                        "control_mode": session_control_mode,
                         "wait_seconds": session.wait_seconds,
                     }
                 ),
                 match_row["id"],
             ),
         )
-        updated_match_row = _fetch_pvp_match(match_row["id"])
+        updated_match_row, session_snapshot = _sync_pvp_match_session(match_row["id"])
         battle_payload = {
             "queue_key": queue_key,
             "battle_mode": battle_mode,
@@ -1781,13 +1830,13 @@ def _join_pvp_queue(user, data, require_team_payload: bool = False):
             "entry": normalize_json_value(queue_entry),
             "opponent": normalize_json_value(opponent_entry),
             "match": normalize_json_value(updated_match_row or match_row),
-            "battle": None,
-            "battle_session": session.public_snapshot(),
+            "battle": (session_snapshot or {}).get("result"),
+            "battle_session": session_snapshot or session.public_snapshot(),
             "battle_payload": battle_payload,
-            "reward": None,
-            "card_state_changes": [],
+            "reward": (updated_match_row or {}).get("reward_payload") or None,
+            "card_state_changes": (updated_match_row or {}).get("card_state_changes") or [],
             "economy": economy_snapshot(user),
-            "winner_side": None,
+            "winner_side": (updated_match_row or {}).get("winner_side"),
         }
     except Exception as exc:
         logging.exception("Failed to create PvP battle session")
@@ -1940,6 +1989,7 @@ def daily_sign_in_claim():
     user = current_user()
     task_date = _daily_date_iso()
     try:
+        ensure_user_wallet(user["id"])
         with get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -1954,16 +2004,35 @@ def daily_sign_in_claim():
                 row = cur.fetchone()
                 if not row:
                     return jsonify({"error": "Daily sign-in already claimed"}), 400
-            conn.commit()
 
-        adjust_dust_balance(
-            user["id"],
-            DAILY_SIGN_IN_REWARD_DUST,
-            "daily_sign_in",
-            ref_type="daily_checkin",
-            ref_id=str(row["id"]),
-            metadata={"claim_date": task_date},
-        )
+                # Pay the reward in the same transaction so a failed payment
+                # can never strand a claimed check-in row.
+                cur.execute(
+                    "SELECT dust_balance FROM user_wallets WHERE user_id = %s FOR UPDATE",
+                    (user["id"],),
+                )
+                wallet = cur.fetchone()
+                next_balance = int(wallet["dust_balance"] if wallet else 0) + DAILY_SIGN_IN_REWARD_DUST
+                cur.execute(
+                    "UPDATE user_wallets SET dust_balance = %s, updated_at = now() WHERE user_id = %s",
+                    (next_balance, user["id"]),
+                )
+                cur.execute(
+                    """
+                    INSERT INTO resource_transactions (
+                        user_id, resource_type, delta, balance_after, reason, ref_type, ref_id, metadata
+                    )
+                    VALUES (%s, 'dust', %s, %s, 'daily_sign_in', 'daily_checkin', %s, %s::jsonb)
+                    """,
+                    (
+                        user["id"],
+                        DAILY_SIGN_IN_REWARD_DUST,
+                        next_balance,
+                        str(row["id"]),
+                        serialize_json({"claim_date": task_date}),
+                    ),
+                )
+            conn.commit()
         return jsonify({"ok": True, "data": daily_snapshot(user)})
     except Exception as exc:
         logging.exception("daily_sign_in_claim failed")
@@ -1978,48 +2047,56 @@ def daily_task_claim(task_key):
         return jsonify({"error": "Unknown daily task"}), 404
 
     try:
-        task_date = _daily_date_iso()
-        _ensure_daily_task_rows(user["id"])
+        ensure_user_wallet(user["id"])
         with get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    SELECT id, progress, target, reward_dust, claimed_at
-                    FROM daily_task_progress
-                    WHERE user_id = %s AND task_date = %s AND task_key = %s
+                    SELECT id, progress, target, reward_dust
+                    FROM daily_task_offers
+                    WHERE user_id = %s AND task_key = %s AND claimed_at IS NULL
                     FOR UPDATE
                     """,
-                    (user["id"], task_date, task_key),
+                    (user["id"], task_key),
                 )
                 row = cur.fetchone()
                 if not row:
-                    return jsonify({"error": "Daily task not found"}), 404
-                if row["claimed_at"] is not None:
-                    return jsonify({"error": "Daily task already claimed"}), 400
+                    return jsonify({"error": "Daily task is not active"}), 404
                 if int(row["progress"]) < int(row["target"]):
                     return jsonify({"error": "Daily task not complete"}), 400
 
+                # Mark claimed and pay out atomically; a failure rolls both back.
                 cur.execute(
-                    """
-                    UPDATE daily_task_progress
-                    SET claimed_at = now(),
-                        updated_at = now()
-                    WHERE id = %s
-                    RETURNING id, reward_dust
-                    """,
+                    "UPDATE daily_task_offers SET claimed_at = now(), updated_at = now() WHERE id = %s",
                     (row["id"],),
                 )
-                claimed = cur.fetchone()
+                cur.execute(
+                    "SELECT dust_balance FROM user_wallets WHERE user_id = %s FOR UPDATE",
+                    (user["id"],),
+                )
+                wallet = cur.fetchone()
+                reward = int(row["reward_dust"])
+                next_balance = int(wallet["dust_balance"] if wallet else 0) + reward
+                cur.execute(
+                    "UPDATE user_wallets SET dust_balance = %s, updated_at = now() WHERE user_id = %s",
+                    (next_balance, user["id"]),
+                )
+                cur.execute(
+                    """
+                    INSERT INTO resource_transactions (
+                        user_id, resource_type, delta, balance_after, reason, ref_type, ref_id, metadata
+                    )
+                    VALUES (%s, 'dust', %s, %s, 'daily_task_reward', 'daily_task_offer', %s, %s::jsonb)
+                    """,
+                    (
+                        user["id"],
+                        reward,
+                        next_balance,
+                        str(row["id"]),
+                        serialize_json({"task_key": task_key}),
+                    ),
+                )
             conn.commit()
-
-        adjust_dust_balance(
-            user["id"],
-            int(claimed["reward_dust"]),
-            "daily_task_reward",
-            ref_type="daily_task_progress",
-            ref_id=str(claimed["id"]),
-            metadata={"task_key": task_key, "task_date": task_date},
-        )
         return jsonify({"ok": True, "data": daily_snapshot(user)})
     except Exception as exc:
         logging.exception("daily_task_claim failed")
@@ -2501,6 +2578,346 @@ def pvp_entry():
         return jsonify({"error": str(e)}), 500
 
 
+def _ordered_friend_pair(user_id_a, user_id_b):
+    values = sorted((str(user_id_a), str(user_id_b)))
+    return values[0], values[1]
+
+
+def _friendship_exists(user_id_a, user_id_b):
+    user_a_id, user_b_id = _ordered_friend_pair(user_id_a, user_id_b)
+    return bool(fetch_one("SELECT 1 AS ok FROM friendships WHERE user_a_id = %s AND user_b_id = %s", (user_a_id, user_b_id)))
+
+
+def _friends_snapshot(user_id):
+    execute("UPDATE friend_challenges SET status = 'expired' WHERE status = 'pending' AND expires_at <= now()")
+    friends = fetch_all(
+        """
+        SELECT u.id, u.email, f.created_at AS friends_since
+        FROM friendships f
+        JOIN users u ON u.id = CASE WHEN f.user_a_id = %s THEN f.user_b_id ELSE f.user_a_id END
+        WHERE f.user_a_id = %s OR f.user_b_id = %s
+        ORDER BY lower(u.email)
+        """,
+        (user_id, user_id, user_id),
+    )
+    incoming_requests = fetch_all(
+        """
+        SELECT r.id, r.status, r.created_at, u.id AS user_id, u.email
+        FROM friend_requests r JOIN users u ON u.id = r.sender_user_id
+        WHERE r.receiver_user_id = %s AND r.status = 'pending'
+        ORDER BY r.created_at DESC
+        """,
+        (user_id,),
+    )
+    outgoing_requests = fetch_all(
+        """
+        SELECT r.id, r.status, r.created_at, u.id AS user_id, u.email
+        FROM friend_requests r JOIN users u ON u.id = r.receiver_user_id
+        WHERE r.sender_user_id = %s AND r.status = 'pending'
+        ORDER BY r.created_at DESC
+        """,
+        (user_id,),
+    )
+    incoming_challenges = fetch_all(
+        """
+        SELECT c.*, u.email AS challenger_email
+        FROM friend_challenges c JOIN users u ON u.id = c.challenger_user_id
+        WHERE c.challenged_user_id = %s AND c.status = 'pending'
+        ORDER BY c.created_at DESC
+        """,
+        (user_id,),
+    )
+    outgoing_challenges = fetch_all(
+        """
+        SELECT c.*, u.email AS challenged_email
+        FROM friend_challenges c JOIN users u ON u.id = c.challenged_user_id
+        WHERE c.challenger_user_id = %s AND c.status IN ('pending', 'resolved')
+        ORDER BY c.created_at DESC LIMIT 20
+        """,
+        (user_id,),
+    )
+    return {
+        "friends": normalize_rows(friends),
+        "incoming_requests": normalize_rows(incoming_requests),
+        "outgoing_requests": normalize_rows(outgoing_requests),
+        "incoming_challenges": normalize_rows(incoming_challenges),
+        "outgoing_challenges": normalize_rows(outgoing_challenges),
+    }
+
+
+@app.route("/api/friends", methods=["GET"])
+@session_required
+def friends_list():
+    return jsonify({"ok": True, "data": _friends_snapshot(current_user()["id"])})
+
+
+@app.route("/api/friends/requests", methods=["POST"])
+@session_required
+def friend_request_create():
+    user = current_user()
+    try:
+        email = str((request.json or {}).get("email") or "").strip().lower()
+        if not email:
+            raise ValueError("Friend email is required")
+        target = fetch_one("SELECT id, email FROM users WHERE lower(email) = %s", (email,))
+        if not target:
+            raise ValueError("No player exists with that email")
+        if str(target["id"]) == str(user["id"]):
+            raise ValueError("You cannot add yourself")
+        if _friendship_exists(user["id"], target["id"]):
+            raise ValueError("This player is already your friend")
+        existing = fetch_one(
+            """
+            SELECT id, sender_user_id, receiver_user_id FROM friend_requests
+            WHERE status = 'pending'
+              AND LEAST(sender_user_id, receiver_user_id) = LEAST(%s::uuid, %s::uuid)
+              AND GREATEST(sender_user_id, receiver_user_id) = GREATEST(%s::uuid, %s::uuid)
+            """,
+            (user["id"], target["id"], user["id"], target["id"]),
+        )
+        if existing:
+            if str(existing["sender_user_id"]) == str(target["id"]):
+                raise ValueError("This player already sent you a friend request")
+            raise ValueError("Friend request already sent")
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO friend_requests (sender_user_id, receiver_user_id)
+                    VALUES (%s, %s)
+                    RETURNING id, sender_user_id, receiver_user_id, status, created_at
+                    """,
+                    (user["id"], target["id"]),
+                )
+                row = cur.fetchone()
+            conn.commit()
+        return jsonify({"ok": True, "data": normalize_json_value(row), "friends": _friends_snapshot(user["id"])}), 201
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception:
+        logging.exception("Failed to create friend request")
+        return jsonify({"error": "Failed to create friend request"}), 500
+
+
+@app.route("/api/friends/requests/<request_id>/<action>", methods=["POST"])
+@session_required
+def friend_request_respond(request_id, action):
+    user = current_user()
+    if action not in {"accept", "decline"}:
+        return jsonify({"error": "Unsupported friend request action"}), 404
+    try:
+        UUID(str(request_id))
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT * FROM friend_requests WHERE id = %s AND receiver_user_id = %s FOR UPDATE",
+                    (request_id, user["id"]),
+                )
+                row = cur.fetchone()
+                if not row:
+                    raise ValueError("Friend request not found")
+                if row["status"] != "pending":
+                    raise ValueError("Friend request is no longer pending")
+                next_status = "accepted" if action == "accept" else "declined"
+                cur.execute("UPDATE friend_requests SET status = %s, responded_at = now() WHERE id = %s", (next_status, request_id))
+                if action == "accept":
+                    user_a_id, user_b_id = _ordered_friend_pair(row["sender_user_id"], row["receiver_user_id"])
+                    cur.execute(
+                        "INSERT INTO friendships (user_a_id, user_b_id) VALUES (%s, %s) ON CONFLICT DO NOTHING",
+                        (user_a_id, user_b_id),
+                    )
+                    cur.execute(
+                        """
+                        UPDATE friend_requests SET status = 'cancelled', responded_at = now()
+                        WHERE id <> %s AND status = 'pending'
+                          AND LEAST(sender_user_id, receiver_user_id) = LEAST(%s::uuid, %s::uuid)
+                          AND GREATEST(sender_user_id, receiver_user_id) = GREATEST(%s::uuid, %s::uuid)
+                        """,
+                        (request_id, user_a_id, user_b_id, user_a_id, user_b_id),
+                    )
+            conn.commit()
+        return jsonify({"ok": True, "data": _friends_snapshot(user["id"])})
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception:
+        logging.exception("Failed to respond to friend request")
+        return jsonify({"error": "Failed to respond to friend request"}), 500
+
+
+@app.route("/api/friends/<friend_user_id>", methods=["DELETE"])
+@session_required
+def friend_remove(friend_user_id):
+    user = current_user()
+    try:
+        UUID(str(friend_user_id))
+        user_a_id, user_b_id = _ordered_friend_pair(user["id"], friend_user_id)
+        execute("DELETE FROM friendships WHERE user_a_id = %s AND user_b_id = %s", (user_a_id, user_b_id))
+        execute(
+            "UPDATE friend_challenges SET status = 'cancelled', responded_at = now() WHERE status = 'pending' AND LEAST(challenger_user_id, challenged_user_id) = LEAST(%s::uuid, %s::uuid) AND GREATEST(challenger_user_id, challenged_user_id) = GREATEST(%s::uuid, %s::uuid)",
+            (user_a_id, user_b_id, user_a_id, user_b_id),
+        )
+        return jsonify({"ok": True, "data": _friends_snapshot(user["id"])})
+    except Exception:
+        logging.exception("Failed to remove friend")
+        return jsonify({"error": "Failed to remove friend"}), 400
+
+
+@app.route("/api/friends/<friend_user_id>/challenges", methods=["POST"])
+@session_required
+def friend_challenge_create(friend_user_id):
+    user = current_user()
+    try:
+        UUID(str(friend_user_id))
+        if not _friendship_exists(user["id"], friend_user_id):
+            raise ValueError("Only friends can challenge each other")
+        formation, hero_ids = _normalize_arena_formation((request.json or {}).get("formation"))
+        team, total_bp = _load_pvp_team_snapshot(user, hero_ids, "arena_2x3", formation=formation)
+        existing = fetch_one(
+            "SELECT id FROM friend_challenges WHERE status = 'pending' AND LEAST(challenger_user_id, challenged_user_id) = LEAST(%s::uuid, %s::uuid) AND GREATEST(challenger_user_id, challenged_user_id) = GREATEST(%s::uuid, %s::uuid)",
+            (user["id"], friend_user_id, user["id"], friend_user_id),
+        )
+        if existing:
+            raise ValueError("A friendly challenge is already pending between you")
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO friend_challenges (
+                        challenger_user_id, challenged_user_id, challenger_formation, challenger_team_snapshot
+                    ) VALUES (%s, %s, %s::jsonb, %s::jsonb)
+                    RETURNING *
+                    """,
+                    (
+                        user["id"], friend_user_id, serialize_json({"mode": "arena_2x3", "board": formation}),
+                        serialize_json({"hero_ids": hero_ids, "team": team, "total_bp": total_bp}),
+                    ),
+                )
+                row = cur.fetchone()
+            conn.commit()
+        return jsonify({"ok": True, "data": normalize_json_value(row), "friends": _friends_snapshot(user["id"])}), 201
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception:
+        logging.exception("Failed to create friend challenge")
+        return jsonify({"error": "Failed to create friend challenge"}), 500
+
+
+@app.route("/api/friend-challenges/<challenge_id>/<action>", methods=["POST"])
+@session_required
+def friend_challenge_respond(challenge_id, action):
+    user = current_user()
+    claimed_challenge_id = None
+    if action not in {"accept", "decline", "cancel"}:
+        return jsonify({"error": "Unsupported challenge action"}), 404
+    try:
+        UUID(str(challenge_id))
+        challenge = fetch_one("SELECT * FROM friend_challenges WHERE id = %s", (challenge_id,))
+        if not challenge:
+            return jsonify({"error": "Friendly challenge not found"}), 404
+        if challenge["status"] != "pending":
+            raise ValueError("Friendly challenge is no longer pending")
+        is_challenger = str(challenge["challenger_user_id"]) == str(user["id"])
+        is_challenged = str(challenge["challenged_user_id"]) == str(user["id"])
+        if action == "cancel" and not is_challenger:
+            return jsonify({"error": "Only the challenger can cancel this challenge"}), 403
+        if action in {"accept", "decline"} and not is_challenged:
+            return jsonify({"error": "Only the invited friend can respond"}), 403
+        if action != "accept":
+            next_status = "declined" if action == "decline" else "cancelled"
+            execute("UPDATE friend_challenges SET status = %s, responded_at = now() WHERE id = %s", (next_status, challenge_id))
+            return jsonify({"ok": True, "data": _friends_snapshot(user["id"])})
+        if challenge["expires_at"] <= datetime.now(timezone.utc):
+            execute("UPDATE friend_challenges SET status = 'expired', responded_at = now() WHERE id = %s", (challenge_id,))
+            raise ValueError("Friendly challenge expired")
+
+        formation, hero_ids = _normalize_arena_formation((request.json or {}).get("formation"))
+        challenged_team, challenged_bp = _load_pvp_team_snapshot(user, hero_ids, "arena_2x3", formation=formation)
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE friend_challenges
+                    SET status = 'accepted', responded_at = now()
+                    WHERE id = %s AND challenged_user_id = %s AND status = 'pending'
+                    RETURNING id
+                    """,
+                    (challenge_id, user["id"]),
+                )
+                claimed = cur.fetchone()
+            conn.commit()
+        if not claimed:
+            raise ValueError("Friendly challenge is no longer pending")
+        claimed_challenge_id = challenge_id
+        challenger_snapshot = normalize_json_value(challenge["challenger_team_snapshot"])
+        challenger_team = challenger_snapshot.get("team", []) if isinstance(challenger_snapshot, dict) else []
+        challenger = fetch_one("SELECT id, email FROM users WHERE id = %s", (challenge["challenger_user_id"],))
+        challenged = fetch_one("SELECT id, email FROM users WHERE id = %s", (challenge["challenged_user_id"],))
+        session = battle_sessions.create_battle_session(
+            battle_mode="arena_2x3",
+            control_mode="program",
+            label_a=str(challenger["email"]).split("@", 1)[0],
+            label_b=str(challenged["email"]).split("@", 1)[0],
+            team_a=[item["hero_payload"] for item in challenger_team],
+            team_b=[item["hero_payload"] for item in challenged_team],
+            wait_seconds=1,
+        )
+        result = session.public_snapshot()["result"]
+        winner_user_id = None
+        if result.get("winnerLabel") == str(challenger["email"]).split("@", 1)[0]:
+            winner_user_id = challenger["id"]
+        elif result.get("winnerLabel") == str(challenged["email"]).split("@", 1)[0]:
+            winner_user_id = challenged["id"]
+        challenged_snapshot = {"hero_ids": hero_ids, "team": challenged_team, "total_bp": challenged_bp}
+        execute(
+            """
+            UPDATE friend_challenges
+            SET status = 'resolved', challenged_formation = %s::jsonb, challenged_team_snapshot = %s::jsonb,
+                battle_result = %s::jsonb, battle_session_id = %s, winner_user_id = %s,
+                responded_at = now(), resolved_at = now()
+            WHERE id = %s
+            """,
+            (
+                serialize_json({"mode": "arena_2x3", "board": formation}), serialize_json(challenged_snapshot),
+                serialize_json(result), session.session_id, winner_user_id, challenge_id,
+            ),
+        )
+        history_payload = {
+            "challengeId": str(challenge_id),
+            "teamA": [item["hero_payload"] for item in challenger_team],
+            "teamB": [item["hero_payload"] for item in challenged_team],
+            "friendly": True,
+        }
+        save_battle_history(challenger, "friendly_arena_2x3", history_payload, result)
+        save_battle_history(challenged, "friendly_arena_2x3", history_payload, result)
+        resolved = fetch_one("SELECT * FROM friend_challenges WHERE id = %s", (challenge_id,))
+        return jsonify({"ok": True, "data": normalize_json_value(resolved), "battle": result})
+    except ValueError as exc:
+        if claimed_challenge_id:
+            execute("UPDATE friend_challenges SET status = 'pending', responded_at = NULL WHERE id = %s AND status = 'accepted'", (claimed_challenge_id,))
+        return jsonify({"error": str(exc)}), 400
+    except Exception:
+        if claimed_challenge_id:
+            try:
+                execute("UPDATE friend_challenges SET status = 'pending', responded_at = NULL WHERE id = %s AND status = 'accepted'", (claimed_challenge_id,))
+            except Exception:
+                logging.exception("Failed to release friend challenge after battle error")
+        logging.exception("Failed to respond to friend challenge")
+        return jsonify({"error": "Failed to respond to friend challenge"}), 500
+
+
+@app.route("/api/friend-challenges/<challenge_id>", methods=["GET"])
+@session_required
+def friend_challenge_get(challenge_id):
+    user = current_user()
+    challenge = fetch_one(
+        "SELECT * FROM friend_challenges WHERE id = %s AND (challenger_user_id = %s OR challenged_user_id = %s)",
+        (challenge_id, user["id"], user["id"]),
+    )
+    if not challenge:
+        return jsonify({"error": "Friendly challenge not found"}), 404
+    return jsonify({"ok": True, "data": normalize_json_value(challenge)})
+
+
 @app.route("/api/pvp/join", methods=["POST"])
 @auth_required
 def pvp_join():
@@ -2740,6 +3157,106 @@ def revive_card(card_id):
         return jsonify({"error": str(e)}), 500
 
 
+def _decompose_dust_return(hero_payload):
+    try:
+        bp = int(float(str((hero_payload or {}).get("BP", 0))))
+    except (TypeError, ValueError):
+        bp = 0
+    return max(10, bp * int(settings.dust_decompose_bp_percent) // 100)
+
+
+@app.route("/api/cards/<card_id>/decompose", methods=["POST"])
+@auth_required
+def decompose_card(card_id):
+    user = current_user()
+    try:
+        UUID(str(card_id))
+    except Exception:
+        return jsonify({"error": "Invalid card id"}), 400
+
+    try:
+        ensure_user_wallet(user["id"])
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT id, user_id, hero_payload, pvp_life_state, pve_life_state,
+                           card_status, locked_reason, pvp_dead_at, decomposed_at,
+                           active_pvp_entry_id, created_at
+                    FROM heroes
+                    WHERE id = %s AND user_id = %s
+                    FOR UPDATE
+                    """,
+                    (card_id, user["id"]),
+                )
+                hero = cur.fetchone()
+                if not hero:
+                    return jsonify({"error": "Card not found"}), 404
+                if hero["card_status"] == "decomposed":
+                    return jsonify({"error": "This card has already been decomposed"}), 400
+                if hero["card_status"] != "active":
+                    return jsonify({"error": "Locked cards cannot be decomposed"}), 400
+                if hero["active_pvp_entry_id"]:
+                    return jsonify({"error": "Queued cards cannot be decomposed. Leave the Arena queue first."}), 400
+
+                dust_returned = _decompose_dust_return(hero["hero_payload"])
+
+                cur.execute(
+                    """
+                    SELECT dust_balance
+                    FROM user_wallets
+                    WHERE user_id = %s
+                    FOR UPDATE
+                    """,
+                    (user["id"],),
+                )
+                wallet = cur.fetchone()
+                next_balance = int(wallet["dust_balance"] if wallet else 0) + dust_returned
+
+                cur.execute(
+                    """
+                    UPDATE user_wallets
+                    SET dust_balance = %s, updated_at = now()
+                    WHERE user_id = %s
+                    """,
+                    (next_balance, user["id"]),
+                )
+                cur.execute(
+                    """
+                    INSERT INTO resource_transactions (
+                        user_id, resource_type, delta, balance_after, reason, ref_type, ref_id, metadata
+                    )
+                    VALUES (%s, 'dust', %s, %s, 'decompose', 'hero', %s, %s::jsonb)
+                    """,
+                    (
+                        user["id"],
+                        dust_returned,
+                        next_balance,
+                        card_id,
+                        serialize_json({"dust_returned": dust_returned, "bp_percent": settings.dust_decompose_bp_percent}),
+                    ),
+                )
+                cur.execute(
+                    """
+                    UPDATE heroes
+                    SET card_status = 'decomposed',
+                        decomposed_at = now(),
+                        equipped_relic_type = NULL
+                    WHERE id = %s AND user_id = %s
+                    RETURNING id, hero_payload, pvp_life_state, pve_life_state, card_status,
+                              locked_reason, pvp_dead_at, decomposed_at, active_pvp_entry_id, created_at
+                    """,
+                    (card_id, user["id"]),
+                )
+                decomposed = cur.fetchone()
+            conn.commit()
+
+        return jsonify({"ok": True, "card": normalize_json_value(decomposed), "dust_returned": dust_returned, "economy": economy_snapshot(user)})
+    except Exception as e:
+        logging.exception(e)
+        return jsonify({"error": str(e)}), 500
+
+
 def _card_row_for_response(row):
     return normalize_json_value(row) if row else None
 
@@ -2783,21 +3300,10 @@ def market_board_snapshot(user):
     relics = get_user_relics(user["id"])
     owned_amounts = {str(row["relic_type"]): int(row["amount"]) for row in relics}
     transactions = get_recent_resource_transactions(user["id"], 20)
-    hero_rows = fetch_all(
-        """
-        SELECT id, source_payload, hero_payload, created_at
-        FROM heroes
-        WHERE user_id = %s
-        ORDER BY created_at DESC
-        LIMIT 20
-        """,
-        (user["id"],),
-    )
     return build_market_board_snapshot(
         catalog=get_relic_catalog(),
         owned_amounts=owned_amounts,
         transactions=normalize_rows(transactions),
-        hero_rows=normalize_rows(hero_rows),
     )
 
 
@@ -2823,7 +3329,10 @@ def market_buy_relic():
 
     try:
         quantity = _parse_market_quantity(payload)
-        quote = _market_quote_for_relic(relic_type)
+        catalog = get_relic_catalog()
+        if not is_market_purchasable(relic_type, catalog):
+            return jsonify({"error": "This relic is not currently available for purchase"}), 400
+        quote = relic_market_quote(relic_type, catalog)
         unit_price = int(quote["ask_price"])
         total_price = unit_price * quantity
         ensure_user_wallet(user["id"])
@@ -2859,6 +3368,7 @@ def market_buy_relic():
                     "quantity": quantity,
                     "unit_price": unit_price,
                     "total_price": total_price,
+                    "purchase_window": quote.get("purchase_window"),
                 }
                 cur.execute(
                     """
@@ -3047,6 +3557,143 @@ def market_sell_relic():
         return jsonify({"error": str(exc)}), 500
 
 
+DUST_PER_DIAMOND = 100
+
+# Mock top-up packs while real payments are deferred. Recorded as test_purchase.
+DIAMOND_PACKS = [
+    {"id": "diamonds_60", "diamonds": 60, "price_cny": 6, "title": "Handful of Gems"},
+    {"id": "diamonds_320", "diamonds": 320, "price_cny": 30, "title": "Pouch of Gems"},
+    {"id": "diamonds_1080", "diamonds": 1080, "price_cny": 98, "title": "Crate of Gems"},
+]
+
+DUST_PACKS = [
+    {"id": "dust_1000", "dust": 1000, "diamonds": 10, "title": "Dust Pouch"},
+    {"id": "dust_5500", "dust": 5500, "diamonds": 50, "title": "Dust Cache"},
+    {"id": "dust_12000", "dust": 12000, "diamonds": 100, "title": "Dust Vault"},
+]
+
+
+def currency_shop_snapshot():
+    return {
+        "dust_per_diamond": DUST_PER_DIAMOND,
+        "diamond_packs": DIAMOND_PACKS,
+        "dust_packs": DUST_PACKS,
+    }
+
+
+def _find_currency_pack(packs, pack_id):
+    return next((pack for pack in packs if pack["id"] == pack_id), None)
+
+
+@app.route("/api/market/currency/diamonds", methods=["POST"])
+@auth_required
+def market_buy_diamond_pack():
+    """Simulated top-up while real payments are deferred; logged as test_purchase."""
+    user = current_user()
+    payload = request.get_json(silent=True) or {}
+    pack = _find_currency_pack(DIAMOND_PACKS, str(payload.get("packId") or ""))
+    if not pack:
+        return jsonify({"error": "Unknown diamond pack"}), 404
+
+    try:
+        ensure_user_wallet(user["id"])
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT diamond_balance FROM user_wallets WHERE user_id = %s FOR UPDATE",
+                    (user["id"],),
+                )
+                wallet = cur.fetchone()
+                next_diamonds = int(wallet["diamond_balance"] if wallet else 0) + int(pack["diamonds"])
+                cur.execute(
+                    "UPDATE user_wallets SET diamond_balance = %s, updated_at = now() WHERE user_id = %s",
+                    (next_diamonds, user["id"]),
+                )
+                cur.execute(
+                    """
+                    INSERT INTO resource_transactions (
+                        user_id, resource_type, delta, balance_after, reason, ref_type, metadata
+                    )
+                    VALUES (%s, 'diamond', %s, %s, 'test_purchase', 'currency_pack', %s::jsonb)
+                    """,
+                    (
+                        user["id"],
+                        int(pack["diamonds"]),
+                        next_diamonds,
+                        serialize_json({"pack_id": pack["id"], "price_cny": pack["price_cny"], "test_purchase": True}),
+                    ),
+                )
+            conn.commit()
+        return jsonify({"ok": True, "pack": pack, "economy": economy_snapshot(user)})
+    except Exception as exc:
+        logging.exception(exc)
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/api/market/currency/dust", methods=["POST"])
+@auth_required
+def market_buy_dust_pack():
+    user = current_user()
+    payload = request.get_json(silent=True) or {}
+    pack = _find_currency_pack(DUST_PACKS, str(payload.get("packId") or ""))
+    if not pack:
+        return jsonify({"error": "Unknown dust pack"}), 404
+
+    try:
+        ensure_user_wallet(user["id"])
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT dust_balance, diamond_balance FROM user_wallets WHERE user_id = %s FOR UPDATE",
+                    (user["id"],),
+                )
+                wallet = cur.fetchone()
+                current_dust = int(wallet["dust_balance"] if wallet else 0)
+                current_diamonds = int(wallet["diamond_balance"] if wallet else 0)
+                cost = int(pack["diamonds"])
+                if current_diamonds < cost:
+                    return jsonify({"error": "Insufficient diamonds"}), 400
+                next_diamonds = current_diamonds - cost
+                next_dust = current_dust + int(pack["dust"])
+                cur.execute(
+                    "UPDATE user_wallets SET dust_balance = %s, diamond_balance = %s, updated_at = now() WHERE user_id = %s",
+                    (next_dust, next_diamonds, user["id"]),
+                )
+                cur.execute(
+                    """
+                    INSERT INTO resource_transactions (
+                        user_id, resource_type, delta, balance_after, reason, ref_type, metadata
+                    )
+                    VALUES (%s, 'diamond', %s, %s, 'dust_pack_purchase', 'currency_pack', %s::jsonb)
+                    """,
+                    (
+                        user["id"],
+                        -cost,
+                        next_diamonds,
+                        serialize_json({"pack_id": pack["id"]}),
+                    ),
+                )
+                cur.execute(
+                    """
+                    INSERT INTO resource_transactions (
+                        user_id, resource_type, delta, balance_after, reason, ref_type, metadata
+                    )
+                    VALUES (%s, 'dust', %s, %s, 'market_buy_dust', 'currency_pack', %s::jsonb)
+                    """,
+                    (
+                        user["id"],
+                        int(pack["dust"]),
+                        next_dust,
+                        serialize_json({"pack_id": pack["id"], "diamonds_spent": cost}),
+                    ),
+                )
+            conn.commit()
+        return jsonify({"ok": True, "pack": pack, "economy": economy_snapshot(user)})
+    except Exception as exc:
+        logging.exception(exc)
+        return jsonify({"error": str(exc)}), 500
+
+
 @app.route("/api/cards/<card_id>/equip-relic", methods=["POST"])
 @auth_required
 def equip_card_relic(card_id):
@@ -3074,7 +3721,9 @@ def equip_card_relic(card_id):
                     return jsonify({"error": "Card not found"}), 404
 
                 if relic_type:
-                    _validate_known_relic(relic_type)
+                    definition = _validate_known_relic(relic_type)
+                    if definition.get("kind") != "relic":
+                        return jsonify({"error": "Only relics can be equipped. Shards are consumable enchant materials."}), 400
                     cur.execute(
                         """
                         SELECT amount
@@ -3124,6 +3773,8 @@ def enchant_card(card_id):
 
     try:
         definition = _validate_known_relic(relic_type)
+        if definition.get("kind") != "shard":
+            return jsonify({"error": "Only shards can be bound as enchantments. Relics are card equipment."}), 400
         now_iso = datetime.now(timezone.utc).isoformat()
         enchantment = {
             "relicType": relic_type,
@@ -3161,7 +3812,7 @@ def enchant_card(card_id):
                 relic_row = cur.fetchone()
                 current_amount = int(relic_row["amount"] if relic_row else 0)
                 if current_amount <= 0:
-                    return jsonify({"error": "Insufficient relics"}), 400
+                    return jsonify({"error": "Insufficient shards"}), 400
                 next_amount = current_amount - 1
 
                 cur.execute(

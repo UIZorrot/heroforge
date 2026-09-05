@@ -9,6 +9,7 @@ type MockHeroSpec = {
   type: string;
   image?: string;
   bp: number;
+  rarity?: CharacterData['rarity'];
   hp: number;
   mp: number;
   atk: number;
@@ -111,6 +112,7 @@ function character(spec: MockHeroSpec): CharacterData {
     name: spec.name,
     description: spec.description,
     BP: String(spec.bp),
+    rarity: spec.rarity ?? 'common',
     template: spec.type,
     state: {
       HP: String(spec.hp),
@@ -152,6 +154,7 @@ export const mockHeroes: SavedHero[] = [
     type: 'light priest',
     image: '/test/圣洁牧师.png',
     bp: 4300,
+    rarity: 'epic',
     hp: 2200,
     mp: 760,
     atk: 178,
@@ -167,7 +170,7 @@ export const mockHeroes: SavedHero[] = [
       s1: { name: 'Lumen Spear', description: 'Fires a narrow lance of consecrated light.', TYPE: 'holy', TARGET: 'Enemy', TARGET_NUM: '1', RANGE: 'enemy', ROLE: 'attack', type_catalog: 'proj', type_effect: 'holy', DMG: '92', MP_COST: '24' },
       s2: { name: 'Tide of Grace', description: 'Restores an ally with a bright water-lit blessing.', TYPE: 'water', TARGET: 'Ally', TARGET_NUM: '1', RANGE: 'ally', ROLE: 'heal', type_catalog: 'instant', type_effect: 'water', buff_type_effect: 'heal', BUFF_NAME: 'heal', BUFF_TIME: '2', BUFF_HP: '180', MP_COST: '34' },
     },
-    equippedRelicId: 'low_radiant_shard',
+    equippedRelicId: 'named_echo_heart',
   }, 0),
   hero({
     id: 'mock-myrr',
@@ -175,6 +178,7 @@ export const mockHeroes: SavedHero[] = [
     type: 'arcane mage',
     image: '/test/奥术法师.png',
     bp: 4520,
+    rarity: 'mythic',
     hp: 1880,
     mp: 980,
     atk: 322,
@@ -190,7 +194,7 @@ export const mockHeroes: SavedHero[] = [
       s1: { name: 'Arcane Comet', description: 'Launches a violet comet that blooms on contact.', TYPE: 'magic', TARGET: 'Enemy', TARGET_NUM: '1', RANGE: 'enemy', ROLE: 'attack', type_catalog: 'proj', type_effect: 'magic', DMG: '124', MP_COST: '30' },
       s2: { name: 'Frost Prism', description: 'Locks the target in a sudden burst of ice.', TYPE: 'frost', TARGET: 'Enemy', TARGET_NUM: '1', RANGE: 'enemy', ROLE: 'attack', type_catalog: 'instant', type_effect: 'frost', buff_type_effect: 'frozen', BUFF_NAME: 'frozen', BUFF_TIME: '2', BUFF_EV: '-10', DMG: '62', MP_COST: '42' },
     },
-    equippedRelicId: 'low_frost_shard',
+    equippedRelicId: 'named_storm_choir_bell',
   }, 1),
   hero({
     id: 'mock-kharos',
@@ -214,7 +218,7 @@ export const mockHeroes: SavedHero[] = [
       s2: { name: 'Corrupting Sigil', description: 'Brands the enemy and lowers their defenses.', TYPE: 'dark', TARGET: 'Enemy', TARGET_NUM: '1', RANGE: 'enemy', ROLE: 'attack', type_catalog: 'instant', type_effect: 'dark', buff_type_effect: 'curse', BUFF_NAME: 'curse', BUFF_TIME: '3', BUFF_DEF: '-12', DMG: '44', MP_COST: '36' },
     },
     equippedRelicId: 'named_ashen_crown',
-    enchantment: { relicId: 'named_ashen_crown', relicName: 'Ashen Crown', effectProfile: '+Fire authority, command traits', appliedAt: nowIso },
+    enchantment: { relicId: 'low_ember_shard', relicName: 'Ember Shard', effectProfile: 'Fire-aligned Forge bias and aggressive archetype bias.', appliedAt: nowIso },
   }, 2),
   hero({
     id: 'mock-vera',
@@ -281,7 +285,7 @@ export const mockHeroes: SavedHero[] = [
       s1: { name: 'Null Lance', description: 'Throws a black lance that collapses into the target.', TYPE: 'void', TARGET: 'Enemy', TARGET_NUM: '1', RANGE: 'enemy', ROLE: 'attack', type_catalog: 'proj', type_effect: 'void', DMG: '108', MP_COST: '28' },
       s2: { name: 'Grave Hex', description: 'Places a long curse that erodes enemy resistance.', TYPE: 'curse', TARGET: 'Enemy', TARGET_NUM: '1', RANGE: 'enemy', ROLE: 'attack', type_catalog: 'instant', type_effect: 'dark', buff_type_effect: 'curse', BUFF_NAME: 'curse', BUFF_TIME: '3', BUFF_DEF: '-14', DMG: '50', MP_COST: '38' },
     },
-    equippedRelicId: 'low_void_shard',
+    equippedRelicId: 'named_sunless_seal',
   }, 5),
   hero({
     id: 'mock-brakka',
@@ -332,8 +336,22 @@ export const mockHeroes: SavedHero[] = [
   }, 7),
 ];
 
+export const mockCurrencyShop: NonNullable<EconomySnapshot['shop']> = {
+  dust_per_diamond: 100,
+  diamond_packs: [
+    { id: 'diamonds_60', diamonds: 60, price_cny: 6, title: 'Handful of Gems' },
+    { id: 'diamonds_320', diamonds: 320, price_cny: 30, title: 'Pouch of Gems' },
+    { id: 'diamonds_1080', diamonds: 1080, price_cny: 98, title: 'Crate of Gems' },
+  ],
+  dust_packs: [
+    { id: 'dust_1000', dust: 1000, diamonds: 10, title: 'Dust Pouch' },
+    { id: 'dust_5500', dust: 5500, diamonds: 50, title: 'Dust Cache' },
+    { id: 'dust_12000', dust: 12000, diamonds: 100, title: 'Dust Vault' },
+  ],
+};
+
 export const mockEconomy: EconomySnapshot = {
-  wallet: { user_id: 'mock-user', dust_balance: 8650, created_at: nowIso, updated_at: nowIso },
+  wallet: { user_id: 'mock-user', dust_balance: 8650, diamond_balance: 120, created_at: nowIso, updated_at: nowIso },
   relics: mockRelicInventory,
   relic_catalog: mockRelicCatalog,
   transactions: [],
@@ -353,13 +371,14 @@ export const mockEconomy: EconomySnapshot = {
     low_tier_relic_drop_pct: 3,
     queue_ttl_minutes: 10,
   },
+  shop: mockCurrencyShop,
 };
 
 export function createMockEconomy(): EconomySnapshot {
   const now = new Date().toISOString();
   return {
     ...mockEconomy,
-    wallet: { ...mockEconomy.wallet!, dust_balance: 25000, updated_at: now },
+    wallet: { ...mockEconomy.wallet!, dust_balance: 25000, diamond_balance: 120, updated_at: now },
     starter: { ...mockEconomy.starter, dust_balance: 25000 },
     relics: mockEconomy.relics.map((relic) => ({ ...relic, amount: 20, updated_at: now })),
     transactions: [],

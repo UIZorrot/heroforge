@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { normalizeCharacterData } from './gameLogic';
+import { normalizeCharacterData, powerTierFromBp, resolveRarity } from './gameLogic';
 
 describe('game logic data normalization', () => {
   it('normalizes base attack visual fields and preserves more than two skills', () => {
@@ -7,6 +7,7 @@ describe('game logic data normalization', () => {
       name: 'Vera',
       description: 'A test unit.',
       BP: '1200',
+      rarity: 'epic',
       state: {
         HP: '1000',
         MP: '100',
@@ -57,6 +58,7 @@ describe('game logic data normalization', () => {
 
     expect(hero.state.type_catalog).toBe('instant');
     expect(hero.state.type_effect).toBe('strike');
+    expect(hero.rarity).toBe('epic');
     expect(Object.keys(hero.skill)).toEqual(['s1', 's2', 's3']);
     expect(hero.skill.s1.type_catalog).toBe('instant');
     expect(hero.skill.s1.type_effect).toBe('claw');
@@ -76,9 +78,21 @@ describe('game logic data normalization', () => {
 
     expect(hero.state.type_catalog).toBe('proj');
     expect(hero.state.type_effect).toBe('bullet');
+    expect(hero.rarity).toBe('common');
     expect(hero.skill.s1.type_catalog).toBe('instant');
     expect(hero.skill.s1.type_effect).toBe('strike');
     expect(hero.skill.s2.type_catalog).toBe('instant');
     expect(hero.skill.s2.type_effect).toBe('claw');
+  });
+
+  it('resolves rarity from payload and maps BP power tiers independently', () => {
+    expect(resolveRarity({ rarity: 'mythic' })).toBe('mythic');
+    expect(resolveRarity({ rarity: 'nope' })).toBe('common');
+    expect(powerTierFromBp(150)).toBe('human');
+    expect(powerTierFromBp(250)).toBe('superhuman');
+    expect(powerTierFromBp(700)).toBe('monster');
+    expect(powerTierFromBp(2000)).toBe('hero');
+    expect(powerTierFromBp(6000)).toBe('demigod');
+    expect(powerTierFromBp(12000)).toBe('god');
   });
 });

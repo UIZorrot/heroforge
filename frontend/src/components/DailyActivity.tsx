@@ -17,8 +17,10 @@ function createSandboxDaily(economy: EconomySnapshot): DailySnapshot {
     checkin: { claimed: false, claim_date: date, reward_dust: 30 },
     tasks: [
       { id: 'sandbox-forge', key: 'forge_one_card', title: 'Forge a card', description: 'Create one hero in the local Forge.', task_date: date, progress: 1, target: 1, reward_dust: 100, claimed: false, claimable: true },
-      { id: 'sandbox-relic', key: 'use_one_relic', title: 'Use a relic', description: 'Equip or enchant with a relic in the sandbox.', task_date: date, progress: 1, target: 1, reward_dust: 300, claimed: false, claimable: true },
+      { id: 'sandbox-relic', key: 'use_one_relic', title: 'Bind a shard', description: 'Bind a shard to enchant a card in the sandbox.', task_date: date, progress: 1, target: 1, reward_dust: 300, claimed: false, claimable: true },
     ],
+    tasks_per_day: 2,
+    tasks_capacity: 5,
     economy,
   };
 }
@@ -128,11 +130,20 @@ export const DailyActivity: React.FC<DailyActivityProps> = ({ token, demoMode = 
     return 'CLAIM';
   };
 
+  const taskCapacity = daily?.tasks_capacity ?? 5;
+  const tasksPerDay = daily?.tasks_per_day ?? 2;
+  const activeTaskCount = daily?.tasks.filter((task) => !task.claimed).length ?? 0;
+  const allTasksDone = daily
+    ? (daily.all_completed ?? (daily.tasks.length > 0 && daily.tasks.every((task) => task.claimed)))
+    : false;
+
   return (
     <div className="mt-6 border-t border-stone-800 pt-6">
       <div className="mb-4 flex items-center justify-between">
         <p className="text-[10px] font-light uppercase tracking-[0.3em] text-stone-500">Daily Ritual</p>
-        <span className="text-[10px] uppercase tracking-[0.2em] text-gold-matte/70">{daily?.date ?? 'SYNC'}</span>
+        <span className="text-[10px] uppercase tracking-[0.2em] text-gold-matte/70">
+          {daily?.date ?? 'SYNC'} · {activeTaskCount}/{taskCapacity}
+        </span>
       </div>
 
       <button
@@ -158,8 +169,17 @@ export const DailyActivity: React.FC<DailyActivityProps> = ({ token, demoMode = 
         </span>
       </button>
 
-      <div className="space-y-2">
-        {(daily?.tasks ?? []).map((task) => {
+      {allTasksDone ? (
+        <div className="border border-gold-matte/25 bg-gold-matte/5 p-4 text-center">
+          <Check size={16} className="mx-auto text-gold-matte/80" />
+          <p className="mt-2 text-xs uppercase tracking-[0.18em] text-stone-300">All tasks completed</p>
+          <p className="mt-1 text-[10px] leading-4 text-stone-500">
+            {tasksPerDay} new rituals arrive tomorrow · up to {taskCapacity} can accumulate
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {(daily?.tasks ?? []).map((task) => {
           const pct = Math.min(100, Math.round((task.progress / Math.max(task.target, 1)) * 100));
           return (
             <div key={task.key} className="border border-stone-800 bg-black/30 p-3">
@@ -188,7 +208,8 @@ export const DailyActivity: React.FC<DailyActivityProps> = ({ token, demoMode = 
             </div>
           );
         })}
-      </div>
+        </div>
+      )}
 
       {loading && <p className="mt-3 text-[10px] uppercase tracking-[0.18em] text-stone-600">Loading daily activity...</p>}
       {error && <p className="mt-3 text-[10px] leading-4 text-red-300">{error}</p>}

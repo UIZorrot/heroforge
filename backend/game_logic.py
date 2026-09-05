@@ -2,7 +2,7 @@ import math
 import random
 from typing import Dict, Any
 
-from vfx_contract import normalize_projectile_type_effect
+from vfx_contract import CANONICAL_BUFF_NAMES, normalize_projectile_type_effect
 
 
 STAT_COSTS = {
@@ -17,6 +17,47 @@ STAT_COSTS = {
     "EV": 6,
     "AC": 4,
 }
+
+# Card rarity is independent of BP tier. Same nominal BP, higher rarity => larger stat budget.
+RARITY_VALUES = ("common", "rare", "epic", "mythic")
+RARITY_BP_MULTIPLIER = {
+    "common": 1.00,
+    "rare": 1.03,
+    "epic": 1.06,
+    "mythic": 1.10,
+}
+RARITY_ROLL_WEIGHTS = (
+    ("common", 70),
+    ("rare", 20),
+    ("epic", 8),
+    ("mythic", 2),
+)
+
+
+def normalize_rarity(value: Any) -> str | None:
+    token = str(value or "").strip().lower()
+    return token if token in RARITY_BP_MULTIPLIER else None
+
+
+def roll_rarity(rng: random.Random | None = None) -> str:
+    picker = rng or random
+    choices = [name for name, _weight in RARITY_ROLL_WEIGHTS]
+    weights = [weight for _name, weight in RARITY_ROLL_WEIGHTS]
+    return picker.choices(choices, weights=weights, k=1)[0]
+
+
+def resolve_rarity(value: Any = None, *, roll_if_missing: bool = False) -> str:
+    normalized = normalize_rarity(value)
+    if normalized:
+        return normalized
+    if roll_if_missing:
+        return roll_rarity()
+    return "common"
+
+
+def rarity_stat_budget(bp: int, rarity: str) -> int:
+    multiplier = RARITY_BP_MULTIPLIER.get(resolve_rarity(rarity), 1.0)
+    return max(1, int(round(max(0, bp) * multiplier)))
 
 
 def _visual_token(value: Any, fallback: str = "") -> str:
@@ -36,7 +77,7 @@ def _legacy_type_effect(effect_type: Any, type_catalog: str | None = None) -> st
     catalog = type_catalog or _legacy_type_catalog(token)
     if catalog == "instant":
         if token == "weapon":
-            return "slash"
+            return "strike"
         if token == "flesh":
             return "claw"
     if catalog == "proj" and token == "weapon":
@@ -539,6 +580,24 @@ def _build_skill(skill: Dict[str, Any], state: Dict[str, str], template: str) ->
 
     if "BUFF_NAME" in generated and isinstance(generated["BUFF_NAME"], str):
         generated["BUFF_NAME"] = generated["BUFF_NAME"].strip().lower()
+        if generated["BUFF_NAME"] and generated["BUFF_NAME"] not in CANONICAL_BUFF_NAMES:
+            # The LLM occasionally invents statuses outside the canonical set.
+            # Battle logic and the VFX layer cannot resolve those, so drop the
+            # buff instead of persisting an unenforceable status.
+            del generated["BUFF_NAME"]
+
+    # Clamp targeting fields to the contract battle logic understands.
+    valid_targets = {"self", "ally", "enemy"}
+    valid_ranges = {"melee", "ranged", "self", "ally", "enemy"}
+    target = str(generated.get("TARGET") or "enemy").strip().lower()
+    if target not in valid_targets:
+        target = "enemy"
+    generated["TARGET"] = target
+    range_mode = str(generated.get("RANGE") or "").strip().lower()
+    if range_mode not in valid_ranges:
+        range_mode = target if target in valid_ranges else "enemy"
+    generated["RANGE"] = range_mode
+    generated["TARGET_NUM"] = str(min(6, max(1, _safe_int(generated.get("TARGET_NUM", 1), 1))))
 
     is_passive = _truthy(skill.get("IS_PASSIVE"))
     generated["IS_PASSIVE"] = "True" if is_passive else "False"
@@ -583,11 +642,14 @@ def adjust_based_on_bp(character_json: Dict[str, Any]) -> Dict[str, Any]:
     except (ValueError, TypeError):
         original_bp = 1000
 
+    rarity = resolve_rarity(character_json.get("rarity"), roll_if_missing=True)
+    budget_bp = rarity_stat_budget(original_bp, rarity)
+
     weights = character_json.get("state_weights") or character_json.get("state") or {}
     skills = character_json.get("skill", {})
     template = _normalize_template(character_json.get("template") or weights.get("template") or weights.get("TEMPLATE"))
 
-    generated_state = _build_state(original_bp, weights, template)
+    generated_state = _build_state(budget_bp, weights, template)
     adjusted_skills = {}
 
     for skill_key, skill in skills.items():
@@ -599,6 +661,7 @@ def adjust_based_on_bp(character_json: Dict[str, Any]) -> Dict[str, Any]:
         "description": str(character_json.get("description", "")),
         "extra": str(character_json.get("extra", "")),
         "BP": str(original_bp),
+        "rarity": rarity,
         "state": generated_state,
         "skill": adjusted_skills,
     }

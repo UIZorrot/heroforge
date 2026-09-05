@@ -45,6 +45,7 @@ class Settings:
     pvp_low_tier_relic_drop_pct: int
     pvp_queue_ttl_minutes: int
     pvp_battle_session_wait_seconds: int
+    dust_decompose_bp_percent: int
 
 
 def _get_int_env(name: str, default: int) -> int:
@@ -158,4 +159,5 @@ def get_settings() -> Settings:
         pvp_low_tier_relic_drop_pct=_get_int_env("PVP_LOW_TIER_RELIC_DROP_PCT", 3),
         pvp_queue_ttl_minutes=_get_int_env("PVP_QUEUE_TTL_MINUTES", 10),
         pvp_battle_session_wait_seconds=_get_int_env("PVP_BATTLE_SESSION_WAIT_SECONDS", 5),
+        dust_decompose_bp_percent=_get_int_env("DUST_DECOMPOSE_BP_PERCENT", 5),
     )

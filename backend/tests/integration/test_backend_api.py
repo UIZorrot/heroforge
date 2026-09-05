@@ -344,20 +344,55 @@ def test_market_board_snapshot_returns_server_authored_sections(harness):
     assert response.status_code == 200, response.get_data(as_text=True)
 
     payload = response.get_json()["data"]
+    assert isinstance(payload["shard_listings"], list)
     assert isinstance(payload["relic_listings"], list)
     assert isinstance(payload["featured_relics"], list)
     assert isinstance(payload["broker_offers"], list)
     assert isinstance(payload["order_tape"], list)
     assert isinstance(payload["notes"], list)
-    assert payload["broker_offers"]
+    assert payload["broker_offers"] == []
+    assert payload["week_key"]
 
-    ember = next(row for row in payload["relic_listings"] if row["relic_type"] == "low_ember_shard")
+    assert payload["shard_listings"]
+    assert all(row["kind"] == "shard" for row in payload["shard_listings"])
+    assert all(row["purchasable"] is True for row in payload["shard_listings"])
+
+    assert payload["relic_listings"]
+    assert all(row["kind"] == "relic" for row in payload["relic_listings"])
+    assert all(row["purchasable"] is True for row in payload["relic_listings"])
+    assert all(row["purchase_window"] in {"stock", "weekly"} for row in payload["relic_listings"])
+
+    assert payload["featured_relics"]
+    assert all(row["purchase_window"] == "weekly" for row in payload["featured_relics"])
+
+    ember = next(row for row in payload["shard_listings"] if row["relic_type"] == "low_ember_shard")
     quote = relic_market_quote("low_ember_shard", get_relic_catalog())
     assert ember["ask_price"] == int(quote["ask_price"])
     assert ember["bid_price"] == int(quote["bid_price"])
     assert ember["category"] == "artifact"
     assert ember["icon_path"].endswith("/Ember%20Shard.png")
     assert ember["owned_amount"] == 0
+    assert ember["purchase_window"] == "open"
+
+    # Full catalog equipment that is not stock/weekly must not appear on the relic board.
+    listed_relic_types = {row["relic_type"] for row in payload["relic_listings"]}
+    assert "named_echo_heart" in listed_relic_types  # stock shelf
+    assert len(listed_relic_types) < 20
+
+
+@pytest.mark.integration
+def test_market_buy_rejects_unlisted_equipment_relic(harness):
+    headers = harness.login("integration-market-buy-blocked@example.com")
+
+    # Never stocked and never in weekly rotation — vault/drop only.
+    response = harness.client.post(
+        "/api/market/relics/buy",
+        headers=headers,
+        json={"relicType": "named_kingless_banner", "quantity": 1},
+    )
+    harness.trace("market-buy-blocked", response)
+    assert response.status_code == 400, response.get_data(as_text=True)
+    assert "not currently available" in response.get_json()["error"].lower()
 
 
 @pytest.mark.integration
@@ -468,11 +503,11 @@ def test_card_relic_enchant_lifecycle_is_persistent_and_one_time(harness):
     hero_id = hero["id"]
 
     harness.grant_relic(user_id, "low_ember_shard", 2)
-    harness.grant_relic(user_id, "low_frost_shard", 1)
+    harness.grant_relic(user_id, "named_echo_heart", 1)
 
-    equipped = harness.equip_relic(headers, hero_id, "low_frost_shard")
-    assert equipped["card"]["equipped_relic_type"] == "low_frost_shard"
-    assert harness.heroes(headers)[0]["equipped_relic_type"] == "low_frost_shard"
+    equipped = harness.equip_relic(headers, hero_id, "named_echo_heart")
+    assert equipped["card"]["equipped_relic_type"] == "named_echo_heart"
+    assert harness.heroes(headers)[0]["equipped_relic_type"] == "named_echo_heart"
 
     enchanted_response = harness.enchant_card(headers, hero_id, "low_ember_shard")
     assert enchanted_response.status_code == 200, enchanted_response.get_data(as_text=True)
@@ -496,9 +531,50 @@ def test_card_relic_enchant_lifecycle_is_persistent_and_one_time(harness):
     assert "already been enchanted" in second_response.get_json()["error"]
 
     persisted = harness.heroes(headers)[0]
-    assert persisted["equipped_relic_type"] == "low_frost_shard"
+    assert persisted["equipped_relic_type"] == "named_echo_heart"
     assert persisted["enchantment"]["relicType"] == "low_ember_shard"
     assert persisted["enchantment"]["removedAt"]
+
+
+@pytest.mark.integration
+def test_shard_and_relic_kinds_are_enforced(harness):
+    headers = harness.login("integration-shard-kind@example.com")
+    user_id = harness.last_user["id"]
+    harness.set_forge_sequence([
+        _hero_pair("Kind Checker", "mage", 1500, "magic", "Arc Bolt", "Ward"),
+    ])
+    harness.forge(headers, _sample_image_base64())
+    hero_id = harness.heroes(headers)[0]["id"]
+
+    harness.grant_relic(user_id, "low_frost_shard", 1)
+    harness.grant_relic(user_id, "named_echo_heart", 1)
+
+    # Shards are consumable enchant materials, not equipment.
+    equip_shard = harness.client.post(
+        f"/api/cards/{hero_id}/equip-relic",
+        headers=headers,
+        json={"relicType": "low_frost_shard"},
+    )
+    assert equip_shard.status_code == 400
+    assert "Only relics can be equipped" in equip_shard.get_json()["error"]
+
+    # Relics are card equipment, not enchant materials.
+    enchant_relic = harness.enchant_card(headers, hero_id, "named_echo_heart")
+    assert enchant_relic.status_code == 400
+    assert "Only shards can be bound" in enchant_relic.get_json()["error"]
+
+    equipped = harness.equip_relic(headers, hero_id, "named_echo_heart")
+    assert equipped["card"]["equipped_relic_type"] == "named_echo_heart"
+
+    enchanted = harness.enchant_card(headers, hero_id, "low_frost_shard")
+    assert enchanted.status_code == 200, enchanted.get_data(as_text=True)
+    assert enchanted.get_json()["card"]["enchantment"]["relicType"] == "low_frost_shard"
+
+    catalog = enchanted.get_json()["economy"]["relic_catalog"]
+    kinds = {row["relic_type"]: row["kind"] for row in catalog}
+    assert kinds["low_frost_shard"] == "shard"
+    assert kinds["named_echo_heart"] == "relic"
+    assert kinds["limited_eclipse_medal"] == "relic"
 
 
 @pytest.mark.integration
@@ -560,6 +636,9 @@ def test_arena_lifecycle_schema_exists(harness):
             cur.execute("SELECT to_regclass('daily_task_progress') AS table_name")
             task_table = cur.fetchone()["table_name"]
 
+            cur.execute("SELECT to_regclass('daily_task_offers') AS table_name")
+            offers_table = cur.fetchone()["table_name"]
+
     assert hero_columns == {
         "pvp_life_state",
         "pve_life_state",
@@ -574,6 +653,7 @@ def test_arena_lifecycle_schema_exists(harness):
     assert death_table is not None
     assert checkin_table is not None
     assert task_table is not None
+    assert offers_table is not None
 
 
 @pytest.mark.integration
@@ -598,7 +678,13 @@ def test_daily_sign_in_can_only_claim_once(harness):
 def test_daily_task_claim_requires_completion(harness):
     headers = harness.login("integration-daily-locked-task@example.com")
 
-    response = harness.client.post("/api/daily/tasks/win_arena_once/claim", headers=headers)
+    snapshot = harness.client.get("/api/daily/me", headers=headers)
+    assert snapshot.status_code == 200
+    data = snapshot.get_json()["data"]
+    assert len(data["tasks"]) == 2  # two new offers per day
+    task_key = data["tasks"][0]["key"]
+
+    response = harness.client.post(f"/api/daily/tasks/{task_key}/claim", headers=headers)
     harness.trace("daily-claim-incomplete", response)
 
     assert response.status_code == 400
@@ -608,6 +694,17 @@ def test_daily_task_claim_requires_completion(harness):
 @pytest.mark.integration
 def test_daily_forge_task_progress_and_claim(harness):
     headers = harness.login("integration-daily-forge-task@example.com")
+    user_id = harness.last_user["id"]
+
+    # Force-offer the forge task; today's rotation may not include it.
+    harness.db_module.execute(
+        """
+        INSERT INTO daily_task_offers (user_id, task_key, assigned_on, target, reward_dust)
+        VALUES (%s, 'forge_one_card', '2020-01-01', 1, 100)
+        ON CONFLICT (user_id, task_key) WHERE claimed_at IS NULL DO NOTHING
+        """,
+        (user_id,),
+    )
 
     initial = harness.client.get("/api/daily/me", headers=headers)
     harness.trace("daily-initial", initial)
@@ -631,9 +728,51 @@ def test_daily_forge_task_progress_and_claim(harness):
     harness.trace("daily-claim-forge", claimed)
     assert claimed.status_code == 200
     claimed_payload = claimed.get_json()["data"]
-    claimed_tasks = {task["key"]: task for task in claimed_payload["tasks"]}
-    assert claimed_tasks["forge_one_card"]["claimed"] is True
+    # Claimed tasks leave the active list.
+    assert "forge_one_card" not in {task["key"] for task in claimed_payload["tasks"]}
     assert claimed_payload["economy"]["wallet"]["dust_balance"] == 500
+
+    again = harness.client.post("/api/daily/tasks/forge_one_card/claim", headers=headers)
+    assert again.status_code == 404
+
+
+@pytest.mark.integration
+def test_daily_task_accumulation_cap_and_all_completed(harness):
+    headers = harness.login("integration-daily-accum@example.com")
+    user_id = harness.last_user["id"]
+
+    # Pre-seed a full backlog of unfinished tasks before the first snapshot.
+    all_keys = ("forge_one_card", "use_relic_once", "enter_arena_once", "win_arena_once", "revive_once")
+    for key in all_keys:
+        harness.db_module.execute(
+            """
+            INSERT INTO daily_task_offers (user_id, task_key, assigned_on, target, reward_dust)
+            VALUES (%s, %s, '2020-01-01', 1, 100)
+            ON CONFLICT (user_id, task_key) WHERE claimed_at IS NULL DO NOTHING
+            """,
+            (user_id, key),
+        )
+
+    snapshot = harness.client.get("/api/daily/me", headers=headers).get_json()["data"]
+    assert snapshot["tasks_capacity"] == 5
+    assert snapshot["tasks_per_day"] == 2
+    # The backlog fills the cap, so no additional tasks are offered today.
+    assert len(snapshot["tasks"]) == 5
+    assert snapshot["all_completed"] is False
+
+    harness.db_module.execute(
+        "UPDATE daily_task_offers SET progress = target WHERE user_id = %s",
+        (user_id,),
+    )
+    for key in all_keys:
+        response = harness.client.post(f"/api/daily/tasks/{key}/claim", headers=headers)
+        assert response.status_code == 200, f"{key}: {response.get_data(as_text=True)}"
+
+    final = harness.client.get("/api/daily/me", headers=headers).get_json()["data"]
+    assert final["tasks"] == []
+    assert final["all_completed"] is True
+    # Starter 500 + 5 x 100 task rewards.
+    assert final["economy"]["wallet"]["dust_balance"] == 1000
 
 
 @pytest.mark.integration
@@ -1107,6 +1246,68 @@ def test_repair_pvp_and_pve_entry_costs(harness):
 
 
 @pytest.mark.integration
+def test_decompose_card_returns_dust_and_blocks_reuse(harness):
+    email = "integration-decompose@example.com"
+    headers = harness.login(email)
+
+    harness.set_forge_sequence([
+        _hero_pair("Scrapbound", "warrior", 1000, "weapon", "Rust Cut", "Guard Up"),
+    ])
+    harness.forge(headers, _sample_image_base64((120, 80, 80)), materials={})
+
+    hero_rows = harness.heroes(headers)
+    hero_id = hero_rows[0]["id"]
+    bp = int(float(str(hero_rows[0]["hero_payload"]["BP"])))
+    expected_dust = max(10, bp * 5 // 100)
+
+    response = harness.client.post(f"/api/cards/{hero_id}/decompose", headers=headers)
+    assert response.status_code == 200, response.get_data(as_text=True)
+    payload = response.get_json()
+    assert payload["ok"] is True
+    assert payload["dust_returned"] == expected_dust
+    assert payload["card"]["card_status"] == "decomposed"
+    assert payload["card"]["decomposed_at"]
+    # Starter 500 - forge 100 = 400 before decomposition.
+    assert payload["economy"]["wallet"]["dust_balance"] == 400 + expected_dust
+    assert payload["economy"]["costs"]["decompose_bp_percent"] == 5
+
+    again = harness.client.post(f"/api/cards/{hero_id}/decompose", headers=headers)
+    assert again.status_code == 400
+
+
+@pytest.mark.integration
+def test_currency_shop_diamond_topup_and_dust_conversion(harness):
+    headers = harness.login("integration-currency@example.com")
+
+    unknown = harness.client.post("/api/market/currency/diamonds", headers=headers, json={"packId": "nope"})
+    assert unknown.status_code == 404
+
+    poor = harness.client.post("/api/market/currency/dust", headers=headers, json={"packId": "dust_1000"})
+    assert poor.status_code == 400
+    assert "Insufficient diamonds" in poor.get_json()["error"]
+
+    topup = harness.client.post("/api/market/currency/diamonds", headers=headers, json={"packId": "diamonds_60"})
+    assert topup.status_code == 200, topup.get_data(as_text=True)
+    topup_payload = topup.get_json()
+    assert topup_payload["economy"]["wallet"]["diamond_balance"] == 60
+    top_txn = topup_payload["economy"]["transactions"][0]
+    assert top_txn["resource_type"] == "diamond"
+    assert top_txn["reason"] == "test_purchase"
+    assert top_txn["metadata"]["test_purchase"] is True
+
+    buy = harness.client.post("/api/market/currency/dust", headers=headers, json={"packId": "dust_5500"})
+    assert buy.status_code == 200, buy.get_data(as_text=True)
+    buy_payload = buy.get_json()
+    wallet = buy_payload["economy"]["wallet"]
+    assert wallet["diamond_balance"] == 10
+    # Starter 500 dust + 5500 from the pack.
+    assert wallet["dust_balance"] == 6000
+    assert buy_payload["economy"]["shop"]["dust_per_diamond"] == 100
+    reasons = {row["reason"] for row in buy_payload["economy"]["transactions"][:2]}
+    assert reasons == {"market_buy_dust", "dust_pack_purchase"}
+
+
+@pytest.mark.integration
 def test_pvp_matchmaking_within_bp_window_and_stake_settlement(harness):
     email_a = "integration-pvp-a@example.com"
     email_b = "integration-pvp-b@example.com"
@@ -1155,6 +1356,101 @@ def test_pvp_matchmaking_within_bp_window_and_stake_settlement(harness):
     economy_b = harness.economy(headers_b)
     total_dust = economy_a["wallet"]["dust_balance"] + economy_b["wallet"]["dust_balance"]
     assert total_dust == 800
+
+
+@pytest.mark.integration
+def test_friend_request_and_stake_free_friend_challenge_resolve_end_to_end(harness):
+    email_a = "integration-friend-a@example.com"
+    email_b = "integration-friend-b@example.com"
+    headers_a = harness.login(email_a)
+    user_a_id = harness.last_user["id"]
+    headers_b = harness.login(email_b)
+    user_b_id = harness.last_user["id"]
+
+    sent = harness.client.post("/api/friends/requests", headers=headers_a, json={"email": email_b})
+    assert sent.status_code == 201, sent.get_data(as_text=True)
+    incoming = harness.client.get("/api/friends", headers=headers_b).get_json()["data"]
+    assert len(incoming["incoming_requests"]) == 1
+
+    request_id = incoming["incoming_requests"][0]["id"]
+    accepted = harness.client.post(f"/api/friends/requests/{request_id}/accept", headers=headers_b)
+    assert accepted.status_code == 200, accepted.get_data(as_text=True)
+    assert accepted.get_json()["data"]["friends"][0]["email"] == email_a
+
+    hero_ids = []
+    for user_id, name in ((user_a_id, "Friendly Alpha"), (user_b_id, "Friendly Beta")):
+        payload = _board_hero(name, hp=900, atk=90, defense=22, speed=45)
+        with harness.db_module.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO heroes (user_id, source_payload, hero_payload)
+                    VALUES (%s, '{}'::jsonb, %s::jsonb) RETURNING id
+                    """,
+                    (user_id, harness.db_module.serialize_json(payload)),
+                )
+                hero_ids.append(str(cur.fetchone()["id"]))
+            conn.commit()
+
+    challenged = harness.client.post(
+        f"/api/friends/{user_b_id}/challenges",
+        headers=headers_a,
+        json={"formation": {"front_0": hero_ids[0]}},
+    )
+    assert challenged.status_code == 201, challenged.get_data(as_text=True)
+    challenge_id = challenged.get_json()["data"]["id"]
+
+    resolved = harness.client.post(
+        f"/api/friend-challenges/{challenge_id}/accept",
+        headers=headers_b,
+        json={"formation": {"front_0": hero_ids[1]}},
+    )
+    assert resolved.status_code == 200, resolved.get_data(as_text=True)
+    payload = resolved.get_json()
+    assert payload["data"]["status"] == "resolved"
+    assert payload["battle"]["controlMode"] == "program"
+    assert payload["battle"]["boardHistory"]
+    assert harness.economy(headers_a)["wallet"]["dust_balance"] == 500
+    assert harness.economy(headers_b)["wallet"]["dust_balance"] == 500
+
+
+@pytest.mark.integration
+def test_browser_arena_ranked_match_resolves_server_side_without_turn_timeouts(harness):
+    headers_a = harness.login("integration-auto-arena-a@example.com")
+    user_a_id = harness.last_user["id"]
+    headers_b = harness.login("integration-auto-arena-b@example.com")
+    user_b_id = harness.last_user["id"]
+
+    hero_ids = []
+    for user_id, name, speed in ((user_a_id, "Auto Alpha", 55), (user_b_id, "Auto Beta", 50)):
+        hero = _board_hero(name, hp=950, atk=95, defense=24, speed=speed)
+        with harness.db_module.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO heroes (user_id, source_payload, hero_payload) VALUES (%s, '{}'::jsonb, %s::jsonb) RETURNING id",
+                    (user_id, harness.db_module.serialize_json(hero)),
+                )
+                hero_ids.append(str(cur.fetchone()["id"]))
+            conn.commit()
+
+    first = harness.client.post(
+        "/api/pvp/join", headers=headers_a,
+        json={"mode": "arena_2x3", "queueKey": "ranked-auto", "formation": {"front_0": hero_ids[0]}},
+    )
+    assert first.status_code == 200
+    assert first.get_json()["status"] == "waiting"
+
+    second = harness.client.post(
+        "/api/pvp/join", headers=headers_b,
+        json={"mode": "arena_2x3", "queueKey": "ranked-auto", "formation": {"front_0": hero_ids[1]}},
+    )
+    assert second.status_code == 200, second.get_data(as_text=True)
+    payload = second.get_json()
+    assert payload["status"] == "matched"
+    assert payload["match"]["status"] == "resolved"
+    assert payload["battle_session"]["status"] == "resolved"
+    assert payload["battle"]["controlMode"] == "program"
+    assert len(payload["battle"]["boardHistory"]) > 1
 
 
 @pytest.mark.integration
@@ -1921,7 +2217,7 @@ def test_battle_session_exposes_visual_type_contract_on_units_skills_and_events(
     hero_a = _board_hero("Ripper", range_mode="melee", target_num=1, hp=500, mp=30, atk=50, speed=80, accuracy=100, evasion=0)
     hero_b = _board_hero("Target", range_mode="melee", target_num=1, hp=500, atk=20, speed=10, accuracy=100, evasion=0)
     hero_a["state"]["type_catalog"] = "instant"
-    hero_a["state"]["type_effect"] = "slash"
+    hero_a["state"]["type_effect"] = "strike"
     hero_a["skill"]["s1"]["type_catalog"] = "instant"
     hero_a["skill"]["s1"]["type_effect"] = "claw"
     hero_a["skill"]["s1"]["buff_type_effect"] = "flesh"
@@ -1940,7 +2236,7 @@ def test_battle_session_exposes_visual_type_contract_on_units_skills_and_events(
 
     actor = session.observation["actor"]
     assert actor["state"]["type_catalog"] == "instant"
-    assert actor["state"]["type_effect"] == "slash"
+    assert actor["state"]["type_effect"] == "strike"
     assert actor["skills"]["s1"]["type_catalog"] == "instant"
     assert actor["skills"]["s1"]["type_effect"] == "claw"
     assert actor["skills"]["s1"]["buff_type_effect"] == "flesh"

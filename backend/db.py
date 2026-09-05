@@ -296,6 +296,59 @@ CREATE INDEX IF NOT EXISTS idx_pvp_matches_queue_created_at ON pvp_matches(queue
 CREATE INDEX IF NOT EXISTS idx_pvp_matches_user_a_created_at ON pvp_matches(user_a_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_pvp_matches_user_b_created_at ON pvp_matches(user_b_id, created_at DESC);
 
+CREATE TABLE IF NOT EXISTS friend_requests (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    sender_user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    receiver_user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    status text NOT NULL DEFAULT 'pending',
+    responded_at timestamptz,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    CHECK (sender_user_id <> receiver_user_id),
+    CHECK (status IN ('pending', 'accepted', 'declined', 'cancelled'))
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_friend_requests_pending_pair
+    ON friend_requests (LEAST(sender_user_id, receiver_user_id), GREATEST(sender_user_id, receiver_user_id))
+    WHERE status = 'pending';
+CREATE INDEX IF NOT EXISTS idx_friend_requests_receiver_status ON friend_requests(receiver_user_id, status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_friend_requests_sender_status ON friend_requests(sender_user_id, status, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS friendships (
+    user_a_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    user_b_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (user_a_id, user_b_id),
+    CHECK (user_a_id <> user_b_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_friendships_user_b ON friendships(user_b_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS friend_challenges (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    challenger_user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    challenged_user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    status text NOT NULL DEFAULT 'pending',
+    challenger_formation jsonb NOT NULL DEFAULT '{}'::jsonb,
+    challenged_formation jsonb NOT NULL DEFAULT '{}'::jsonb,
+    challenger_team_snapshot jsonb NOT NULL DEFAULT '{}'::jsonb,
+    challenged_team_snapshot jsonb NOT NULL DEFAULT '{}'::jsonb,
+    battle_result jsonb NOT NULL DEFAULT '{}'::jsonb,
+    battle_session_id text,
+    winner_user_id uuid REFERENCES users(id) ON DELETE SET NULL,
+    expires_at timestamptz NOT NULL DEFAULT (now() + interval '10 minutes'),
+    responded_at timestamptz,
+    resolved_at timestamptz,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    CHECK (challenger_user_id <> challenged_user_id),
+    CHECK (status IN ('pending', 'accepted', 'declined', 'cancelled', 'resolved', 'expired'))
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_friend_challenges_pending_pair
+    ON friend_challenges (LEAST(challenger_user_id, challenged_user_id), GREATEST(challenger_user_id, challenged_user_id))
+    WHERE status = 'pending';
+CREATE INDEX IF NOT EXISTS idx_friend_challenges_challenged_status ON friend_challenges(challenged_user_id, status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_friend_challenges_challenger_status ON friend_challenges(challenger_user_id, status, created_at DESC);
+
 CREATE TABLE IF NOT EXISTS card_death_records (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     hero_id uuid NOT NULL REFERENCES heroes(id) ON DELETE CASCADE,
@@ -347,6 +400,41 @@ CREATE TABLE IF NOT EXISTS daily_task_progress (
 );
 
 CREATE INDEX IF NOT EXISTS idx_daily_task_progress_user_date ON daily_task_progress(user_id, task_date DESC);
+
+-- Rolling daily task offers: 2 new tasks per day, unfinished tasks accumulate
+-- up to DAILY_TASK_MAX_ACTIVE, claimed tasks leave the active list.
+CREATE TABLE IF NOT EXISTS daily_task_offers (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    task_key text NOT NULL,
+    assigned_on date NOT NULL,
+    progress integer NOT NULL DEFAULT 0,
+    target integer NOT NULL DEFAULT 1,
+    reward_dust bigint NOT NULL DEFAULT 0,
+    claimed_at timestamptz,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    CHECK (progress >= 0),
+    CHECK (target > 0),
+    CHECK (reward_dust >= 0)
+);
+
+-- One active (unclaimed) offer per task key per user.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_daily_task_offers_active
+    ON daily_task_offers (user_id, task_key) WHERE claimed_at IS NULL;
+
+CREATE INDEX IF NOT EXISTS idx_daily_task_offers_user ON daily_task_offers(user_id, created_at DESC);
+
+-- Tracks the last date the daily task offer ran, so cap-blocked or fully
+-- completed days do not re-offer until the next day.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS daily_tasks_offered_on date;
+
+-- Premium currency wallet + transaction support.
+ALTER TABLE user_wallets ADD COLUMN IF NOT EXISTS diamond_balance bigint NOT NULL DEFAULT 0;
+
+ALTER TABLE resource_transactions DROP CONSTRAINT IF EXISTS resource_transactions_resource_type_check;
+ALTER TABLE resource_transactions ADD CONSTRAINT resource_transactions_resource_type_check
+    CHECK (resource_type IN ('dust', 'relic', 'diamond'));
 
 ALTER TABLE pvp_queue_entries ADD COLUMN IF NOT EXISTS formation_snapshot jsonb NOT NULL DEFAULT '{}'::jsonb;
 ALTER TABLE pvp_matches ADD COLUMN IF NOT EXISTS formation_a jsonb NOT NULL DEFAULT '{}'::jsonb;
@@ -477,7 +565,7 @@ def get_user_wallet(user_id):
     ensure_user_wallet(user_id)
     return fetch_one(
         """
-        SELECT user_id, dust_balance, created_at, updated_at
+        SELECT user_id, dust_balance, diamond_balance, created_at, updated_at
         FROM user_wallets
         WHERE user_id = %s
         """,

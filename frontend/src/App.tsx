@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { ArrowRight, CalendarDays, Gem, Gift, Mail, Newspaper, RefreshCw, Send, ShoppingBag, Sparkles, Swords, WalletCards, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { GameShell, type ArenaSideKey, type ForgeSideKey, type GameSectionKey, type HomeSideKey } from './components/GameShell';
+import { GameShell, type ArenaSideKey, type ForgeSideKey, type GameSectionKey, type HomeSideKey, type VaultSideKey } from './components/GameShell';
 import { VaultPage } from './components/VaultPage';
 import { ForgePage } from './components/ForgePage';
 import { ArenaPage } from './components/ArenaPage';
@@ -13,6 +13,7 @@ import { SectionHeader } from './components/Effects';
 import { PageHeader, PageHeaderStat } from './components/PageHeader';
 import {
   clearStoredSession,
+  decomposeCard,
   enchantCard,
   equipCardRelic,
   fetchBattles,
@@ -89,6 +90,7 @@ function createForgedMockHero(image: string): SavedHero {
     name: `${variant.name} ${String(now).slice(-3)}`,
     description: 'A locally forged sandbox card. Its actions, skills, enchantments, and Arena behavior can be tested without a live service.',
     BP: String(variant.bp),
+    rarity: 'rare',
     template: variant.type,
     state: {
       HP: String(variant.hp), MP: String(variant.mp), ATK: String(variant.atk), DEF: String(variant.def),
@@ -334,6 +336,29 @@ function battleRecordDate(value: string): string {
   return date.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
+const TRANSACTION_REASON_LABELS: Record<string, string> = {
+  forge_entry: 'Forge',
+  repair: 'Repair',
+  pve_entry: 'PvE entry',
+  pvp_entry: 'Arena entry',
+  pvp_stake: 'Arena stake',
+  pvp_revive: 'Arena revive',
+  pvp_queue_join_refund: 'Arena queue refund',
+  pvp_relic_drop: 'Arena shard drop',
+  pvp_reward: 'Arena reward',
+  daily_sign_in: 'Daily sign-in',
+  daily_task_reward: 'Daily task',
+  market_buy_relic: 'Market buy',
+  market_sell_relic: 'Market sell',
+  card_enchant: 'Shard enchant',
+  decompose: 'Card break',
+  test_grant: 'Grant',
+};
+
+function transactionReasonLabel(reason: string): string {
+  return TRANSACTION_REASON_LABELS[reason] ?? reason.replace(/_/g, ' ');
+}
+
 function HomePage({
   user,
   activeTab,
@@ -387,7 +412,7 @@ function HomePage({
       tone: 'from-[#4b2118] via-[#17110e] to-[#050505]',
     },
     {
-      title: 'Relic Enchanting',
+      title: 'Shard Enchanting',
       tag: 'Forge',
       description: 'New relic rituals are applied to cards after generation.',
       tone: 'from-[#34244f] via-[#111014] to-[#050505]',
@@ -405,7 +430,7 @@ function HomePage({
     ['遗物包', '$9.99', 'Relic rolls for enchantment and collection growth'],
   ] : [
     ['Dust Economy', 'Internal', 'Dust currently circulates through forge, revive, Arena entry, and relic trading.'],
-    ['Relic Loop', 'Live', 'Relics can already drop, equip, enchant, and trade inside the current MVP loop.'],
+    ['Relic Loop', 'Live', 'Shards enchant cards, relics equip into the battle slot, and both circulate through drops and the market.'],
     ['Recharge', 'Deferred', 'Real-money recharge and Stripe settlement are intentionally out of scope for the first release.'],
   ];
   const quickLinks: Array<[GameSectionKey, string, string, React.ReactNode]> = [
@@ -497,7 +522,7 @@ function HomePage({
                 <HomeSectionTitle icon={<WalletCards size={16} />} eyebrow="Account" title="Player Ledger" />
                 <div className="mt-6 grid gap-4 md:grid-cols-3">
                   <ProfileLedgerCard label="Dust Balance" value={dust.toLocaleString()} hint="Forge, revive, and Arena stake currency" />
-                  <ProfileLedgerCard label="Relics Owned" value={relics.toLocaleString()} hint="Used for enchantment and collection power" />
+                  <ProfileLedgerCard label="Relics Owned" value={relics.toLocaleString()} hint="Shards enchant cards; relics equip to a card's battle slot" />
                   <ProfileLedgerCard label="Vault Size" value={heroCount.toLocaleString()} hint="Playable hero cards in this account" />
                 </div>
                 <div className="mt-6 grid gap-4 md:grid-cols-2">
@@ -577,6 +602,39 @@ function HomePage({
                 </p>
               </div>
             </section>
+
+            <section className="border border-white/8 bg-black/20 p-6">
+              <HomeSectionTitle icon={<Newspaper size={16} />} eyebrow="Economy" title="Recent Activity" />
+              {(() => {
+                const catalog = Object.fromEntries((economy?.relic_catalog ?? []).map((item) => [item.relic_type, item.display_name]));
+                const recent = (economy?.transactions ?? []).slice(0, 8);
+                if (recent.length === 0) {
+                  return (
+                    <p className="mt-6 text-xs leading-5 text-stone-500">
+                      No activity yet. Forge, battle, trade, and daily claims will be recorded here.
+                    </p>
+                  );
+                }
+                return (
+                  <div className="mt-6 space-y-2">
+                    {recent.map((tx) => (
+                      <div key={tx.id} className="flex items-center justify-between gap-3 border border-white/8 bg-black/30 px-4 py-3">
+                        <div className="min-w-0">
+                          <div className="truncate text-xs uppercase tracking-[0.16em] text-stone-300">{transactionReasonLabel(tx.reason)}</div>
+                          <div className="mt-1 truncate text-[10px] uppercase tracking-[0.14em] text-stone-600">
+                            {tx.resource_type === 'relic' && tx.resource_key ? `${catalog[tx.resource_key] ?? tx.resource_key} · ` : ''}
+                            {tx.created_at ? battleRecordDate(tx.created_at) : ''}
+                          </div>
+                        </div>
+                        <div className={`shrink-0 text-sm font-light ${tx.delta >= 0 ? 'text-[#d8b06c]' : 'text-stone-400'}`}>
+                          {tx.delta >= 0 ? '+' : ''}{tx.delta.toLocaleString()} {tx.resource_type === 'dust' ? 'Dust' : ''}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
+            </section>
           </aside>
         </section>
       </div>
@@ -620,7 +678,7 @@ function HomePage({
         <aside className="flex h-full flex-col gap-6">
           <section className="flex flex-1 flex-col border border-white/8 bg-black/20 p-6">
             <HomeSectionTitle icon={<CalendarDays size={16} />} eyebrow="Daily" title="Ritual Board" />
-            {dailyToken ? (
+            {dailyToken || previewContentEnabled ? (
               <DailyActivity token={dailyToken} demoMode={previewContentEnabled} economy={economy} onEconomyChange={onEconomyChange} />
             ) : (
               <DailyPreview />
@@ -1133,6 +1191,7 @@ const App: React.FC = () => {
   const [forgeTab, setForgeTab] = useState<ForgeSideKey>('create');
   const [arenaTab, setArenaTab] = useState<ArenaSideKey>('queue');
   const [arenaLocked, setArenaLocked] = useState(false);
+  const [vaultTab, setVaultTab] = useState<VaultSideKey>('overview');
   const [replayRecord, setReplayRecord] = useState<BattleHistoryRecord | null>(null);
   const [authOpen, setAuthOpen] = useState(false);
   const [booting, setBooting] = useState(true);
@@ -1162,7 +1221,9 @@ const App: React.FC = () => {
     if (!token || token === 'mock-token') return [];
     try {
       const heroRecords = await fetchHeroes(token);
-      const heroes = heroRecords.map(heroRecordToSavedHero);
+      const heroes = heroRecords
+        .filter((record) => record.card_status !== 'decomposed')
+        .map(heroRecordToSavedHero);
       setSavedHeroes(heroes);
       try {
         setEconomy(await fetchEconomy(token));
@@ -1514,6 +1575,38 @@ const App: React.FC = () => {
     }));
   };
 
+  const handleBreakHero = async (heroId: string): Promise<number | null> => {
+    const token = session?.token ?? getStoredToken();
+    if (token && token !== 'mock-token') {
+      try {
+        const result = await decomposeCard(heroId, token);
+        setSavedHeroes((prev) => prev.filter((hero) => hero.id !== heroId));
+        setEconomy(result.economy);
+        return result.dust_returned;
+      } catch (breakError) {
+        setError(breakError instanceof Error ? breakError.message : 'Failed to break card.');
+        return null;
+      }
+    }
+
+    if (!IS_MOCK_MODE) {
+      setError('Login with a live session to break cards.');
+      return null;
+    }
+
+    const target = savedHeroes.find((hero) => hero.id === heroId);
+    if (!target) return null;
+    const bp = Number.parseInt(String(target.character.BP), 10) || 0;
+    const dustReturned = Math.max(10, Math.floor(bp * 0.05));
+    setSavedHeroes((prev) => prev.filter((hero) => hero.id !== heroId));
+    setEconomy((prev) => {
+      const base = prev ?? mockEconomy;
+      const wallet = base.wallet ?? mockEconomy.wallet!;
+      return { ...base, wallet: { ...wallet, dust_balance: wallet.dust_balance + dustReturned } };
+    });
+    return dustReturned;
+  };
+
   const content = (() => {
     if (activeSection === 'home') {
       return (
@@ -1557,7 +1650,9 @@ const App: React.FC = () => {
           onRarityFilterChange={setVaultRarityFilter}
           sort={vaultSort}
           onSortChange={setVaultSort}
+          onEquipRelic={handleEquipRelic}
           demoMode={demoMode}
+          activeTab={vaultTab}
         />
       );
     }
@@ -1573,9 +1668,9 @@ const App: React.FC = () => {
           economy={economy}
           demoMode={demoMode}
           activeTab={forgeTab}
-          onEquipRelic={handleEquipRelic}
           onEnchantHero={handleEnchantHero}
           onWashEnchant={handleWashEnchant}
+          onBreakHero={handleBreakHero}
           onGenerate={handleImageSelect}
           onBreak={resetForge}
         />
@@ -1640,13 +1735,15 @@ const App: React.FC = () => {
         onNavigate={handleNavigate}
         user={user}
         dustBalance={dustBalance(economy)}
-        relicBalance={relicBalance(economy)}
+        gemBalance={economy?.wallet?.diamond_balance ?? 0}
         homeTab={homeTab}
         forgeTab={forgeTab}
         arenaTab={arenaTab}
+        vaultTab={vaultTab}
         arenaLocked={arenaLocked}
         onHomeTabChange={setHomeTab}
         onForgeTabChange={setForgeTab}
+        onVaultTabChange={setVaultTab}
         onArenaTabChange={(tab) => {
           if (arenaLocked && tab !== 'battle') return;
           setArenaTab(tab);

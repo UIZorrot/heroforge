@@ -251,6 +251,7 @@ function visualEffectFamily(effect?: string): BattleVfxFamily {
     case 'pierce':
     case 'blunt':
     case 'strike':
+    case 'slash':
       return 'weapon';
     case 'claw':
       return 'flesh';

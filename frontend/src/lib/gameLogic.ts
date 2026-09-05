@@ -51,6 +51,7 @@ export interface CharacterData {
   description: string;
   extra?: string;
   BP: string;
+  rarity?: Rarity;
   template?: string;
   state: CharacterState;
   skill: Record<string, Skill> & {
@@ -60,16 +61,47 @@ export interface CharacterData {
   activeBuffs?: Array<{ name: string; duration: number; value: number }>;
 }
 
+export type PowerTier = 'human' | 'superhuman' | 'monster' | 'hero' | 'demigod' | 'god';
+
+export const POWER_TIER_LABEL: Record<PowerTier, string> = {
+  human: 'Human',
+  superhuman: 'Superhuman',
+  monster: 'Monster',
+  hero: 'Hero',
+  demigod: 'Demigod',
+  god: 'God',
+};
+
 export function toNumber(value: unknown, fallback = 0): number {
   const parsed = typeof value === 'number' ? value : Number.parseFloat(String(value));
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
-export function calculateRarity(bp: number): Rarity {
-  if (bp >= 3000) return 'mythic';
-  if (bp >= 1800) return 'epic';
-  if (bp >= 900) return 'rare';
+function normalizeRarityToken(value: unknown): Rarity | null {
+  const token = String(value ?? '').trim().toLowerCase();
+  if (token === 'common' || token === 'rare' || token === 'epic' || token === 'mythic') return token;
+  return null;
+}
+
+/** Prefer stored card rarity. Missing/legacy payloads fall back to common (not BP thresholds). */
+export function resolveRarity(source: { rarity?: unknown } | Rarity | null | undefined): Rarity {
+  if (typeof source === 'string') return normalizeRarityToken(source) ?? 'common';
+  return normalizeRarityToken(source?.rarity) ?? 'common';
+}
+
+/** @deprecated Use resolveRarity — rarity is independent of BP. */
+export function calculateRarity(_bp: number): Rarity {
   return 'common';
+}
+
+/** Display-only BP ladder; independent of card rarity. */
+export function powerTierFromBp(bp: number): PowerTier {
+  if (bp >= 10000) return 'god';
+  if (bp >= 5000) return 'demigod';
+  if (bp >= 1000) return 'hero';
+  if (bp >= 500) return 'monster';
+  if (bp >= 200) return 'superhuman';
+  return 'human';
 }
 
 export function normalizeCardType(typeStr: string): CardType {
@@ -98,7 +130,7 @@ function normalizeToken(value: unknown, fallback = ''): string {
 
 function inferTypeCatalog(type: string): 'proj' | 'instant' {
   const token = normalizeToken(type, 'flesh');
-  if (token === 'weapon' || token === 'flesh' || token === 'claw') return 'instant';
+  if (token === 'weapon' || token === 'flesh' || token === 'claw' || token === 'slash') return 'instant';
   return 'proj';
 }
 
@@ -188,6 +220,7 @@ export function normalizeCharacterData(source: unknown): CharacterData {
     description: toStringValue(payload.description, ''),
     extra: toStringValue(payload.extra, ''),
     BP: toStringValue(payload.BP, '1000'),
+    rarity: resolveRarity(payload),
     template: toStringValue(payload.template, ''),
     state,
     skill: normalizedSkills,

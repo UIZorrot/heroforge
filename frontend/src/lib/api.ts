@@ -5,11 +5,15 @@ import type {
   BattleResult,
   DailySnapshot,
   EconomySnapshot,
+  FriendChallengeRecord,
+  FriendsSnapshot,
   ArenaFormation,
   BattleSessionAction,
   BattleSessionSnapshot,
   CharacterData,
   CreateAgentAccessKeyResponse,
+  CurrencyDiamondPack,
+  CurrencyDustPack,
   HeroHistoryRecord,
   LadderSnapshot,
   LoginCodeResponse,
@@ -418,6 +422,30 @@ export async function washCardEnchant(cardId: string, token?: string | null): Pr
   );
 }
 
+export async function decomposeCard(cardId: string, token?: string | null): Promise<{ ok: true; card: HeroHistoryRecord; dust_returned: number; economy: EconomySnapshot }> {
+  return await requestJson<{ ok: true; card: HeroHistoryRecord; dust_returned: number; economy: EconomySnapshot }>(
+    `/api/cards/${cardId}/decompose`,
+    { method: 'POST' },
+    token
+  );
+}
+
+export async function buyDiamondPack(packId: string, token?: string | null): Promise<{ ok: true; pack: CurrencyDiamondPack; economy: EconomySnapshot }> {
+  return await requestJson<{ ok: true; pack: CurrencyDiamondPack; economy: EconomySnapshot }>(
+    '/api/market/currency/diamonds',
+    { method: 'POST', body: JSON.stringify({ packId }) },
+    token
+  );
+}
+
+export async function buyDustPack(packId: string, token?: string | null): Promise<{ ok: true; pack: CurrencyDustPack; economy: EconomySnapshot }> {
+  return await requestJson<{ ok: true; pack: CurrencyDustPack; economy: EconomySnapshot }>(
+    '/api/market/currency/dust',
+    { method: 'POST', body: JSON.stringify({ packId }) },
+    token
+  );
+}
+
 export async function buyMarketRelic(
   relicType: string,
   quantity: number,
@@ -446,6 +474,62 @@ export async function sellMarketRelic(
     },
     token
   );
+}
+
+export async function fetchFriends(token?: string | null): Promise<FriendsSnapshot> {
+  const payload = await requestJson<{ ok: true; data: FriendsSnapshot }>('/api/friends', {}, token);
+  return payload.data;
+}
+
+export async function sendFriendRequest(email: string, token?: string | null): Promise<FriendsSnapshot> {
+  const payload = await requestJson<{ ok: true; friends: FriendsSnapshot }>(
+    '/api/friends/requests',
+    { method: 'POST', body: JSON.stringify({ email }) },
+    token
+  );
+  return payload.friends;
+}
+
+export async function respondFriendRequest(requestId: string, action: 'accept' | 'decline', token?: string | null): Promise<FriendsSnapshot> {
+  const payload = await requestJson<{ ok: true; data: FriendsSnapshot }>(
+    `/api/friends/requests/${encodeURIComponent(requestId)}/${action}`,
+    { method: 'POST' },
+    token
+  );
+  return payload.data;
+}
+
+export async function removeFriend(friendUserId: string, token?: string | null): Promise<FriendsSnapshot> {
+  const payload = await requestJson<{ ok: true; data: FriendsSnapshot }>(
+    `/api/friends/${encodeURIComponent(friendUserId)}`,
+    { method: 'DELETE' },
+    token
+  );
+  return payload.data;
+}
+
+export async function createFriendChallenge(friendUserId: string, formation: ArenaFormation, token?: string | null): Promise<FriendsSnapshot> {
+  const payload = await requestJson<{ ok: true; friends: FriendsSnapshot }>(
+    `/api/friends/${encodeURIComponent(friendUserId)}/challenges`,
+    { method: 'POST', body: JSON.stringify({ formation }) },
+    token
+  );
+  return payload.friends;
+}
+
+export async function respondFriendChallenge(
+  challengeId: string,
+  action: 'accept' | 'decline' | 'cancel',
+  formation: ArenaFormation | null,
+  token?: string | null
+): Promise<{ snapshot?: FriendsSnapshot; challenge?: FriendChallengeRecord; battle?: BattleResult | null }> {
+  const payload = await requestJson<{ ok: true; data: FriendsSnapshot | FriendChallengeRecord; battle?: BattleResult | null }>(
+    `/api/friend-challenges/${encodeURIComponent(challengeId)}/${action}`,
+    { method: 'POST', body: JSON.stringify(formation ? { formation } : {}) },
+    token
+  );
+  if (action === 'accept') return { challenge: payload.data as FriendChallengeRecord, battle: payload.battle ?? null };
+  return { snapshot: payload.data as FriendsSnapshot };
 }
 
 export function stableHeroKey(hero: CharacterData) {

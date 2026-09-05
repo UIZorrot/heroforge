@@ -141,6 +141,7 @@ const INSTANT_HIT_SEQUENCE_BY_TOKEN: Record<string, InstantHitSequenceKey> = {
   rock: 'smash',
   stone: 'smash',
   strike: 'strike',
+  slash: 'strike',
   pierce: 'pierce',
   arrow: 'strike',
   weapon: 'strike',

@@ -20,6 +20,37 @@ CANONICAL_PROJECTILE_TYPE_EFFECTS = (
 
 PROJECTILE_TYPE_EFFECTS = frozenset(CANONICAL_PROJECTILE_TYPE_EFFECTS)
 
+# Must match frontend canonicalBattleInstantTypeEffects (battleVfxCatalog.ts).
+CANONICAL_INSTANT_TYPE_EFFECTS = (
+    "magic",
+    "thunder",
+    "strike",
+    "explode",
+    "fire",
+    "poison",
+    "frost",
+    "dark",
+    "light",
+    "nature",
+    "water",
+    "claw",
+    "pierce",
+    "blunt",
+    "bullet_hit",
+)
+
+# Must match frontend canonicalBattleBuffTypeEffects (battleVfxCatalog.ts).
+CANONICAL_BUFF_NAMES = (
+    "stun",
+    "frozen",
+    "poison",
+    "wound",
+    "burn",
+    "curse",
+    "heal",
+    "pray",
+)
+
 PROJECTILE_TYPE_EFFECT_ALIASES = {
     "blood": "blood",
     "flesh": "blood",

@@ -3,19 +3,8 @@ import time
 from dataclasses import dataclass
 from typing import Any, Dict, List, Literal, Protocol
 
-from vfx_contract import normalize_projectile_type_effect
+from vfx_contract import CANONICAL_BUFF_NAMES, CANONICAL_INSTANT_TYPE_EFFECTS, normalize_projectile_type_effect
 
-
-CANONICAL_BUFF_NAMES = (
-    "stun",
-    "frozen",
-    "poison",
-    "wound",
-    "burn",
-    "curse",
-    "heal",
-    "pray",
-)
 
 # Negative statuses merge into curse, positive ones into pray; burn is a fire DoT.
 BUFF_ALIASES = {
@@ -35,7 +24,7 @@ BUFF_ALIASES = {
 }
 SUPPORT_SKILL_ROLES = {"buff", "support", "heal", "defense", "utility"}
 
-INSTANT_TYPE_EFFECTS = {"slash", "magic", "thunder", "strike", "explode", "fire", "poison", "frost", "dark", "light", "nature", "water", "claw", "pierce", "blunt", "bullet_hit"}
+INSTANT_TYPE_EFFECTS = set(CANONICAL_INSTANT_TYPE_EFFECTS)
 BUFF_TYPE_EFFECTS = set(CANONICAL_BUFF_NAMES)
 
 
@@ -60,7 +49,7 @@ def _legacy_type_effect(effect_type: Any, type_catalog: str | None = None) -> st
     catalog = type_catalog or _legacy_type_catalog(token)
     if catalog == "instant":
         if token == "weapon":
-            return "slash"
+            return "strike"
         if token == "flesh":
             return "claw"
     if catalog == "proj" and token == "weapon":

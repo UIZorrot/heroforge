@@ -1,13 +1,15 @@
 import type { ReactNode } from 'react';
-import { ChevronDown, Gem, Home, Landmark, Settings, Shield, Sparkles, Swords, User, WalletCards, Zap } from 'lucide-react';
+import { ChevronDown, Gem, Home, Landmark, Settings, Shield, Sparkles, Swords, User, Users, WalletCards, Zap } from 'lucide-react';
 import { AppLogo } from './AppLogo';
+import { DustIcon } from './CurrencyIcons';
 import type { AuthUser } from '../types';
 import { IS_MOCK_MODE } from '../lib/runtimeMode';
 
 export type GameSectionKey = 'home' | 'forge' | 'vault' | 'arena' | 'vfx' | 'chronicle' | 'market' | 'settings';
-export type ArenaSideKey = 'queue' | 'train' | 'battle';
+export type ArenaSideKey = 'queue' | 'train' | 'friends' | 'battle';
 export type HomeSideKey = 'welcome' | 'profile';
 export type ForgeSideKey = 'create' | 'enchant' | 'break';
+export type VaultSideKey = 'overview' | 'card' | 'shard' | 'relic';
 
 type NavItem = {
   key: GameSectionKey;
@@ -19,7 +21,7 @@ type SideItem = {
   icon: ReactNode;
   active?: boolean;
   disabled?: boolean;
-  key?: ArenaSideKey | HomeSideKey | ForgeSideKey;
+  key?: ArenaSideKey | HomeSideKey | ForgeSideKey | VaultSideKey;
 };
 
 type GameShellProps = {
@@ -27,14 +29,16 @@ type GameShellProps = {
   onNavigate: (section: GameSectionKey) => void;
   user: AuthUser | null;
   dustBalance: number;
-  relicBalance: number;
+  gemBalance?: number;
   homeTab?: HomeSideKey;
   forgeTab?: ForgeSideKey;
   arenaTab?: ArenaSideKey;
+  vaultTab?: VaultSideKey;
   arenaLocked?: boolean;
   onHomeTabChange?: (tab: HomeSideKey) => void;
   onForgeTabChange?: (tab: ForgeSideKey) => void;
   onArenaTabChange?: (tab: ArenaSideKey) => void;
+  onVaultTabChange?: (tab: VaultSideKey) => void;
   onOpenAuth?: () => void;
   onOpenSettings?: () => void;
   children: ReactNode;
@@ -59,9 +63,10 @@ const sideItemsBySection: Record<GameSectionKey, SideItem[]> = {
     { key: 'break', label: 'Break', icon: <Landmark size={20} /> },
   ],
   vault: [
-    { label: 'Overview', icon: <WalletCards size={20} />, active: true },
-    { label: 'Card', icon: <Gem size={20} /> },
-    { label: 'Relic', icon: <Sparkles size={20} /> },
+    { key: 'overview', label: 'Overview', icon: <WalletCards size={20} /> },
+    { key: 'card', label: 'Card', icon: <Gem size={20} /> },
+    { key: 'shard', label: 'Shard', icon: <Sparkles size={20} /> },
+    { key: 'relic', label: 'Relic', icon: <Shield size={20} /> },
   ],
   arena: [],
   vfx: [
@@ -94,14 +99,16 @@ export function GameShell({
   onNavigate,
   user,
   dustBalance,
-  relicBalance,
+  gemBalance = 0,
   homeTab = 'welcome',
   forgeTab = 'create',
   arenaTab = 'queue',
+  vaultTab = 'overview',
   arenaLocked = false,
   onHomeTabChange,
   onForgeTabChange,
   onArenaTabChange,
+  onVaultTabChange,
   onOpenAuth,
   onOpenSettings,
   children,
@@ -114,10 +121,13 @@ export function GameShell({
       ]
       : activeSection === 'forge'
       ? sideItemsBySection.forge.map((item) => ({ ...item, active: item.key === forgeTab }))
+      : activeSection === 'vault'
+      ? sideItemsBySection.vault.map((item) => ({ ...item, active: item.key === vaultTab }))
       : activeSection === 'arena'
       ? [
         { key: 'queue' as const, label: 'Queue', icon: <Swords size={20} />, active: arenaTab === 'queue', disabled: arenaLocked },
         { key: 'train' as const, label: 'Train', icon: <Shield size={20} />, active: arenaTab === 'train', disabled: arenaLocked },
+        { key: 'friends' as const, label: 'Friends', icon: <Users size={20} />, active: arenaTab === 'friends', disabled: arenaLocked },
         { key: 'battle' as const, label: 'Battle', icon: <Landmark size={20} />, active: arenaTab === 'battle' },
       ]
       : sideItemsBySection[activeSection];
@@ -158,14 +168,14 @@ export function GameShell({
           <div className="flex h-full items-center border-l border-white/8">
             <div className="flex h-full items-center gap-5 border-r border-white/8 px-6">
               <div className="flex items-center gap-2 text-sm text-stone-200">
-                <Gem size={16} className="text-stone-300" />
-                <span>{formatNumber(relicBalance)}</span>
-                <button type="button" className="text-stone-500 hover:text-stone-200" aria-label="Add relics">
+                <Gem size={16} className="text-sky-300" />
+                <span>{formatNumber(gemBalance)}</span>
+                <button type="button" className="text-stone-500 hover:text-stone-200" aria-label="Add gems">
                   +
                 </button>
               </div>
               <div className="flex items-center gap-2 text-sm text-stone-200">
-                <span className="flex h-4 w-4 items-center justify-center rounded-full border border-stone-500 text-[9px]">D</span>
+                <DustIcon size={16} className="text-[#c4a574]" />
                 <span>{formatNumber(dustBalance)}</span>
                 <button type="button" className="text-stone-500 hover:text-stone-200" aria-label="Add dust">
                   +
@@ -217,6 +227,9 @@ export function GameShell({
                 }
                 if (activeSection === 'forge' && item.key && onForgeTabChange) {
                   onForgeTabChange(item.key as ForgeSideKey);
+                }
+                if (activeSection === 'vault' && item.key && onVaultTabChange) {
+                  onVaultTabChange(item.key as VaultSideKey);
                 }
                 if (activeSection === 'arena' && item.key && onArenaTabChange) {
                   onArenaTabChange(item.key as ArenaSideKey);

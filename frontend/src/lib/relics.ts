@@ -1,6 +1,12 @@
-import type { RelicDefinition } from '../types';
+import type { RelicDefinition, RelicKind } from '../types';
 
 export type RelicCategory = 'weapon' | 'armor' | 'accessory' | 'artifact';
+
+/** Mirrors backend relic_catalog.get_relic_kind: low_* entries are shards. */
+export function getRelicKind(relic?: Pick<RelicDefinition, 'relic_type' | 'kind'> | null): RelicKind {
+  if (relic?.kind === 'shard' || relic?.kind === 'relic') return relic.kind;
+  return relic?.relic_type?.startsWith('low_') ? 'shard' : 'relic';
+}
 
 function fileNameFromDisplayName(displayName: string) {
   const trimmed = displayName.trim();

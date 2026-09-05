@@ -1,6 +1,6 @@
 import { cn } from '../lib/utils';
 import type { CharacterData, CardType, Rarity } from '../lib/gameLogic';
-import { calculateRarity, normalizeCardType, toNumber } from '../lib/gameLogic';
+import { POWER_TIER_LABEL, normalizeCardType, powerTierFromBp, resolveRarity, toNumber } from '../lib/gameLogic';
 import { CARD_FALLBACK_SRC } from '../lib/cards';
 import { StatPill } from './Effects';
 
@@ -44,8 +44,9 @@ export function HeroCard({
   disabled,
   compact = false,
 }: HeroCardProps) {
-  const rarityKey = calculateRarity(statValue(character.BP));
+  const rarityKey = resolveRarity(character);
   const rarity = rarityConfig[rarityKey];
+  const powerTier = POWER_TIER_LABEL[powerTierFromBp(statValue(character.BP))];
   const typeKey = normalizeCardType(character.state.TYPE);
 
   const imageSrc = image || CARD_FALLBACK_SRC;
@@ -94,25 +95,22 @@ export function HeroCard({
         </div>
         <div className="absolute right-3 top-3 text-right">
           <div className="text-2xl font-light tracking-[0.12em] text-stone-100">{character.BP}</div>
-          <div className="text-[9px] uppercase tracking-[0.3em] text-stone-500">BP</div>
+          <div className="text-[9px] uppercase tracking-[0.3em] text-stone-500">BP · {powerTier}</div>
         </div>
       </div>
 
-      <div className="flex h-[42%] flex-col gap-3 p-4">
-        <div>
-          <h3 className="text-lg font-light tracking-[0.08em] text-stone-100">{character.name}</h3>
-          <p className="mt-1 line-clamp-2 text-xs leading-5 text-stone-400">{character.description}</p>
-        </div>
-
-        <div className="flex flex-wrap gap-2">
-          <StatPill label="HP" value={statValue(character.state.HP)} tone="slate" />
-          <StatPill label="ATK" value={statValue(character.state.ATK)} tone="gold" />
-          <StatPill label="DEF" value={statValue(character.state.DEF)} tone="violet" />
-          <StatPill label="SPD" value={statValue(character.state.SPEED)} tone="emerald" />
+      <div className="flex h-[42%] min-h-0 flex-col overflow-hidden px-4 pb-4 pt-3">
+        <div className="min-h-0 shrink">
+          <h3 className={cn('font-light tracking-[0.08em] text-stone-100', compact ? 'text-base' : 'text-lg')}>
+            {character.name}
+          </h3>
+          <p className={cn('mt-1 text-xs leading-5 text-stone-400', compact ? 'line-clamp-1' : 'line-clamp-2')}>
+            {character.description}
+          </p>
         </div>
 
         {!compact && (
-          <div className="grid grid-cols-2 gap-2 text-xs text-stone-300">
+          <div className="mt-3 grid shrink-0 grid-cols-2 gap-2 text-xs text-stone-300">
             <div className="border border-white/5 bg-black/35 p-2">
               <div className="text-[9px] uppercase tracking-[0.22em] text-stone-500">Primary</div>
               <div className="mt-1 line-clamp-1">{character.skill.s1?.name || 'Untitled skill'}</div>
@@ -124,6 +122,16 @@ export function HeroCard({
           </div>
         )}
 
+        <div className={cn('mt-auto flex shrink-0 flex-wrap gap-2', compact ? 'pt-3' : 'pt-2')}>
+          <StatPill label="HP" value={statValue(character.state.HP)} tone="slate" />
+          <StatPill label="ATK" value={statValue(character.state.ATK)} tone="gold" />
+          {!compact && (
+            <>
+              <StatPill label="DEF" value={statValue(character.state.DEF)} tone="violet" />
+              <StatPill label="SPD" value={statValue(character.state.SPEED)} tone="emerald" />
+            </>
+          )}
+        </div>
       </div>
 
       <div className="pointer-events-none absolute inset-0 border border-transparent group-hover:border-[#c59a5a]/30" />

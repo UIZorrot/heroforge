@@ -1,11 +1,12 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { BookOpen, ChevronLeft, ChevronRight, Grid2X2, ListFilter, Rows3, ScrollText, Search, Shield, Sparkles, Sword } from 'lucide-react';
 import { PageHeader, PageHeaderStat } from './PageHeader';
-import { calculateRarity, normalizeCardType, toNumber, type Rarity } from '../lib/gameLogic';
+import type { VaultSideKey } from './GameShell';
+import { normalizeCardType, resolveRarity, toNumber, type Rarity } from '../lib/gameLogic';
 import { CARD_FALLBACK_SRC } from '../lib/cards';
 import { mockHeroes, mockRelicCatalog, mockRelicInventory } from '../lib/mockContent';
-import { getRelicCategory, getRelicIconSrc, type RelicCategory } from '../lib/relics';
-import type { EconomySnapshot, RelicDefinition, SavedHero } from '../types';
+import { getRelicCategory, getRelicIconSrc, getRelicKind, type RelicCategory } from '../lib/relics';
+import type { EconomySnapshot, RelicDefinition, RelicKind, SavedHero } from '../types';
 
 type VaultSort = 'date' | 'bp' | 'name';
 
@@ -20,7 +21,9 @@ type VaultPageProps = {
   onRarityFilterChange: (rarity: Rarity | 'all') => void;
   sort: VaultSort;
   onSortChange: (sort: VaultSort) => void;
+  onEquipRelic?: (heroId: string, relicId: string | null) => Promise<void> | void;
   demoMode?: boolean;
+  activeTab?: VaultSideKey;
 };
 
 type DisplayHero = SavedHero & {
@@ -32,6 +35,7 @@ type RelicCard = {
   name: string;
   rarity: Rarity;
   family: string;
+  kind: RelicKind;
   amount: number;
   icon?: string | null;
   category: RelicCategory;
@@ -89,6 +93,7 @@ function relicsFromEconomy(economy: EconomySnapshot | null, demoMode: boolean): 
       name: definition?.display_name ?? entry.relic_type,
       rarity: tier as Rarity,
       family: definition?.family ?? 'Relic',
+      kind: getRelicKind(definition ?? { relic_type: entry.relic_type }),
       amount: entry.amount,
       icon: getRelicIconSrc(definition),
       category: getRelicCategory(definition),
@@ -187,7 +192,7 @@ function HeroTile({
   active: boolean;
   onSelect: () => void;
 }) {
-  const rarity = calculateRarity(heroBp(hero));
+  const rarity = resolveRarity(hero.character);
   const tone = rarityTone[rarity];
   const level = levelForHero(hero, index);
 
@@ -323,7 +328,17 @@ function Trait({ label, value }: { label: string; value: string }) {
   );
 }
 
-function HeroDetailPanel({ hero, index, relics }: { hero: DisplayHero | null; index: number; relics: RelicCard[] }) {
+function HeroDetailPanel({
+  hero,
+  index,
+  relics,
+  onEquipRelic,
+}: {
+  hero: DisplayHero | null;
+  index: number;
+  relics: RelicCard[];
+  onEquipRelic?: (heroId: string, relicId: string | null) => Promise<void> | void;
+}) {
   if (!hero) {
     return (
       <section className="h-full border border-white/8 bg-[#0a0a0a]/90 p-5">
@@ -333,9 +348,10 @@ function HeroDetailPanel({ hero, index, relics }: { hero: DisplayHero | null; in
     );
   }
 
-  const rarity = calculateRarity(heroBp(hero));
+  const rarity = resolveRarity(hero.character);
   const tone = rarityTone[rarity];
   const level = levelForHero(hero, index);
+  const equipmentRelics = relics.filter((relic) => relic.kind === 'relic' && relic.amount > 0);
   const equippedRelic = relics.find((relic) => relic.id === hero.equippedRelicId);
   const enchantRelic = hero.enchantment?.relicName || relics.find((relic) => relic.id === hero.enchantment?.relicId)?.name;
   const skills = [hero.character.skill.s1, hero.character.skill.s2].filter(Boolean) as Array<NonNullable<SavedHero['character']['skill']['s1']>>;
@@ -378,6 +394,58 @@ function HeroDetailPanel({ hero, index, relics }: { hero: DisplayHero | null; in
       </div>
 
       <div className="mt-7">
+        <div className="flex items-end justify-between gap-3">
+          <div className="text-[10px] uppercase tracking-[0.24em] text-stone-600">Equip Relic</div>
+          <div className="text-[10px] uppercase tracking-[0.16em] text-stone-600">
+            {equippedRelic ? equippedRelic.name : 'None equipped'}
+          </div>
+        </div>
+        <div className="mt-4 grid grid-cols-3 gap-2">
+          <button
+            type="button"
+            onClick={() => onEquipRelic?.(hero.id, null)}
+            className={`border px-2 py-3 text-center transition ${
+              !hero.equippedRelicId
+                ? 'border-[#d7a852] bg-[#b49664]/10 text-[#f0d8ad]'
+                : 'border-white/10 bg-black/35 text-stone-400 hover:border-stone-500'
+            }`}
+          >
+            <div className="text-[9px] uppercase tracking-[0.14em]">None</div>
+          </button>
+          {equipmentRelics.slice(0, 8).map((relic) => {
+            const active = hero.equippedRelicId === relic.id;
+            return (
+              <button
+                key={relic.id}
+                type="button"
+                onClick={() => onEquipRelic?.(hero.id, relic.id)}
+                className={`relative overflow-hidden border text-left transition ${
+                  active ? 'border-[#d7a852]' : 'border-white/10 hover:border-stone-500'
+                }`}
+                title={relic.name}
+              >
+                {relic.icon ? (
+                  <img src={relic.icon} alt={relic.name} className="h-16 w-full object-cover opacity-90" />
+                ) : (
+                  <div className="flex h-16 items-center justify-center bg-black/40">
+                    <Sword size={16} className="text-stone-500" />
+                  </div>
+                )}
+                <div className="absolute inset-x-0 bottom-0 bg-black/75 px-1 py-0.5 text-center text-[8px] uppercase tracking-[0.12em] text-stone-300">
+                  {active ? 'Equipped' : `x${relic.amount}`}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+        {equipmentRelics.length === 0 && (
+          <div className="mt-3 text-xs leading-5 text-stone-600">
+            No equipment relics in inventory. Shards are used for enchanting in Forge.
+          </div>
+        )}
+      </div>
+
+      <div className="mt-7">
         <div className="text-[10px] uppercase tracking-[0.24em] text-stone-600">Traits</div>
         <div className="mt-4 space-y-3">
           <Trait label="Battle Type" value={hero.character.state.TYPE || 'Unknown'} />
@@ -385,10 +453,6 @@ function HeroDetailPanel({ hero, index, relics }: { hero: DisplayHero | null; in
           <Trait label="Enchant" value={enchantRelic ?? 'Clean'} />
         </div>
       </div>
-
-      <button type="button" className="mt-7 w-full bg-[#806838] px-5 py-3 text-[11px] font-semibold uppercase tracking-[0.22em] text-stone-100 transition hover:bg-[#9a7d4a]">
-        View Details
-      </button>
     </section>
   );
 }
@@ -415,6 +479,9 @@ function RelicDetailPanel({ relic }: { relic: RelicCard | null }) {
           <div className="mt-3 flex flex-wrap items-center gap-2 text-[10px] uppercase tracking-[0.18em]">
             <span className={`${tone.chip} px-2 py-1`}>{tone.label}</span>
             <span className="text-stone-500">{relic.category}</span>
+            <span className="border border-white/10 px-2 py-1 text-stone-400">
+              {relic.kind === 'shard' ? 'Shard · Enchant material' : 'Relic · Equipment'}
+            </span>
           </div>
         </div>
       </div>
@@ -447,15 +514,23 @@ export function VaultPage({
   onRarityFilterChange,
   sort,
   onSortChange,
+  onEquipRelic,
   demoMode,
+  activeTab = 'overview',
 }: VaultPageProps) {
   const [relicQuery, setRelicQuery] = useState('');
   const [relicFilter, setRelicFilter] = useState<RelicCategory | 'all'>('all');
   const [cardPage, setCardPage] = useState(1);
   const [relicPage, setRelicPage] = useState(1);
   const [selectedRelicId, setSelectedRelicId] = useState('');
+  const [overviewRelicKind, setOverviewRelicKind] = useState<RelicKind>('relic');
   const cardsRef = useRef<HTMLElement | null>(null);
   const relicsRef = useRef<HTMLElement | null>(null);
+
+  const showCardsSection = activeTab === 'overview' || activeTab === 'card';
+  const showRelicSection = activeTab === 'overview' || activeTab === 'shard' || activeTab === 'relic';
+  const relicKind: RelicKind = activeTab === 'shard' || activeTab === 'relic' ? activeTab : overviewRelicKind;
+  const showKindToggle = activeTab === 'overview';
 
   const displayHeroes = (heroes.length > 0 ? heroes : demoMode ? demoHeroes : []) as DisplayHero[];
   const relicCards = useMemo(() => relicsFromEconomy(economy, Boolean(demoMode)), [demoMode, economy]);
@@ -467,7 +542,7 @@ export function VaultPage({
         if (!needle) return true;
         return hero.character.name.toLowerCase().includes(needle) || hero.character.description.toLowerCase().includes(needle);
       })
-      .filter((hero) => rarityFilter === 'all' || calculateRarity(heroBp(hero)) === rarityFilter)
+      .filter((hero) => rarityFilter === 'all' || resolveRarity(hero.character) === rarityFilter)
       .sort((a, b) => {
         if (sort === 'bp') return heroBp(b) - heroBp(a);
         if (sort === 'name') return a.character.name.localeCompare(b.character.name);
@@ -477,6 +552,7 @@ export function VaultPage({
 
   const filteredRelics = useMemo(() => (
     relicCards
+      .filter((relic) => relic.kind === relicKind)
       .filter((relic) => {
         const needle = relicQuery.trim().toLowerCase();
         if (!needle) return true;
@@ -487,15 +563,21 @@ export function VaultPage({
         );
       })
       .filter((relic) => relicFilter === 'all' || relic.category === relicFilter)
-  ), [relicCards, relicFilter, relicQuery]);
+  ), [relicCards, relicKind, relicFilter, relicQuery]);
 
-  useEffect(() => {
+  const cardQueryKey = `${query}|${rarityFilter}|${sort}`;
+  const [prevCardQueryKey, setPrevCardQueryKey] = useState(cardQueryKey);
+  if (prevCardQueryKey !== cardQueryKey) {
+    setPrevCardQueryKey(cardQueryKey);
     setCardPage(1);
-  }, [query, rarityFilter, sort]);
+  }
 
-  useEffect(() => {
+  const relicQueryKey = `${relicKind}|${relicFilter}|${relicQuery}`;
+  const [prevRelicQueryKey, setPrevRelicQueryKey] = useState(relicQueryKey);
+  if (prevRelicQueryKey !== relicQueryKey) {
+    setPrevRelicQueryKey(relicQueryKey);
     setRelicPage(1);
-  }, [relicFilter, relicQuery]);
+  }
 
   const pagedHeroes = paginate(filteredHeroes, cardPage, CARD_PAGE_SIZE);
   const pagedRelics = paginate(filteredRelics, relicPage, RELIC_PAGE_SIZE);
@@ -511,30 +593,37 @@ export function VaultPage({
     filteredRelics.find((relic) => relic.id === selectedRelicId) ||
     pagedRelics.items[0] ||
     filteredRelics[0] ||
-    relicCards[0] ||
     null;
 
   const totalPower = displayHeroes.reduce((sum, hero) => sum + heroBp(hero), 0);
-  const strongest = displayHeroes.length > 0 ? Math.max(...displayHeroes.map(heroBp)) : 0;
 
   return (
     <div className="mx-auto max-w-[1540px] px-6 py-6 2xl:px-8">
       <PageHeader
         title="Vault"
         eyebrow="Archive"
-        subtitle="Collection Index"
-        description="Inspect cards and relics."
+        subtitle={activeTab === 'card' ? 'Card Index' : activeTab === 'shard' ? 'Shard Archive' : activeTab === 'relic' ? 'Relic Archive' : 'Collection Index'}
+        description={
+          activeTab === 'card'
+            ? 'Inspect forged cards.'
+            : activeTab === 'shard'
+              ? 'Consumable enchant materials.'
+              : activeTab === 'relic'
+                ? 'Card equipment for the battle slot.'
+                : 'Inspect cards, shards, and relics.'
+        }
         stats={
           <>
             <PageHeaderStat label="Cards Owned" value={`${displayHeroes.length} / 500`} />
-            <PageHeaderStat label="Relics Owned" value={`${relicCards.length} / 100`} />
+            <PageHeaderStat label="Shards" value={relicCards.filter((relic) => relic.kind === 'shard').length} />
+            <PageHeaderStat label="Relics" value={relicCards.filter((relic) => relic.kind === 'relic').length} />
             <PageHeaderStat label="Total Power" value={formatNumber(totalPower)} />
-            <PageHeaderStat label="Strongest Card" value={formatNumber(strongest)} />
           </>
         }
       />
 
       <div className="mt-5 space-y-5">
+        {showCardsSection && (
         <div className="grid items-stretch gap-5 xl:grid-cols-[minmax(0,1fr)_300px]">
           <section ref={cardsRef} className="flex h-full flex-col border border-white/8 bg-[#0a0a0a]/92">
             <SectionHeader
@@ -617,39 +706,60 @@ export function VaultPage({
             </div>
           </section>
 
-          <HeroDetailPanel hero={selectedHero} index={selectedIndex} relics={relicCards} />
+          <HeroDetailPanel hero={selectedHero} index={selectedIndex} relics={relicCards} onEquipRelic={onEquipRelic} />
         </div>
+        )}
 
+        {showRelicSection && (
         <div className="grid items-stretch gap-5 xl:grid-cols-[minmax(0,1fr)_300px]">
           <section ref={relicsRef} className="flex h-full flex-col border border-white/8 bg-[#0a0a0a]/92">
             <SectionHeader
-              title="Relics"
-              searchPlaceholder="Search relics..."
-              filters={(['all', 'weapon', 'armor', 'accessory', 'artifact'] as Array<RelicCategory | 'all'>).map((item) => (
-                <button
-                  key={item}
-                  type="button"
-                  onClick={() => setRelicFilter(item)}
-                  className={`relative pb-2 text-[10px] font-semibold uppercase tracking-[0.22em] transition-colors ${
-                    relicFilter === item ? 'text-stone-100' : 'text-stone-600 hover:text-stone-300'
-                  }`}
-                >
-                  {item}
-                  {relicFilter === item && <span className="absolute inset-x-0 bottom-0 h-px bg-[#b49664]" />}
-                </button>
-              ))}
+              title={relicKind === 'shard' ? 'Shards' : 'Relics'}
+              searchPlaceholder={relicKind === 'shard' ? 'Search shards...' : 'Search relics...'}
+              filters={([
+                ...(showKindToggle ? [
+                  <div key="kind" className="mr-3 flex items-center gap-1 border border-white/10 bg-black/35 p-1">
+                    {(['relic', 'shard'] as RelicKind[]).map((kind) => (
+                      <button
+                        key={kind}
+                        type="button"
+                        onClick={() => setOverviewRelicKind(kind)}
+                        className={`px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.18em] transition-colors ${
+                          relicKind === kind ? 'bg-[#b49664]/15 text-[#f0d8ad]' : 'text-stone-500 hover:text-stone-300'
+                        }`}
+                      >
+                        {kind === 'shard' ? 'Shards' : 'Relics'}
+                      </button>
+                    ))}
+                  </div>,
+                ] : []),
+                ...(['all', 'weapon', 'armor', 'accessory', 'artifact'] as Array<RelicCategory | 'all'>).map((item) => (
+                  <button
+                    key={item}
+                    type="button"
+                    onClick={() => setRelicFilter(item)}
+                    className={`relative pb-2 text-[10px] font-semibold uppercase tracking-[0.22em] transition-colors ${
+                      relicFilter === item ? 'text-stone-100' : 'text-stone-600 hover:text-stone-300'
+                    }`}
+                  >
+                    {item}
+                    {relicFilter === item && <span className="absolute inset-x-0 bottom-0 h-px bg-[#b49664]" />}
+                  </button>
+                )),
+              ])}
             >
               <input
                 value={relicQuery}
                 onChange={(event) => setRelicQuery(event.target.value)}
-                placeholder="Search relics..."
+                placeholder={relicKind === 'shard' ? 'Search shards...' : 'Search relics...'}
                 className="w-full bg-transparent text-sm text-stone-300 outline-none placeholder:text-stone-600"
               />
             </SectionHeader>
 
             <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-4">
               <div className="text-[10px] uppercase tracking-[0.18em] text-stone-600">
-                {filteredRelics.length} relics in archive
+                {filteredRelics.length} {relicKind === 'shard' ? 'shards' : 'relics'} in archive
+                {relicKind === 'shard' ? ' · consumable enchant materials' : ' · card equipment'}
               </div>
               <div className="flex items-center gap-3">
                 <button type="button" className="flex h-9 w-9 items-center justify-center border border-white/10 bg-black/35 text-stone-500 hover:text-stone-200">
@@ -672,6 +782,7 @@ export function VaultPage({
           </section>
           <RelicDetailPanel relic={selectedRelic} />
         </div>
+        )}
       </div>
     </div>
   );

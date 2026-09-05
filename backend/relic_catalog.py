@@ -366,14 +366,35 @@ RELIC_CATALOG = [
 
 _RELIC_INDEX = {row["relic_type"]: row for row in RELIC_CATALOG}
 
+# Shards are consumable enchant materials; relics are card equipment (one slot
+# per card). Low-tier commons are shards; named/limited entries are relics.
+RELIC_KIND_SHARD = "shard"
+RELIC_KIND_EQUIPMENT = "relic"
+
+
+def get_relic_kind(relic_type: str) -> str:
+    return RELIC_KIND_SHARD if str(relic_type).startswith("low_") else RELIC_KIND_EQUIPMENT
+
+
+def _with_kind(row):
+    return {**row, "kind": get_relic_kind(row["relic_type"])}
+
 
 def get_relic_catalog():
-    return deepcopy(RELIC_CATALOG)
+    return [_with_kind(row) for row in deepcopy(RELIC_CATALOG)]
 
 
 def get_relic_definition(relic_type: str):
     definition = _RELIC_INDEX.get(relic_type)
-    return deepcopy(definition) if definition else None
+    return _with_kind(deepcopy(definition)) if definition else None
+
+
+def get_shard_types():
+    return [row["relic_type"] for row in RELIC_CATALOG if get_relic_kind(row["relic_type"]) == RELIC_KIND_SHARD]
+
+
+def get_equipment_relic_types():
+    return [row["relic_type"] for row in RELIC_CATALOG if get_relic_kind(row["relic_type"]) == RELIC_KIND_EQUIPMENT]
 
 
 def get_low_tier_relic_types():
