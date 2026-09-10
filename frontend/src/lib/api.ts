@@ -309,6 +309,20 @@ export async function createBattleSession(
   return payload.data;
 }
 
+export async function prepareBattleSession(teamA: unknown[], teamB: unknown[], token?: string | null): Promise<BattleSessionSnapshot> {
+  const payload = await requestJson<{ data: BattleSessionSnapshot }>('/api/battle/sessions', {
+    method: 'POST', body: JSON.stringify({ teamA, teamB, battleMode: 'arena_2x3', controlMode: 'program', preparation: true, labelA: 'Forger', labelB: 'Rival' }),
+  }, token);
+  return payload.data;
+}
+
+export async function confirmBattleFormation(sessionId: string, positions: Record<string, number>, token?: string | null): Promise<BattleSessionSnapshot> {
+  const payload = await requestJson<{ data: BattleSessionSnapshot }>(`/api/battle/sessions/${encodeURIComponent(sessionId)}/confirm`, {
+    method: 'POST', body: JSON.stringify({ positions }),
+  }, token);
+  return payload.data;
+}
+
 export async function fetchBattleSession(sessionId: string, token?: string | null): Promise<BattleSessionSnapshot> {
   const payload = await requestJson<{ data: BattleSessionSnapshot }>(
     `/api/battle/sessions/${encodeURIComponent(sessionId)}`,
@@ -522,13 +536,13 @@ export async function respondFriendChallenge(
   action: 'accept' | 'decline' | 'cancel',
   formation: ArenaFormation | null,
   token?: string | null
-): Promise<{ snapshot?: FriendsSnapshot; challenge?: FriendChallengeRecord; battle?: BattleResult | null }> {
-  const payload = await requestJson<{ ok: true; data: FriendsSnapshot | FriendChallengeRecord; battle?: BattleResult | null }>(
+): Promise<{ snapshot?: FriendsSnapshot; challenge?: FriendChallengeRecord; battle?: BattleResult | null; battle_session?: BattleSessionSnapshot | null }> {
+  const payload = await requestJson<{ ok: true; data: FriendsSnapshot | FriendChallengeRecord; battle?: BattleResult | null; battle_session?: BattleSessionSnapshot | null }>(
     `/api/friend-challenges/${encodeURIComponent(challengeId)}/${action}`,
     { method: 'POST', body: JSON.stringify(formation ? { formation } : {}) },
     token
   );
-  if (action === 'accept') return { challenge: payload.data as FriendChallengeRecord, battle: payload.battle ?? null };
+  if (action === 'accept') return { challenge: payload.data as FriendChallengeRecord, battle: payload.battle ?? null, battle_session: payload.battle_session };
   return { snapshot: payload.data as FriendsSnapshot };
 }
 

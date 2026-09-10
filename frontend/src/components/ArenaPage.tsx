@@ -16,14 +16,15 @@ import {
   Zap,
 } from 'lucide-react';
 import { BattleVisualizer } from './BattleVisualizer';
-import { cancelPvpEntry, createBattleSession, createFriendChallenge, fetchBattleSession, fetchFriends, fetchPvpEntryStatus, getStoredToken, joinArenaQueue, removeFriend, respondFriendChallenge, respondFriendRequest, sendFriendRequest, submitBattleSessionAction } from '../lib/api';
+import { acceptBattleSessionSnapshot, applyPreparationPositions, formationPositions, movePreparationCard } from '../lib/battlePreparation';
+import { cancelPvpEntry, prepareBattleSession, confirmBattleFormation, createFriendChallenge, fetchBattleSession, fetchFriends, fetchPvpEntryStatus, getStoredToken, joinArenaQueue, removeFriend, respondFriendChallenge, respondFriendRequest, sendFriendRequest } from '../lib/api';
 import { resolveRarity, normalizeCardType, toNumber, type Rarity } from '../lib/gameLogic';
 import { CARD_FALLBACK_SRC } from '../lib/cards';
 import { mockHeroes } from '../lib/mockContent';
 import { cn } from '../lib/utils';
 import { STORAGE_NAMESPACE } from '../lib/runtimeMode';
-import type { BattleBoardUnit } from '../lib/battleTypes';
-import type { ArenaFormation, ArenaSlotKey, BattleHistoryRecord, BattleResult, BattleSessionAction, BattleSessionObservation, BattleSessionSnapshot, EconomySnapshot, FriendsSnapshot, PvpBattleMode, PvpMatchRecord, PvpQueueEntry, SavedHero } from '../types';
+import type { BattleBoardState, BattleBoardUnit } from '../lib/battleTypes';
+import type { ArenaFormation, ArenaSlotKey, BattleHistoryRecord, BattleResult, BattleSessionSnapshot, EconomySnapshot, FriendsSnapshot, PvpMatchRecord, PvpQueueEntry, SavedHero } from '../types';
 
 type ArenaTab = 'queue' | 'train' | 'friends' | 'battle';
 
@@ -51,8 +52,6 @@ const STORAGE_KEY = `${STORAGE_NAMESPACE}.pvp.arena.v1`;
 const DEFAULT_QUEUE_KEY = 'ranked';
 const MAX_TEAM_SIZE = 4;
 const ARENA_CARD_PAGE_SIZE = 10;
-const BATTLE_SESSION_STEP_LIMIT = 120;
-const BATTLE_AGENT_FALLBACK_SECONDS = 1;
 const ARENA_ROWS: Array<{ label: string; slots: ArenaSlotKey[] }> = [
   { label: 'Lane 1', slots: ['front_0', 'back_0'] },
   { label: 'Lane 2', slots: ['front_1', 'back_1'] },
@@ -223,119 +222,7 @@ function battleSessionToResult(session: BattleSessionSnapshot | null): BattleRes
 }
 
 function heroSessionPayload(hero: SavedHero) {
-  return { id: hero.id, character: hero.character };
-}
-
-function wait(ms: number) {
-  return new Promise((resolve) => {
-    window.setTimeout(resolve, ms);
-  });
-}
-
-function isBattleSessionObservation(value: BattleSessionSnapshot['observation']): value is BattleSessionObservation {
-  return Boolean(
-    value &&
-    typeof value === 'object' &&
-    'actor' in value &&
-    'enemies' in value &&
-    Array.isArray((value as BattleSessionObservation).enemies)
-  );
-}
-
-function skillMpCost(skill?: Record<string, unknown>) {
-  const raw = skill?.MP_COST;
-  const numeric = typeof raw === 'number' ? raw : Number(raw ?? 0);
-  return Number.isFinite(numeric) ? Math.max(0, numeric) : 0;
-}
-
-function skillText(skill: Record<string, unknown> | undefined, key: string) {
-  return String(skill?.[key] ?? '').trim().toLowerCase();
-}
-
-function skillNumber(skill: Record<string, unknown> | undefined, key: string) {
-  const raw = skill?.[key];
-  const numeric = typeof raw === 'number' ? raw : Number(raw ?? 0);
-  return Number.isFinite(numeric) ? numeric : 0;
-}
-
-function chooseBattleSessionAction(snapshot: BattleSessionSnapshot): BattleSessionAction {
-  const observation = snapshot.observation;
-  if (!isBattleSessionObservation(observation) || !snapshot.activeActorTag) {
-    throw new Error('Battle session is missing the active actor observation.');
-  }
-
-  const actor = observation.actor;
-  const skills = actor.skills ?? {};
-  const preferredSlots: Array<'s1' | 's2'> = ['s1', 's2'];
-  const availableSkills = preferredSlots
-    .map((slot) => ({ slot, skill: skills[slot] }))
-    .filter(({ skill }) => Boolean(skill && actor.mp >= skillMpCost(skill)));
-
-  const supportSkill = availableSkills.find(({ skill }) => {
-    const target = skillText(skill, 'TARGET');
-    const role = skillText(skill, 'ROLE');
-    return actor.buffs.length === 0 && ['self', 'ally'].includes(target) && ['buff', 'support', 'heal', 'defense', 'utility'].includes(role);
-  });
-  if (supportSkill) {
-    return {
-      actorTag: snapshot.activeActorTag,
-      kind: 'skill',
-      skillSlot: supportSkill.slot,
-    };
-  }
-
-  const shouldUseOffensiveSkill = snapshot.round % 2 === 1;
-  const offensiveSkill = shouldUseOffensiveSkill ? availableSkills.find(({ skill }) => {
-    const target = skillText(skill, 'TARGET') || 'enemy';
-    const role = skillText(skill, 'ROLE') || 'attack';
-    return ['enemy', ''].includes(target) && (role === 'attack' || skillNumber(skill, 'DMG') > 0 || skillText(skill, 'BUFF_NAME'));
-  }) : null;
-  if (offensiveSkill) {
-    return {
-      actorTag: snapshot.activeActorTag,
-      kind: 'skill',
-      skillSlot: offensiveSkill.slot,
-    };
-  }
-
-  return {
-    actorTag: snapshot.activeActorTag,
-    kind: 'attack',
-  };
-}
-
-async function resolveBattleSessionToResult(
-  teamA: SavedHero[],
-  teamB: SavedHero[],
-  battleMode: PvpBattleMode,
-  labelA: string,
-  labelB: string,
-  token?: string | null
-): Promise<BattleResult> {
-  let snapshot = await createBattleSession(
-    teamA.map(heroSessionPayload),
-    teamB.map(heroSessionPayload),
-    battleMode,
-    labelA,
-    labelB,
-    token,
-    BATTLE_AGENT_FALLBACK_SECONDS
-  );
-
-  for (let step = 0; step < BATTLE_SESSION_STEP_LIMIT && snapshot.status !== 'resolved'; step += 1) {
-    try {
-      snapshot = await submitBattleSessionAction(snapshot.sessionId, chooseBattleSessionAction(snapshot), token);
-    } catch {
-      await wait((snapshot.waitSeconds || BATTLE_AGENT_FALLBACK_SECONDS) * 1000 + 150);
-      snapshot = await fetchBattleSession(snapshot.sessionId, token);
-    }
-  }
-
-  if (snapshot.status !== 'resolved' || !snapshot.result) {
-    throw new Error('Battle session did not resolve cleanly.');
-  }
-
-  return enrichBattleResultImages(snapshot.result, teamA, teamB);
+  return { id: hero.id, character: hero.character, image: hero.image };
 }
 
 function unitFromHero(hero: SavedHero, side: 'A' | 'B', slot: number): BattleBoardUnit {
@@ -482,7 +369,7 @@ function enrichBoardUnits(units: Array<BattleBoardUnit | null> | undefined, hero
   const heroByName = new Map(heroes.map((hero) => [hero.character.name.toLowerCase(), hero]));
   return (units ?? []).map((unit) => {
     if (!unit) return null;
-    const hero = heroBySlot.get(unit.slot) ?? heroByName.get(unit.name.toLowerCase());
+    const hero = heroByName.get(unit.name.toLowerCase()) ?? heroBySlot.get(unit.slot);
     if (!hero) return unit;
     return {
       ...unit,
@@ -507,48 +394,6 @@ function enrichBattleResultImages(result: BattleResult, teamA: SavedHero[], team
   };
 }
 
-function createPreviewBattleResult(heroes: SavedHero[], rivals = createPreviewRivals()): BattleResult {
-  const attackers = rankHeroes(heroes).slice(0, 4);
-  const defenders = rivals;
-  const bottom = Array.from({ length: 4 }, (_, index) => attackers[index] ? unitFromHero(attackers[index], 'A', index) : null);
-  const top = Array.from({ length: 4 }, (_, index) => defenders[index] ? unitFromHero(defenders[index], 'B', index) : null);
-  const { events, logs, boardHistory } = simulateTrainingBattle(bottom, top, 'Arena');
-  const finalBoard = boardHistory[boardHistory.length - 1] ?? createTrainingBoardSnapshot(1, bottom, top, 'Arena');
-
-  return {
-    winner: teamHp(bottom) >= teamHp(top) ? 'A' : 'B',
-    winnerLabel: teamHp(bottom) >= teamHp(top) ? 'Forger' : 'Rival',
-    logs,
-    events,
-    board: finalBoard,
-    boardHistory,
-    finalHpA: teamHp(bottom),
-    finalHpB: teamHp(top),
-    aliveA: teamAlive(bottom),
-    aliveB: teamAlive(top),
-    summary: 'Arena preview resolved locally by computer control.',
-  };
-}
-
-function createTrainPreviewBattleResult(teamA: SavedHero[], teamB: SavedHero[]): BattleResult {
-  const bottom = Array.from({ length: MAX_TEAM_SIZE }, (_, index) => teamA[index] ? unitFromHero(teamA[index], 'A', index) : null);
-  const top = Array.from({ length: MAX_TEAM_SIZE }, (_, index) => teamB[index] ? unitFromHero(teamB[index], 'B', index) : null);
-  const { events, logs, boardHistory } = simulateTrainingBattle(bottom, top);
-  const finalBoard = boardHistory[boardHistory.length - 1] ?? createTrainingBoardSnapshot(1, bottom, top);
-  return {
-    winner: teamHp(bottom) >= teamHp(top) ? 'A' : 'B',
-    winnerLabel: teamHp(bottom) >= teamHp(top) ? 'Forger' : 'Rival',
-    logs,
-    events,
-    board: finalBoard,
-    boardHistory,
-    finalHpA: teamHp(bottom),
-    finalHpB: teamHp(top),
-    aliveA: teamAlive(bottom),
-    aliveB: teamAlive(top),
-    summary: 'Training preview resolved locally by computer control.',
-  };
-}
 
 function SmallStat({ label, value, tone = 'default' }: { label: string; value: string | number; tone?: 'default' | 'gold' | 'green' | 'red' }) {
   const toneClass =
@@ -842,6 +687,8 @@ export function ArenaPage({ heroes, economy, token, demoMode = false, activeTab,
   const [, setMatchRecord] = useState<PvpMatchRecord | null>(null);
   const [battleResult, setBattleResult] = useState<BattleResult | null>(null);
   const [battleSession, setBattleSession] = useState<BattleSessionSnapshot | null>(null);
+  const [localPreparation, setLocalPreparation] = useState<BattleBoardState | null>(null);
+  const [formationDraft, setFormationDraft] = useState<{ id: string; positions: Record<string, number> } | null>(null);
   const [friends, setFriends] = useState<FriendsSnapshot | null>(demoMode ? demoFriends : null);
   const [friendEmail, setFriendEmail] = useState('');
   const [busy, setBusy] = useState(false);
@@ -937,7 +784,96 @@ export function ArenaPage({ heroes, economy, token, demoMode = false, activeTab,
     () => (!battleResult && !battleSession && replayRecord?.result ? replayRecord.result : null),
     [battleResult, battleSession, replayRecord]
   );
-  const battleLoaded = activeTab === 'battle' && Boolean(liveBattleResult ?? replayResult);
+  const preparationSource = localPreparation ?? (battleSession?.status === 'preparing' ? battleSession.board : null);
+  const preparationId = localPreparation ? 'simulation' : battleSession?.sessionId ?? '';
+  const ownSide = battleSession?.viewerSide ?? 'A';
+  const ownReady = !localPreparation && Boolean(battleSession?.readiness?.[ownSide]);
+  const rivalReady = Boolean(localPreparation || battleSession?.readiness?.[ownSide === 'A' ? 'B' : 'A']);
+  const preparationBoard = useMemo(() => {
+    if (!preparationSource) return null;
+    const source = enrichBattleResultImages({ winner: 'Pending', logs: [], events: [], board: preparationSource }, displayHeroes, displayHeroes).board!;
+    return formationDraft?.id === preparationId && !ownReady ? applyPreparationPositions(source, ownSide, formationDraft.positions) : source;
+  }, [preparationSource, displayHeroes, formationDraft, preparationId, ownReady, ownSide]);
+  const preparationResult: BattleResult | null = preparationBoard ? { winner: 'Pending', logs: [], events: [], board: preparationBoard, boardHistory: [preparationBoard] } : null;
+  const shownBattleResult = preparationResult ?? liveBattleResult ?? replayResult;
+  const battleLoaded = activeTab === 'battle' && Boolean(shownBattleResult);
+
+  const beginPreparation = useCallback(async (teamA: SavedHero[], teamB: SavedHero[]) => {
+    if (!teamA.length || !teamB.length) { setError('Choose cards for both sides first.'); return; }
+    if (!demoMode && (!currentToken || currentToken === 'mock-token')) { setError('Please login first.'); return; }
+    setBusy(true); setError(''); setMessage('');
+    try {
+      setBattleResult(null); setBattleSession(null); setLocalPreparation(null); setFormationDraft(null);
+      setMatchRecord(null); setQueueEntry(null); setResumeEntryId(null);
+      if (demoMode) {
+        const bottom = Array.from({ length: 6 }, (_, index) => teamA[index] ? unitFromHero(teamA[index], 'A', index) : null);
+        const top = Array.from({ length: 6 }, (_, index) => teamB[index] ? unitFromHero(teamB[index], 'B', index) : null);
+        setLocalPreparation(createTrainingBoardSnapshot(1, bottom, top));
+      } else {
+        setBattleSession(await prepareBattleSession(teamA.map(heroSessionPayload), teamB.map(heroSessionPayload), currentToken));
+      }
+      onTabChange('battle');
+    } catch (err) { setError(err instanceof Error ? err.message : 'Failed to prepare battle.'); }
+    finally { setBusy(false); }
+  }, [currentToken, demoMode, onTabChange]);
+
+  const movePreparedCard = (tag: string, slot: number) => {
+    if (!preparationBoard || ownReady || busy) return;
+    const moved = movePreparationCard(preparationBoard, ownSide, tag, slot);
+    setFormationDraft({ id: preparationId, positions: formationPositions(moved, ownSide) });
+  };
+  const confirmFormation = async () => {
+    if (!preparationBoard || ownReady || busy) return;
+    setBusy(true); setError('');
+    try {
+      if (localPreparation) {
+        const bottom = preparationBoard.bottom.map(cloneBattleUnit);
+        const top = preparationBoard.top.map(cloneBattleUnit);
+        const { events, logs, boardHistory } = simulateTrainingBattle(bottom, top);
+        const board = boardHistory.at(-1) ?? preparationBoard;
+        setBattleResult({ winner: teamHp(bottom) >= teamHp(top) ? 'A' : 'B', winnerLabel: teamHp(bottom) >= teamHp(top) ? 'Forger' : 'Rival', events, logs, board, boardHistory, finalHpA: teamHp(bottom), finalHpB: teamHp(top), aliveA: teamAlive(bottom), aliveB: teamAlive(top) });
+        setLocalPreparation(null);
+      } else if (battleSession) {
+        const snapshot = await confirmBattleFormation(battleSession.sessionId, formationPositions(preparationBoard, ownSide), currentToken);
+        setBattleSession(current => acceptBattleSessionSnapshot(current, snapshot));
+        if (snapshot.result) setBattleResult(enrichBattleResultImages(snapshot.result, displayHeroes, displayHeroes));
+      }
+      setFormationDraft(null);
+    } catch (err) { setError(err instanceof Error ? err.message : 'Unable to confirm. Your formation is still available to retry.'); }
+    finally { setBusy(false); }
+  };
+
+  const openPreparedSession = async (sessionId: string) => {
+    setBusy(true); setError('');
+    try {
+      const snapshot = await fetchBattleSession(sessionId, currentToken);
+      setLocalPreparation(null); setFormationDraft(null); setBattleResult(snapshot.result ?? null); setBattleSession(current => acceptBattleSessionSnapshot(current, snapshot));
+      setResumeEntryId(null); onTabChange('battle');
+    } catch (err) { setError(err instanceof Error ? err.message : 'Unable to open battle.'); }
+    finally { setBusy(false); }
+  };
+
+  // Preparation rooms (including friendly matches) stay synchronized while
+  // preserving local drag edits until this participant explicitly confirms.
+  useEffect(() => {
+    if (!battleSession || battleSession.status !== 'preparing' || demoMode) return;
+    const sessionId = battleSession.sessionId;
+    let cancelled = false;
+    let pending = false;
+    const timer = window.setInterval(async () => {
+      if (pending) return;
+      pending = true;
+      try {
+        const snapshot = await fetchBattleSession(sessionId, currentToken);
+        if (!cancelled) {
+          setBattleSession(current => acceptBattleSessionSnapshot(current, snapshot));
+          if (snapshot.result) { setFormationDraft(null); setBattleResult(enrichBattleResultImages(snapshot.result, displayHeroes, displayHeroes)); }
+        }
+      } catch (err) { if (!cancelled) setError(err instanceof Error ? err.message : 'Connection lost. Retrying preparation sync.'); }
+      finally { pending = false; }
+    }, 1500);
+    return () => { cancelled = true; window.clearInterval(timer); };
+  }, [battleSession?.sessionId, battleSession?.status, currentToken, demoMode, displayHeroes]);
 
   const refreshFriends = useCallback(async () => {
     if (demoMode) {
@@ -1070,9 +1006,7 @@ export function ArenaPage({ heroes, economy, token, demoMode = false, activeTab,
     try {
       if (demoMode) {
         if (action === 'accept') {
-          setBattleResult(createPreviewBattleResult(selectedHeroes));
-          setMessage('Friendly simulation resolved. No stake or card death was applied.');
-          onTabChange('battle');
+          await beginPreparation(selectedHeroes, createPreviewRivals());
         } else {
           setFriends((current) => ({
             ...(current ?? demoFriends),
@@ -1082,7 +1016,10 @@ export function ArenaPage({ heroes, economy, token, demoMode = false, activeTab,
         }
       } else {
         const response = await respondFriendChallenge(challengeId, action, action === 'accept' ? arenaFormation : null, currentToken);
-        if (response.battle) {
+        if (response.battle_session) {
+          setBattleSession(response.battle_session); setBattleResult(null); setLocalPreparation(null); setFormationDraft(null); setResumeEntryId(null);
+          onTabChange('battle');
+        } else if (response.battle) {
           setBattleResult(enrichBattleResultImages(response.battle, selectedHeroes, []));
           setMessage('Friendly battle resolved. No stake or card death was applied.');
           onTabChange('battle');
@@ -1110,6 +1047,7 @@ export function ArenaPage({ heroes, economy, token, demoMode = false, activeTab,
   };
 
   const clearQueueArtifacts = () => {
+    setLocalPreparation(null); setFormationDraft(null);
     setQueueEntry(null);
     setMatchRecord(null);
     setBattleResult(null);
@@ -1239,8 +1177,8 @@ export function ArenaPage({ heroes, economy, token, demoMode = false, activeTab,
             match_id: `sim-match-${entryId}`,
             matched_at: new Date().toISOString(),
           });
-          setBattleResult(createPreviewBattleResult(selectedHeroes, opponents));
-          setMessage(`Rival found at ${formatNumber(opponentBp)} BP. Simulated ranked battle resolved by server-style program control.`);
+          void beginPreparation(selectedHeroes, opponents);
+          setMessage(`Rival found at ${formatNumber(opponentBp)} BP. Confirm your formation to begin.`);
           mockQueueTimerRef.current = null;
           onTabChange('battle');
         }, 1800);
@@ -1251,7 +1189,8 @@ export function ArenaPage({ heroes, economy, token, demoMode = false, activeTab,
       setMatchRecord(response.match ?? null);
       const sessionId = response.battle_session?.sessionId ?? response.match?.battle_session_id ?? null;
       const liveSession = sessionId ? await fetchBattleSession(sessionId, currentToken) : response.battle_session ?? null;
-      setBattleSession(liveSession);
+      setBattleSession(current => liveSession ? acceptBattleSessionSnapshot(current, liveSession) : null);
+      setLocalPreparation(null); setFormationDraft(null);
       const battle = resolveBattleResult(response.match, response.battle);
       const visibleBattle = battle ? enrichBattleResultImages(battle, selectedHeroes, []) : battle;
       setBattleResult(visibleBattle);
@@ -1307,80 +1246,8 @@ export function ArenaPage({ heroes, economy, token, demoMode = false, activeTab,
     }
   };
 
-  const handleStartBattle = useCallback(async () => {
-    const orderedHeroes = battleOrderHeroes.length ? battleOrderHeroes : selectedHeroes.length ? selectedHeroes : displayHeroes;
-    if (!demoMode && (!currentToken || currentToken === 'mock-token')) {
-      setError('Please login first.');
-      return;
-    }
-    setError('');
-    setMessage('');
-    setBusy(true);
-    try {
-      if (demoMode) {
-        setBattleResult(createPreviewBattleResult(orderedHeroes));
-      } else {
-        const result = await resolveBattleSessionToResult(
-          orderedHeroes.slice(0, MAX_TEAM_SIZE),
-          createPreviewRivals(),
-          '4v4',
-          'Forger',
-          'Rival',
-          currentToken
-        );
-        setBattleResult(result);
-      }
-      setMatchRecord(null);
-      setQueueEntry(null);
-      setBattleSession(null);
-      setResumeEntryId(null);
-      setMessage('Battle resolved through the server battle session.');
-      onTabChange('battle');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to resolve battle session.');
-    } finally {
-      setBusy(false);
-    }
-  }, [battleOrderHeroes, currentToken, demoMode, displayHeroes, onTabChange, selectedHeroes]);
-
-  const handleStartTrainBattle = useCallback(async () => {
-    if (trainTeamA.length === 0 || trainTeamB.length === 0) {
-      setError('Choose cards for both training sides.');
-      return;
-    }
-    if (!demoMode && (!currentToken || currentToken === 'mock-token')) {
-      setError('Please login first.');
-      return;
-    }
-    setBusy(true);
-    setError('');
-    setMessage('');
-    try {
-      if (demoMode) {
-        setBattleResult(createTrainPreviewBattleResult(trainTeamA, trainTeamB));
-      } else {
-        const result = await resolveBattleSessionToResult(
-          trainTeamA,
-          trainTeamB,
-          '4v4',
-          'Forger',
-          'Rival',
-          currentToken
-        );
-        setBattleResult(result);
-      }
-      setMatchRecord(null);
-      setQueueEntry(null);
-      setBattleSession(null);
-      setResumeEntryId(null);
-      setMessage('Training battle resolved.');
-      onTabChange('battle');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to start training battle.');
-    } finally {
-      setBusy(false);
-    }
-  }, [currentToken, demoMode, onTabChange, trainTeamA, trainTeamB]);
+  const handleStartBattle = () => beginPreparation((battleOrderHeroes.length ? battleOrderHeroes : selectedHeroes).slice(0, MAX_TEAM_SIZE), createPreviewRivals());
+  const handleStartTrainBattle = () => beginPreparation(trainTeamA, trainTeamB);
 
   useEffect(() => {
     if (!resumeEntryId || !currentToken || demoMode) return;
@@ -1395,7 +1262,7 @@ export function ArenaPage({ heroes, economy, token, demoMode = false, activeTab,
         const sessionId = response.battle_session?.sessionId ?? response.match?.battle_session_id ?? null;
         const liveSession = sessionId ? await fetchBattleSession(sessionId, currentToken) : response.battle_session ?? null;
         if (cancelled) return;
-        setBattleSession(liveSession);
+        setBattleSession(current => liveSession ? acceptBattleSessionSnapshot(current, liveSession) : null);
         const battle = response.match?.battle_result ?? null;
         if (response.entry.status === 'waiting') {
           setMessage('Waiting for opponent...');
@@ -1428,7 +1295,7 @@ export function ArenaPage({ heroes, economy, token, demoMode = false, activeTab,
   }, [currentToken, demoMode, onTabChange, resumeEntryId, syncResolvedMatch]);
 
   useEffect(() => {
-    const loadedResult = liveBattleResult ?? replayResult;
+    const loadedResult = Boolean(localPreparation || liveBattleResult || replayResult);
     onBattleLockChange(Boolean(loadedResult));
     if (loadedResult && activeTab !== 'battle') {
       onTabChange('battle');
@@ -1436,7 +1303,7 @@ export function ArenaPage({ heroes, economy, token, demoMode = false, activeTab,
     if (!loadedResult && activeTab === 'battle') {
       onTabChange('queue');
     }
-  }, [activeTab, liveBattleResult, replayResult, onBattleLockChange, onTabChange]);
+  }, [activeTab, localPreparation, liveBattleResult, replayResult, onBattleLockChange, onTabChange]);
 
   return (
     <div className={cn('mx-auto max-w-[1540px] px-6 2xl:px-8', battleLoaded ? 'py-5' : 'py-8')}>
@@ -1459,9 +1326,9 @@ export function ArenaPage({ heroes, economy, token, demoMode = false, activeTab,
         </section>
       )}
 
-      {activeTab === 'battle' && (liveBattleResult ?? replayResult) ? (
+      {activeTab === 'battle' && shownBattleResult ? (
         <section className="space-y-4">
-          {(!battleResult || replayResult) && (
+          {!preparationBoard && (!battleResult || replayResult) && (
             <div className="flex items-center justify-between gap-4 border border-[#2b241b] bg-black/30 px-5 py-3">
               <div>
                 <div className="text-[10px] uppercase tracking-[0.28em] text-[#b49664]">
@@ -1491,7 +1358,29 @@ export function ArenaPage({ heroes, economy, token, demoMode = false, activeTab,
               )}
             </div>
           )}
-          <BattleVisualizer heroA={null} heroB={null} result={liveBattleResult ?? replayResult} liveSession={!battleResult && !replayResult} />
+          {preparationBoard && <div className="battle-preparation" aria-label="Battle preparation">
+            <div className="battle-preparation__copy" aria-live="polite">
+              <div className="battle-preparation__eyebrow">Prepare for battle</div>
+              <h3>{ownReady ? 'Formation confirmed' : 'Take your positions'}</h3>
+              <p>{ownReady ? 'Your formation is locked. Waiting for your opponent to confirm.' : (localPreparation || battleSession?.opponentAutoReady) ? 'Drag your cards to arrange the formation, then confirm to begin. Your simulated opponent is already ready.' : 'Drag your cards to arrange the formation. Battle begins only after both players confirm.'}</p>
+            </div>
+            <div className="battle-preparation__actions">
+              <div className="battle-preparation__readiness" aria-live="polite"><span data-ready={ownReady}>You · {ownReady ? 'Ready' : 'Preparing'}</span><span data-ready={rivalReady}>Opponent · {rivalReady ? 'Ready' : 'Preparing'}</span></div>
+              <button type="button" onClick={confirmFormation} disabled={busy || ownReady}>{busy ? 'Confirming…' : ownReady ? 'Waiting for opponent' : 'Confirm formation'}</button>
+            </div>
+          </div>}
+          {error && <p role="alert" className="border border-amber-400/25 px-5 py-3 text-sm text-amber-100">{error}</p>}
+          <BattleVisualizer
+            key={preparationBoard ? `prepare-${preparationId}` : battleSession?.sessionId ?? 'resolved'}
+            heroA={null}
+            heroB={null}
+            result={shownBattleResult}
+            editUnitSlots={Boolean(preparationBoard && !ownReady && !busy)}
+            editableSide={ownSide}
+            onUnitSlotChange={movePreparedCard}
+            liveSession={Boolean(preparationBoard) || (!battleResult && !replayResult)}
+            showPlaybackControls={Boolean(replayResult)}
+          />
         </section>
       ) : activeTab === 'battle' ? (
         <section className="mt-5 grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
@@ -1517,7 +1406,7 @@ export function ArenaPage({ heroes, economy, token, demoMode = false, activeTab,
                     className="inline-flex h-11 items-center gap-2 bg-[#806838] px-5 text-[10px] font-semibold uppercase tracking-[0.22em] text-stone-100 transition hover:bg-[#9a7d4a] disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {busy ? <RefreshCw size={15} className="animate-spin" /> : <Zap size={15} />}
-                    Start Battle
+                    Enter Battlefield
                   </button>
                 </div>
 
@@ -1739,10 +1628,10 @@ export function ArenaPage({ heroes, economy, token, demoMode = false, activeTab,
                   {friends.incoming_challenges.map((challenge) => (
                     <div key={challenge.id} className="border border-[#b49664]/20 bg-black/35 p-3">
                       <div className="text-sm text-stone-200">{challenge.challenger_email ?? 'A friend'} challenges you</div>
-                      <div className="mt-3 grid grid-cols-2 gap-2">
+                      {challenge.status === 'accepted' && challenge.battle_session_id ? <button type="button" onClick={() => openPreparedSession(challenge.battle_session_id!)} disabled={busy} className="mt-3 h-9 w-full bg-[#806838] text-xs text-white">Enter battlefield</button> : <div className="mt-3 grid grid-cols-2 gap-2">
                         <button type="button" onClick={() => handleFriendChallenge(challenge.id, 'accept')} disabled={busy || !selectedHeroes.length} className="h-9 bg-[#806838] text-[9px] uppercase tracking-[0.2em] text-white disabled:opacity-35">Fight</button>
                         <button type="button" onClick={() => handleFriendChallenge(challenge.id, 'decline')} disabled={busy} className="h-9 border border-white/10 text-[9px] uppercase tracking-[0.2em] text-stone-500">Decline</button>
-                      </div>
+                      </div>}
                     </div>
                   ))}
                 </div>
@@ -1761,6 +1650,8 @@ export function ArenaPage({ heroes, economy, token, demoMode = false, activeTab,
                       </div>
                       {challenge.status === 'pending' ? (
                         <button type="button" onClick={() => handleFriendChallenge(challenge.id, 'cancel')} disabled={busy} className="mt-3 h-8 w-full border border-white/10 text-[9px] uppercase tracking-[0.2em] text-stone-500 hover:text-stone-200">Cancel invite</button>
+                      ) : challenge.status === 'accepted' && challenge.battle_session_id ? (
+                        <button type="button" onClick={() => openPreparedSession(challenge.battle_session_id!)} disabled={busy} className="mt-3 h-9 w-full bg-[#806838] text-xs text-white">Enter battlefield</button>
                       ) : challenge.status === 'resolved' && challenge.battle_result ? (
                         <button
                           type="button"
@@ -1865,7 +1756,7 @@ export function ArenaPage({ heroes, economy, token, demoMode = false, activeTab,
                   <p className="mt-2 text-xs leading-5 text-stone-400">
                     {demoMode
                       ? `Searching a simulated ranked population in your ${tolerancePct}% BP window.`
-                      : `Awaiting a rival squad in your ${tolerancePct}% BP window. The server resolves the battle automatically when one joins.`}
+                      : `Awaiting a rival squad in your ${tolerancePct}% BP window. Both players confirm their formations before the server starts combat.`}
                   </p>
                   <div className="mt-2 text-[9px] uppercase tracking-[0.18em] text-stone-600">
                     Entry {queueEntry.id.slice(0, 8)} · Cards locked until match, cancel, or expiry
@@ -1968,7 +1859,7 @@ export function ArenaPage({ heroes, economy, token, demoMode = false, activeTab,
               className="inline-flex h-14 w-full items-center justify-center gap-3 bg-[#9a7338] px-5 text-[13px] font-semibold uppercase tracking-[0.24em] text-stone-100 transition hover:bg-[#b18647] disabled:cursor-not-allowed disabled:opacity-50"
             >
               {busy ? <RefreshCw size={17} className="animate-spin" /> : <Zap size={17} />}
-              Start Train
+              Prepare Training
             </button>
 
             <AnimatePresence mode="wait">

@@ -52,6 +52,20 @@ describe('vfxTestHarness', () => {
     expect(board.bottom[0]?.buffs).toEqual([{ name: 'burn', duration: 3, value: 2 }]);
   });
 
+  it('builds a full formation with unique slots and keeps the attacking pair stable', () => {
+    const board = createVfxTestBoard('projectile', 'fire', true);
+    for (const team of [board.bottom, board.top]) {
+      expect(team).toHaveLength(6);
+      expect(new Set(team.map(unit => unit?.slot)).size).toBe(6);
+      expect(team.every(unit => Boolean(unit?.image))).toBe(true);
+    }
+    expect(board.bottom[0]?.tag).toBe('A1');
+    expect(board.top[0]?.tag).toBe('B1');
+    const result = createVfxTestResult(board, createVfxTestEvent('projectile', 'fire', 1, { crit: true }));
+    expect(result.board?.top[0]?.hp).toBe(1278);
+    expect(result.board?.top[1]?.hp).toBe(1800);
+  });
+
   it('wraps the board and event in a replayable battle result', () => {
     const board = createVfxTestBoard('projectile', 'fire');
     const event = createVfxTestEvent('projectile', 'fire', 2);
@@ -59,6 +73,9 @@ describe('vfxTestHarness', () => {
 
     expect(result.events).toEqual([event]);
     expect(result.logs).toEqual([event.log]);
-    expect(result.boardHistory).toEqual([board]);
+    expect(result.boardHistory).toHaveLength(2);
+    expect(result.boardHistory?.[0]).toEqual(board);
+    expect(result.board?.top[0]?.hp).toBe(event.hpB);
+    expect(board.top[0]?.hp).toBe(1800);
   });
 });

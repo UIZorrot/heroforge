@@ -1051,6 +1051,8 @@ It returns:
 `View Battles`
 
 - Opens battle history.
+- Stores at most 25 battle records per user; after a new record is saved, the oldest excess records are deleted automatically.
+- Each retained record can be opened as a read-only replay from the player profile.
 
 `View Cards`
 
@@ -1400,3 +1402,12 @@ This document should later be split into implementation-ready documents:
 - Ladder UX and rating spec.
 - Market, relic trading, and Dust purchase spec.
 - Card lifecycle, revival, and decomposition spec.
+
+
+### Battle formation confirmation
+
+The battlefield opens in a preparation phase before combat. A banner above the arena explains the readiness rule and shows each participant's state. The new **Confirm formation** button submits the local player's complete positions; until then, that player can drag their own cards between the six slots, swapping occupied allied positions. Opposing cards are never editable.
+
+Ranked and friendly matches remain server-side `preparing` until both participants confirm. Confirming locks that side immediately, including while waiting for the opponent. Training and mock matches mark the simulated opponent ready automatically, but still wait for the player's confirmation. Once both sides are ready, the server resolves program-controlled combat and the shared Battle/VFX renderer presents a lift → strike → rebound → landing sequence, followed by a 0.75-second pause before the next unit. Replays remain read-only.
+
+`POST /api/battle/sessions/:sessionId/confirm` accepts `{ positions: { A1: 3, A2: 0 } }` for the authenticated participant's side (or B tags for side B). The server validates the complete roster, unique slot indices 0–5, and participant ownership. Identical retries are idempotent; edits to a confirmed formation are rejected. Preparation snapshots expose `status: preparing`, `readiness`, `viewerSide` and `opponentAutoReady`; action timeouts do not advance preparation. Both friendly participants can reopen an accepted room from Friends.

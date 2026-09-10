@@ -85,6 +85,11 @@ class BattleSession:
     team_b_units: List[battle_logic.Battler | None] = field(init=False)
     turn_order: List[battle_logic.Battler] = field(default_factory=list)
     turn_index: int = 0
+    require_confirmation: bool = False
+    auto_ready_b: bool = False
+    participant_ids: Dict[str, str] = field(default_factory=dict)
+    ready_sides: Dict[str, bool] = field(default_factory=lambda: {"A": False, "B": False})
+    _preparation_lock: Any = field(default_factory=threading.RLock, repr=False)
 
     def __post_init__(self) -> None:
         lanes = _lanes_for_mode(self.battle_mode)
@@ -99,10 +104,52 @@ class BattleSession:
         if self.control_mode not in {"rest", "program"}:
             raise BattleSessionError("battle session controlMode must be rest or program")
 
+        if self.require_confirmation:
+            self.status = "preparing"
+            self.ready_sides["B"] = self.auto_ready_b
+            self.expected_action_source = "confirmation"
+            self._append_board_history()
+            return
         self._begin_round(time.time())
         self._append_board_history()
         if self.control_mode == "program":
             self.run_program_to_completion()
+
+    def confirm_preparation(self, side: str, positions: Dict[str, int]) -> Dict[str, Any]:
+        with self._preparation_lock:
+            if not self.require_confirmation or side not in {"A", "B"}:
+                raise BattleSessionError("This battle does not accept formation confirmation")
+            team = self.team_a_units if side == "A" else self.team_b_units
+            units = {unit.tag: unit for unit in team if unit}
+            if not isinstance(positions, dict) or set(positions) != set(units):
+                raise BattleSessionError("Submit every card from your own side exactly once")
+            slots = list(positions.values())
+            if any(type(slot) is not int or not 0 <= slot < len(team) for slot in slots) or len(set(slots)) != len(slots):
+                raise BattleSessionError("Formation slots must be unique valid board positions")
+            current = {tag: unit.slot_index for tag, unit in units.items()}
+            if self.ready_sides[side]:
+                if positions != current:
+                    raise BattleSessionError("Your confirmed formation is locked")
+                return self.public_snapshot()
+            if self.status != "preparing":
+                raise BattleSessionError("The battle has already started")
+            arranged = [None] * len(team)
+            for tag, slot in positions.items():
+                units[tag].slot_index = slot
+                arranged[slot] = units[tag]
+            if side == "A":
+                self.team_a_units = arranged
+            else:
+                self.team_b_units = arranged
+            self.ready_sides[side] = True
+            self.updated_at_ms = _now_ms()
+            self.board_history = []
+            self._append_board_history()
+            if all(self.ready_sides.values()):
+                self._begin_round(time.time())
+                if self.control_mode == "program":
+                    self.run_program_to_completion()
+            return self.public_snapshot()
 
     def _push_event(
         self,
@@ -479,6 +526,10 @@ class BattleSession:
         self._begin_round(time.time())
 
     def auto_advance_due(self, now_ms: int | None = None) -> bool:
+        with self._preparation_lock:
+            return self._auto_advance_due(now_ms)
+
+    def _auto_advance_due(self, now_ms: int | None = None) -> bool:
         if self.status != "awaiting_action" or self.control_mode not in {"rest", "program"}:
             return False
         if self.control_mode == "rest" and (self.waiting_until_ms is None or (now_ms or _now_ms()) < self.waiting_until_ms):
@@ -528,6 +579,8 @@ class BattleSession:
             raise BattleSessionError("program battle did not resolve within the step limit")
 
     def submit_action(self, action: Dict[str, Any]) -> Dict[str, Any]:
+        if self.status == "preparing":
+            raise BattleSessionError("Both sides must confirm before combat actions")
         if self.control_mode != "rest":
             raise BattleSessionError("program-controlled battle sessions do not accept manual actions")
         if self.status == "resolved":
@@ -536,6 +589,10 @@ class BattleSession:
         return self.public_snapshot()
 
     def public_snapshot(self) -> Dict[str, Any]:
+        with self._preparation_lock:
+            return self._public_snapshot()
+
+    def _public_snapshot(self) -> Dict[str, Any]:
         observation = self.observation
         board = battle_logic._board_snapshot(self.round, self.team_a_units, self.team_b_units, self.label_a, self.label_b)
         if self.status == "resolved" and self.result:
@@ -548,6 +605,8 @@ class BattleSession:
             "labelA": self.label_a,
             "labelB": self.label_b,
             "status": self.status,
+            "readiness": dict(self.ready_sides) if self.require_confirmation else None,
+            "opponentAutoReady": self.auto_ready_b,
             "round": self.round,
             "waitingUntil": self.waiting_until_ms,
             "waitSeconds": self.wait_seconds,
@@ -591,6 +650,9 @@ class BattleSessionManager:
         team_a: List[Dict[str, Any]],
         team_b: List[Dict[str, Any]],
         wait_seconds: int = DEFAULT_WAIT_SECONDS,
+        require_confirmation: bool = False,
+        auto_ready_b: bool = False,
+        participant_ids: Dict[str, str] | None = None,
     ) -> BattleSession:
         session = BattleSession(
             session_id=str(uuid.uuid4()),
@@ -601,6 +663,9 @@ class BattleSessionManager:
             team_a_payload=team_a,
             team_b_payload=team_b,
             wait_seconds=wait_seconds,
+            require_confirmation=require_confirmation,
+            auto_ready_b=auto_ready_b,
+            participant_ids=participant_ids or {},
         )
         with self._lock:
             self._sessions[session.session_id] = session
@@ -639,8 +704,11 @@ def create_battle_session(
     team_a: List[Dict[str, Any]],
     team_b: List[Dict[str, Any]],
     wait_seconds: int = DEFAULT_WAIT_SECONDS,
+    require_confirmation: bool = False,
+    auto_ready_b: bool = False,
+    participant_ids: Dict[str, str] | None = None,
 ) -> BattleSession:
-    return MANAGER.create_session(battle_mode, control_mode, label_a, label_b, team_a, team_b, wait_seconds=wait_seconds)
+    return MANAGER.create_session(battle_mode, control_mode, label_a, label_b, team_a, team_b, wait_seconds=wait_seconds, require_confirmation=require_confirmation, auto_ready_b=auto_ready_b, participant_ids=participant_ids)
 
 
 def get_battle_session(session_id: str) -> BattleSession | None:

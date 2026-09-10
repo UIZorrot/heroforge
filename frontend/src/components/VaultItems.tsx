@@ -19,9 +19,11 @@ export type VaultItem = {
 };
 
 function ItemArt({ item }: { item: VaultItem }) {
+  const [failedIcon, setFailedIcon] = useState<string | null>(null);
+  const showIcon = item.icon && failedIcon !== item.icon;
   return <span className="vault-item-art">
-    {item.kind === 'relic' ? <Shield size={28} /> : <Gem size={20} />}
-    {item.icon && <img src={item.icon} alt="" loading="lazy" onError={(event) => { event.currentTarget.style.display = 'none'; }} />}
+    {!showIcon && (item.kind === 'relic' ? <Shield size={28} /> : <Gem size={20} />)}
+    {showIcon && <img src={item.icon!} alt="" loading="lazy" onError={() => setFailedIcon(item.icon!)} />}
   </span>;
 }
 
@@ -51,7 +53,12 @@ function ItemDetail({ item, onClose, onUse }: { item: VaultItem; onClose: () => 
     <div className="vault-item-detail__surface">
       <header><span>{material ? 'Shard / Enchant material' : 'Relic / Equipment'}</span><button type="button" aria-label="Close item details" onClick={onClose}><X size={18} /></button></header>
       <div className="vault-item-detail__body">
-        <div className="vault-item-detail__preview"><DepthPreview label={item.name} material={material}><div className="vault-item-detail__art"><ItemArt item={item} /><span>{item.amount.toLocaleString('en-US')} {material ? 'in stock' : 'owned'}</span></div></DepthPreview></div>
+        <div className="vault-item-detail__preview">
+          <DepthPreview label={item.name} material={material} variant="item">
+            <div className="vault-item-detail__art"><ItemArt item={item} /></div>
+          </DepthPreview>
+          <p className="vault-item-detail__quantity">{item.amount.toLocaleString('en-US')} {material ? 'in stock' : 'owned'}</p>
+        </div>
         <div className="vault-item-detail__content">
           <span className="vault-item-rarity" data-rarity={item.rarity}>{item.rarity} · {item.family}</span>
           <h2 id={titleId}>{item.name}</h2>

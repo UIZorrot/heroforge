@@ -3,13 +3,15 @@ import { useReducedMotion } from 'framer-motion';
 import { RotateCcw } from 'lucide-react';
 import './DepthPreview.css';
 
-export function DepthPreview({ label, material = false, children }: { label: string; material?: boolean; children: ReactNode }) {
+export function DepthPreview({ label, material = false, variant = 'card', children }: { label: string; material?: boolean; variant?: 'card' | 'item'; children: ReactNode }) {
+  const isItem = variant === 'item';
   const object = useRef<HTMLDivElement>(null);
   const pointer = useRef<number | null>(null);
-  const angle = useRef({ x: -3, y: -8 });
+  const angle = useRef(isItem ? { x: 0, y: 0 } : { x: -3, y: -8 });
   const helpId = useId();
   const reducedMotion = useReducedMotion();
-  const limit = material ? 10 : 18;
+  const limit = isItem ? (material ? 4 : 6) : (material ? 10 : 18);
+  const keyStep = isItem ? 2 : 4;
   function paint(x: number, y: number) {
     angle.current = { x: Math.max(-limit, Math.min(limit, x)), y: Math.max(-limit, Math.min(limit, y)) };
     const element = object.current;
@@ -24,8 +26,8 @@ export function DepthPreview({ label, material = false, children }: { label: str
     const bounds = event.currentTarget.getBoundingClientRect();
     paint(-((event.clientY - bounds.top) / bounds.height * 2 - 1) * limit * .7, ((event.clientX - bounds.left) / bounds.width * 2 - 1) * limit);
   }
-  return <div className={`depth-preview${material ? ' depth-preview--material' : ''}`}>
-    <div className="depth-preview__stage" role="group" tabIndex={0} aria-label={`${label}, 3D preview`} aria-describedby={helpId}
+  return <div className={`depth-preview${material ? ' depth-preview--material' : ''}${isItem ? ' depth-preview--item' : ''}`}>
+    <div className="depth-preview__stage" role="group" tabIndex={0} aria-label={`${label}, ${isItem ? 'item' : '3D'} preview`} aria-describedby={helpId}
       onDragStart={(event) => event.preventDefault()}
       onPointerMove={move}
       onPointerDown={(event) => {
@@ -44,10 +46,10 @@ export function DepthPreview({ label, material = false, children }: { label: str
         event.preventDefault();
         event.stopPropagation();
         if (event.key.toLowerCase() === 'r') paint(0, 0);
-        else paint(angle.current.x + (event.key === 'ArrowUp' ? 4 : event.key === 'ArrowDown' ? -4 : 0), angle.current.y + (event.key === 'ArrowRight' ? 4 : event.key === 'ArrowLeft' ? -4 : 0));
+        else paint(angle.current.x + (event.key === 'ArrowUp' ? keyStep : event.key === 'ArrowDown' ? -keyStep : 0), angle.current.y + (event.key === 'ArrowRight' ? keyStep : event.key === 'ArrowLeft' ? -keyStep : 0));
       }}>
       <div ref={object} className="depth-preview__object">{children}</div>
     </div>
-    <div className="depth-preview__controls"><span id={helpId}>Drag to inspect · Arrow keys</span><button type="button" aria-label={`Reset ${label} preview`} onClick={() => paint(0, 0)}><RotateCcw size={13} /><span>Reset</span></button></div>
+    <div className="depth-preview__controls"><span id={helpId}>{isItem ? 'Move to tilt · Arrow keys' : 'Drag to inspect · Arrow keys'}</span><button type="button" aria-label={`Reset ${label} preview`} onClick={() => paint(0, 0)}><RotateCcw size={13} /><span>Reset</span></button></div>
   </div>;
 }

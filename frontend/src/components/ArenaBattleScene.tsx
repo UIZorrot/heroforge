@@ -1,8 +1,8 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent as ReactDragEvent } from 'react';
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent as ReactDragEvent } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { gsap } from 'gsap';
 import { Application, Assets, BlurFilter, Container, Graphics, Particle, ParticleContainer, Rectangle, Sprite, Text, Texture } from 'pixi.js';
-import { Pause, Play, RotateCcw, Shield, Sparkles } from 'lucide-react';
+import { Pause, Play, RotateCcw, Shield } from 'lucide-react';
 import arenaHallPerspective from '../assets/battle/arena-hall-perspective.png';
 import { CARD_FALLBACK_SRC } from '../lib/cards';
 import {
@@ -34,7 +34,7 @@ import {
   battleDebrisRecipeForEvent,
   type BattleDebrisRecipe,
 } from '../lib/battleVfxDebris';
-import type { BattleBoardSkill, BattleBoardState, BattleBoardUnit, BattleEvent, BattleResult } from '../lib/battleTypes';
+import type { BattleBoardState, BattleBoardUnit, BattleEvent, BattleResult } from '../lib/battleTypes';
 import {
   createFastProjectilePlan,
   createImpactVfxPlan,
@@ -47,7 +47,6 @@ import {
   projectileFlightFrameIndex,
   projectileHeadProgress,
   projectileParticleAlpha,
-  projectilePathSample,
   projectileTrailSegments,
   pointInHost,
   rectInHost,
@@ -62,6 +61,12 @@ import {
 } from '../lib/battleVfxParticlePlan';
 import type { InstantHitSequenceKey } from '../lib/battleVfxAssets';
 import { cn } from '../lib/utils';
+import './ArenaBattleScene.css';
+import { useBattleCamera } from './useBattleCamera';
+import { battleFlightSample } from '../lib/battleSceneDepth';
+import { BATTLE_PRESENTATION, battleActorKeyframes, battleNextBeatDelay, battleStrikeVector, nextBattlePlaybackIndex } from '../lib/battlePresentation';
+
+const BattleImpactContext = createContext<string | null>(null);
 
 type ArenaBattleSceneProps = {
   board: BattleBoardState;
@@ -71,8 +76,11 @@ type ArenaBattleSceneProps = {
   autoStartKey?: string | number;
   showCommanders?: boolean;
   showResultReveal?: boolean;
+  resultPreviewOutcome?: BattleOutcome | null;
+  showPlaybackControls?: boolean;
   liveSession?: boolean;
   editUnitSlots?: boolean;
+  editableSide?: 'A' | 'B';
   onUnitSlotChange?: (unitTag: string, slot: number) => void;
 };
 
@@ -130,7 +138,7 @@ const rivalSlots: SlotSpec[] = [
   { slot: 5, lane: 2, row: 'back' },
 ];
 
-const PLAYBACK_STEP_MS = 1150;
+const PLAYBACK_STEP_MS = BATTLE_PRESENTATION.beatMs;
 
 /**
  * EXPERIMENT: projectile trail rendering.
@@ -259,20 +267,8 @@ function eventAnchors(board: BattleBoardState, event: BattleEvent): { from: Batt
   return { from, to, selfTarget: Boolean(actor && target && actor.tag === target.tag) || event.attacker === event.defender };
 }
 
-function initials(value: string | undefined) {
-  if (!value) return '--';
-  const clean = value.replace(/[^a-zA-Z0-9]/g, '');
-  return clean.slice(0, 2).toUpperCase() || value.slice(0, 2).toUpperCase();
-}
-
 function unitImage(unit?: BattleBoardUnit | null) {
   return unit?.image ?? null;
-}
-
-function unitTone(unit: BattleBoardUnit | null) {
-  if (!unit) return 'border-[#3d2c19]/50 bg-black/28 text-stone-700';
-  if (!unit.alive || unit.hp <= 0) return 'border-stone-800/70 bg-black/45 text-stone-500 opacity-65 grayscale';
-  return 'border-[#b49664]/55 bg-[#100c08] shadow-[0_0_18px_rgba(180,150,100,0.14)]';
 }
 
 function unitArtTone(unit?: BattleBoardUnit | null) {
@@ -294,15 +290,6 @@ function paletteCss(value: number, alpha: number) {
   return `rgba(${r},${g},${b},${alpha})`;
 }
 
-function actionTone(event?: BattleEvent | null) {
-  if (!event) return 'border-stone-700 bg-black/45 text-stone-300';
-  if (event.actionType === 'heal') return 'border-emerald-300/35 bg-emerald-400/10 text-emerald-100';
-  if (event.actionType === 'dot_damage') return 'border-violet-400/35 bg-violet-400/10 text-violet-100';
-  if (event.actionType === 'stunned') return 'border-amber-300/35 bg-amber-400/10 text-amber-100';
-  if (event.actionType === 'skill') return 'border-[#c59a5a]/40 bg-[#c59a5a]/10 text-[#f0d8ad]';
-  return 'border-stone-500/50 bg-stone-500/10 text-stone-100';
-}
-
 function unitSpeed(unit: BattleBoardUnit | null) {
   const raw = unit?.state?.SPEED;
   const numeric = typeof raw === 'number' ? raw : Number(raw ?? 0);
@@ -315,6 +302,21 @@ function initiativeOrder(board: BattleBoardState) {
     .sort((a, b) => unitSpeed(b) - unitSpeed(a) || a.tag.localeCompare(b.tag));
 }
 
+// Read the unanimated slot in table-local coordinates. A lifted card's
+// screen rectangle would feed its own movement back into the next trajectory.
+function battleSlotRect(element: HTMLElement) {
+  const slot = element.closest<HTMLElement>('.battle-slot')!;
+  const table = slot.closest('.battle-table');
+  let x = 0, y = 0;
+  let node: HTMLElement | null = slot;
+  while (node && node !== table) {
+    x += node.offsetLeft;
+    y += node.offsetTop;
+    node = node.offsetParent as HTMLElement | null;
+  }
+  return { x, y, width: slot.offsetWidth, height: slot.offsetHeight };
+}
+
 function ArenaUnitCard({ unit, slot, side, currentEvent }: { unit: BattleBoardUnit | null; slot: SlotSpec; side: 'forger' | 'rival'; currentEvent?: BattleEvent | null }) {
   const ratio = hpRatio(unit);
   const alive = Boolean(unit && unit.alive && unit.hp > 0);
@@ -322,16 +324,29 @@ function ArenaUnitCard({ unit, slot, side, currentEvent }: { unit: BattleBoardUn
   const sideLabel = side === 'rival' ? 'B' : 'A';
   const isActor = unitMatchesTag(unit, currentEvent?.attacker);
   const isTarget = unitMatchesTag(unit, currentEvent?.defender);
-  const canMove = isCombatMotionEvent(currentEvent);
+  const impactedKey = useContext(BattleImpactContext);
+  const hasImpact = Boolean(currentEvent && impactedKey === eventKey(currentEvent));
+  const canMove = isCombatMotionEvent(currentEvent) && !prefersReducedMotion();
   const tone = eventVfxTone(currentEvent);
   const mode = eventVfxMode(currentEvent);
-  const hitDelay = mode === 'projectile' ? 0.32 : 0.04;
-  const actorDirection = side === 'forger' ? 24 : -24;
-  const recoilDirection = side === 'forger' ? -16 : 16;
-  const motionX = canMove && isActor ? [0, actorDirection, -3, 0] : canMove && isTarget ? [0, recoilDirection, -recoilDirection * 0.65, recoilDirection * 0.28, 0] : 0;
-  const motionY = canMove && isActor ? [0, -4, 0, 0] : canMove && isTarget ? [0, -2, 2, 0] : 0;
-  const motionScale = canMove && isActor ? [1, 1.06, 1.01, 1] : canMove && isTarget ? [1, 0.965, 1.035, 1] : 1;
-  const motionRotate = canMove && isTarget ? [0, side === 'forger' ? -1.8 : 1.8, side === 'forger' ? 1.2 : -1.2, 0] : 0;
+  const hitDelay = 0;
+  const cardRef = useRef<HTMLDivElement | null>(null);
+  const [strike, setStrike] = useState({ x: 0, y: 0, directionX: 0, directionY: 0 });
+  useLayoutEffect(() => {
+    if (!canMove || (!isActor && !isTarget) || !currentEvent) return;
+    const stage = cardRef.current?.closest<HTMLElement>('.battle-stage');
+    if (!stage) return;
+    const source = findBattleUnitElement(stage, currentEvent.attacker);
+    const target = findBattleUnitElement(stage, currentEvent.defender);
+    if (source && target) setStrike(battleStrikeVector(battleSlotRect(source), battleSlotRect(target), mode !== 'instant'));
+  }, [canMove, isActor, isTarget, currentEvent, mode]);
+  const actorFrames = useMemo(() => battleActorKeyframes(strike), [strike]);
+  const recoil = currentEvent?.isCrit ? 34 : 24;
+  const recoilX = strike.directionX * recoil;
+  const recoilY = strike.directionY * recoil;
+  const motionX = canMove && isActor ? actorFrames.x : canMove && isTarget && hasImpact ? [0, recoilX, recoilX, -recoilX * .15, 0, 0] : 0;
+  const motionY = canMove && isActor ? actorFrames.y : canMove && isTarget && hasImpact ? [0, recoilY, recoilY, -recoilY * .15, 0, 0] : 0;
+  const motionScale = canMove && isActor ? actorFrames.scale : canMove && isTarget && hasImpact ? [1, .94, .94, 1.025, 1, 1] : 1;
   const image = unitImage(unit) ?? CARD_FALLBACK_SRC;
   const buffDisplay = unitBuffDisplay(unit);
   const buffChips = unit
@@ -349,7 +364,7 @@ function ArenaUnitCard({ unit, slot, side, currentEvent }: { unit: BattleBoardUn
 
   if (!unit) {
     return (
-      <div className="relative h-full w-full overflow-hidden border border-[#b49664]/22 bg-black/24 text-stone-600 shadow-[inset_0_0_26px_rgba(0,0,0,0.72)]">
+      <div className="battle-empty">
         <div className="pointer-events-none absolute inset-1.5 border border-[#d8b06c]/12" />
         <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(135deg,transparent_49%,rgba(216,176,108,0.12)_50%,transparent_51%),linear-gradient(45deg,transparent_49%,rgba(216,176,108,0.08)_50%,transparent_51%)]" />
         <div className="relative flex h-full flex-col justify-between p-2">
@@ -366,15 +381,21 @@ function ArenaUnitCard({ unit, slot, side, currentEvent }: { unit: BattleBoardUn
 
   return (
     <motion.div
-      key={battleUnitMotionKey(unit, currentEvent)}
-      initial={{ opacity: 1, x: 0, y: 0, scale: 1, rotate: 0 }}
-      animate={{ opacity: 1, x: motionX, y: motionY, scale: motionScale, rotate: motionRotate }}
-      transition={canMove && (isActor || isTarget) ? { duration: 0.58, ease: [0.22, 0.9, 0.24, 1] } : { duration: 0.35, ease: 'easeOut' }}
+      key={`${battleUnitMotionKey(unit, currentEvent)}-${isTarget && hasImpact ? 'impact' : 'ready'}`}
+      ref={cardRef}
+      data-active={isActor ? 'actor' : isTarget ? 'target' : undefined}
+      data-alive={alive}
+      data-impact={isTarget && hasImpact ? currentEvent?.isCrit ? 'critical' : 'hit' : undefined}
+      role="group" tabIndex={0}
+      aria-label={`${unit.name}, ${unit.state?.TYPE ?? 'Hero'}, HP ${unit.hp} of ${unit.maxHp}, MP ${unit.mp}, ${alive ? 'standing' : 'fallen'}`}
+      title={`${unit.name} · ${unit.state?.TYPE ?? 'Hero'} · HP ${unit.hp}/${unit.maxHp} · MP ${unit.mp}/${unit.maxMp}${unit.buffs.length ? ' · ' + unit.buffs.map(buff => `${buff.name} (${buff.duration})`).join(', ') : ''}`}
+      initial={{ opacity: 1, x: 0, y: 0, scale: 1, rotate: 0, z: 0 }}
+      animate={{ opacity: 1, x: motionX, y: motionY, scale: motionScale, rotate: 0, z: canMove && isActor ? actorFrames.z : 0 }}
+      transition={canMove && (isActor || isTarget) ? { duration: isActor ? BATTLE_PRESENTATION.actorDuration : BATTLE_PRESENTATION.reactionDuration, times: [...(isActor ? BATTLE_PRESENTATION.actorTimes : BATTLE_PRESENTATION.reactionTimes)], ease: isActor ? BATTLE_PRESENTATION.actorEase : [0.22, 0.9, 0.24, 1] } : { duration: 0.16, ease: 'easeOut' }}
       className={cn(
-        'group relative box-border h-full w-full min-w-0 overflow-hidden border p-1.5 transition ring-1 ring-black/80',
-        unitTone(unit),
-        isActor && 'z-10 border-[#f0d8ad]/90 shadow-[0_0_38px_rgba(216,176,108,0.36)]',
-        isTarget && !isActor && 'z-10 border-red-300/80 shadow-[0_0_34px_rgba(220,38,38,0.28)]'
+        'battle-unit group relative box-border h-full w-full min-w-0 overflow-hidden border p-1.5 transition-colors ring-1 ring-black/80',
+        !alive && 'grayscale',
+        (isActor || isTarget) && 'z-10'
       )}
     >
       {(isActor || isTarget) && (
@@ -386,42 +407,42 @@ function ArenaUnitCard({ unit, slot, side, currentEvent }: { unit: BattleBoardUn
           )}
           initial={{ opacity: 0.25, scale: 0.98 }}
           animate={{ opacity: [0.38, 0.9, 0.28], scale: [0.99, 1.035, 1] }}
-          transition={{ duration: 0.72, ease: 'easeOut' }}
+          transition={{ duration: 0.48, ease: 'easeOut' }}
         />
       )}
-      {isTarget && currentEvent && mode !== 'buff' && (
+      {isTarget && hasImpact && currentEvent && mode !== 'buff' && (
         <motion.div
           key={`hit-flash-${unit.tag}-${eventKey(currentEvent)}`}
           className="pointer-events-none absolute inset-0 z-30 bg-[radial-gradient(circle_at_50%_34%,rgba(255,244,214,0.86),rgba(248,113,113,0.32)_28%,transparent_58%)] mix-blend-screen"
           initial={{ opacity: 0, scale: 0.92 }}
           animate={{ opacity: [0, 0.95, 0.2, 0], scale: [0.92, 1.05, 1.02, 1] }}
-          transition={{ duration: currentEvent.isCrit ? 0.82 : 0.66, delay: hitDelay, ease: [0.22, 1, 0.36, 1] }}
+          transition={{ duration: BATTLE_PRESENTATION.reactionDuration, delay: hitDelay, ease: [0.22, 1, 0.36, 1] }}
         />
       )}
-      <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(130deg,rgba(255,255,255,0.13),transparent_26%,rgba(180,150,100,0.18)_74%,transparent)] opacity-85" />
+      <motion.div className="battle-unit__lighting" initial={{ opacity: .12 }} animate={{ opacity: canMove && isActor ? [.12, .22, .42, .12] : .12 }} transition={{ duration: BATTLE_PRESENTATION.actorDuration, times: [...BATTLE_PRESENTATION.actorTimes], ease: BATTLE_PRESENTATION.actorEase }} />
       {buffDisplay && (
         <div className={cn('pointer-events-none absolute inset-0 z-10 border', buffDisplay.gradeClass)} />
       )}
-      {isTarget && currentEvent && tone === 'frost' && mode !== 'buff' && (
+      {isTarget && hasImpact && currentEvent && tone === 'frost' && mode !== 'buff' && (
         <motion.div
           key={`frost-card-${eventKey(currentEvent)}`}
           className="pointer-events-none absolute inset-0 z-20 bg-[linear-gradient(135deg,transparent_0_36%,rgba(186,230,253,0.38)_37%,transparent_39%_58%,rgba(186,230,253,0.28)_59%,transparent_61%),radial-gradient(circle_at_50%_44%,rgba(224,242,254,0.18),transparent_46%)]"
           initial={{ opacity: 0 }}
           animate={{ opacity: [0, 0.85, 0.28] }}
-          transition={{ duration: 0.62, ease: [0.22, 1, 0.36, 1] }}
+          transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
         />
       )}
-      {isTarget && currentEvent && tone === 'curse' && (
+      {isTarget && hasImpact && currentEvent && tone === 'curse' && (
         <motion.div
           key={`curse-card-${eventKey(currentEvent)}`}
           className="pointer-events-none absolute inset-0 z-20 bg-[radial-gradient(circle_at_50%_48%,rgba(168,85,247,0.3),transparent_42%),linear-gradient(180deg,rgba(88,28,135,0.16),rgba(0,0,0,0.08))]"
           initial={{ opacity: 0, scale: 0.96 }}
           animate={{ opacity: [0, 0.72, 0.18], scale: [0.96, 1.02, 1] }}
-          transition={{ duration: 0.62, ease: [0.22, 1, 0.36, 1] }}
+          transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
         />
       )}
-      <div data-battle-unit-hitbox className={cn('relative h-[116px] overflow-hidden border border-black/70 bg-gradient-to-br xl:h-[124px] 2xl:h-[132px]', unitArtTone(unit))}>
-        <img src={image} alt="" className={cn('absolute inset-0 h-full w-full object-cover object-top opacity-90', buffDisplay?.artClass)} />
+      <div data-battle-unit-hitbox className={cn('battle-unit__art relative h-[116px] overflow-hidden border border-black/70 bg-gradient-to-br xl:h-[124px] 2xl:h-[132px]', unitArtTone(unit))}>
+        <img src={image} alt="" draggable={false} className={cn('absolute inset-0 h-full w-full object-cover object-top opacity-90', buffDisplay?.artClass)} />
         <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(0,0,0,0.05),rgba(0,0,0,0.16)_42%,rgba(0,0,0,0.84)_100%)]" />
         <div className="absolute left-2 top-2 flex h-5 w-5 items-center justify-center border border-[#d8b06c]/50 bg-black/70 font-display text-[10px] text-[#f0d8ad]">
           {slot.lane + 1}
@@ -431,43 +452,13 @@ function ArenaUnitCard({ unit, slot, side, currentEvent }: { unit: BattleBoardUn
           <div className="truncate text-[10px] uppercase tracking-[0.16em] text-stone-100">{unit.name}</div>
         </div>
       </div>
-      <div className="relative mt-1.5 flex items-center justify-between gap-2">
-        <div className="truncate text-[9px] uppercase tracking-[0.18em] text-[#b49664]">{unit.state?.TYPE ?? 'Unknown'}</div>
-        <div className="text-[8px] uppercase tracking-[0.16em] text-stone-500">HP</div>
-      </div>
-      <div className="relative mt-1.5 h-1.5 border border-black/60 bg-black">
-        <motion.div
-          className={cn('h-full', ratio <= 0.25 ? 'bg-red-500' : ratio <= 0.6 ? 'bg-amber-500' : 'bg-emerald-500')}
-          initial={false}
-          animate={{ width: `${ratio * 100}%` }}
-          transition={{ duration: 0.35 }}
-        />
-      </div>
-      <div className="relative mt-1.5 flex items-center justify-between text-[8px] text-stone-400">
-        <span>HP {formatNumber(unit.hp)}</span>
-        <span>{formatNumber(unit.mp)}</span>
-      </div>
-      <div className="relative mt-1 flex min-h-3 flex-wrap gap-1 overflow-hidden">
-        {buffChips.length ? (
-          buffChips.map(([key, chip]) => {
-            const display = BATTLE_BUFF_DISPLAY[key];
-            return (
-              <span
-                key={`${unit.tag}-${key}`}
-                className="border px-1.5 py-0.5 text-[7px] uppercase tracking-[0.18em]"
-                style={{
-                  borderColor: paletteCss(display.palette.core, 0.4),
-                  backgroundColor: paletteCss(display.palette.core, 0.12),
-                  color: paletteCss(display.palette.text, 1),
-                }}
-              >
-                {display.label}{chip.count > 1 ? `×${chip.count}` : ''} {chip.duration}
-              </span>
-            );
-          })
-        ) : (
-          <span className="text-[7px] uppercase tracking-[0.2em] text-stone-700">No effect</span>
-        )}
+      <div className="battle-unit__vitals">
+        <div className="battle-unit__health"><span>HP</span><strong>{formatNumber(unit.hp)}</strong><small>MP {formatNumber(unit.mp)}</small></div>
+        <div className="battle-unit__health-track"><motion.div initial={false} animate={{ scaleX: ratio }} transition={{ duration: 0.16 }} style={{ backgroundColor: ratio <= .25 ? '#b96f5d' : ratio <= .6 ? '#b39858' : '#829c7b' }} /></div>
+        <div className="battle-unit__buffs">{buffChips.map(([key, chip]) => {
+          const display = BATTLE_BUFF_DISPLAY[key];
+          return <span key={key} title={`${display.label} · ${chip.duration} turns`} style={{ color: paletteCss(display.palette.text, 1) }}>{display.label}{chip.count > 1 ? ` ×${chip.count}` : ''}</span>;
+        })}</div>
       </div>
       {!alive && <div className="pointer-events-none absolute inset-0 bg-black/45 ring-1 ring-inset ring-stone-900" />}
     </motion.div>
@@ -538,9 +529,11 @@ function SlotCell({
   return (
     <div
       className={cn(
-        'portrait-card relative w-[130px] shrink-0 xl:w-[136px] 2xl:w-36',
+        'battle-slot relative shrink-0',
         isDropTarget ? 'ring-1 ring-[#d8b06c]/70 ring-offset-2 ring-offset-black/80' : ''
       )}
+      data-occupied={Boolean(unit)}
+      data-active={unitMatchesTag(unit, currentEvent?.attacker) ? 'actor' : unitMatchesTag(unit, currentEvent?.defender) ? 'target' : undefined}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
@@ -575,6 +568,7 @@ function FormationGrid({
   side: 'forger' | 'rival';
   currentEvent?: BattleEvent | null;
   editUnitSlots?: boolean;
+  editableSide?: 'A' | 'B';
   onUnitSlotChange?: (unitTag: string, slot: number) => void;
 }) {
   const [activeDragUnitTag, setActiveDragUnitTag] = useState<string | null>(null);
@@ -587,8 +581,8 @@ function FormationGrid({
   }
 
   return (
-    <div className="relative h-[345px] w-[158px] shrink-0 sm:h-[452px] sm:w-[204px] md:h-[540px] md:w-[244px] lg:h-[628px] lg:w-[284px] xl:h-[652px] xl:w-[300px] 2xl:h-[688px] 2xl:w-[316px]">
-      <div className="absolute left-1/2 top-0 grid origin-top -translate-x-1/2 scale-[0.55] grid-cols-[130px_130px] auto-rows-auto justify-center gap-x-6 gap-y-5 sm:scale-[0.72] md:scale-[0.86] lg:scale-100 xl:grid-cols-[136px_136px] 2xl:grid-cols-[144px_144px]">
+    <div className={`battle-formation battle-formation--${side}`}>
+      <div className="battle-formation__slots">
         {slots.map((slot) => {
           const unit = boardSlotUnit(units, slot.slot);
           return (
@@ -616,125 +610,26 @@ function FormationGrid({
   );
 }
 
-function CommanderPanel({ label, units, side }: { label: string; units: Array<BattleBoardUnit | null>; side: 'forger' | 'rival' }) {
+function BattleTeamSummary({ label, units, side }: { label: string; units: Array<BattleBoardUnit | null>; side: 'forger' | 'rival' }) {
   const totals = sideTotals(units);
-  const leader = units.find((unit) => unit && unit.alive) ?? units.find(Boolean);
-  const ratio = totals.maxHp > 0 ? totals.hp / totals.maxHp : 0;
-  const leaderImage = leader ? unitImage(leader) ?? CARD_FALLBACK_SRC : null;
-  const leaderSkills = (['s1', 's2'] as const)
-    .map((slot) => ({ slot, skill: leader?.skills?.[slot] }))
-    .filter((entry): entry is { slot: 's1' | 's2'; skill: BattleBoardSkill } => Boolean(entry.skill));
-
-  return (
-    <aside className="relative min-h-[760px] overflow-hidden border border-[#40311f] bg-[#050403]/90 p-4 shadow-[0_22px_80px_rgba(0,0,0,0.52)]">
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_8%,rgba(216,176,108,0.12),transparent_22%),linear-gradient(180deg,rgba(255,255,255,0.035),transparent_18%,rgba(0,0,0,0.5))]" />
-      <div className="pointer-events-none absolute inset-x-4 top-4 h-px bg-gradient-to-r from-transparent via-[#b49664]/30 to-transparent" />
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <div className="text-[10px] uppercase tracking-[0.28em] text-[#b49664]">{side}</div>
-          <h3 className="mt-2 font-display text-2xl font-light uppercase tracking-[0.18em] text-stone-100">{label}</h3>
-        </div>
-        <div className="flex h-10 w-10 items-center justify-center border border-[#b49664]/30 bg-[#b49664]/10 text-[#d8b06c]">
-          <Shield size={18} />
-        </div>
-      </div>
-
-      <div className="relative mt-4 overflow-hidden border border-[#3d2c19] bg-[#070707]">
-        <div
-          className={cn('relative h-[310px] overflow-hidden bg-gradient-to-br', unitArtTone(leader))}
-          style={leaderImage ? { backgroundImage: `url(${leaderImage})`, backgroundPosition: 'center top', backgroundSize: 'cover' } : undefined}
-        >
-          {!leaderImage && (
-            <>
-              <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_24%,rgba(245,185,95,0.16),transparent_28%),linear-gradient(180deg,rgba(255,255,255,0.035),rgba(0,0,0,0.86))]" />
-              <div className="absolute left-1/2 top-16 flex h-16 w-16 -translate-x-1/2 items-center justify-center border border-[#d8b06c]/22 bg-black/36 font-display text-xl tracking-[0.14em] text-[#e3c589]">
-                {initials(leader?.name)}
-              </div>
-            </>
-          )}
-          <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(0,0,0,0.02),rgba(0,0,0,0.22)_42%,rgba(0,0,0,0.86)_100%)]" />
-          <div className="relative flex h-full flex-col justify-end p-4">
-            <div className="text-[10px] uppercase tracking-[0.28em] text-[#b49664]">{leader?.state?.TYPE ?? 'Mythic'}</div>
-            <div className="mt-2 font-display text-2xl font-light uppercase tracking-[0.18em] text-stone-100">{leader?.name ?? 'No leader'}</div>
-          </div>
-        </div>
-        <div className="border-t border-white/8 p-3">
-          <div className="text-2xl font-light tracking-[0.08em] text-stone-100">{formatNumber(totals.hp)}</div>
-          <div className="mt-2 h-1.5 border border-white/8 bg-black">
-            <div className="h-full bg-gradient-to-r from-red-700 via-amber-500 to-emerald-500" style={{ width: `${Math.max(0, Math.min(1, ratio)) * 100}%` }} />
-          </div>
-          <div className="mt-2 grid grid-cols-3 gap-2 text-[9px] uppercase tracking-[0.18em] text-stone-500">
-            <span>Alive {totals.alive}</span>
-            <span>Total {totals.total}</span>
-            <span>Round</span>
-          </div>
-        </div>
-      </div>
-
-      <div className="mt-5">
-        <div className="flex items-center justify-between gap-3">
-          <div className="text-[10px] uppercase tracking-[0.28em] text-[#b49664]">Skills</div>
-          <div className="text-[8px] uppercase tracking-[0.2em] text-stone-600">Leader</div>
-        </div>
-        <div className="mt-3 border-y border-[#3d2c19]">
-          {leaderSkills.length > 0 ? leaderSkills.map(({ slot, skill }, index) => {
-            const name = String(skill.name ?? '').trim() || slot.toUpperCase();
-            const role = String(skill.ROLE ?? skill.TYPE ?? '').trim();
-            const mpCost = Number(skill.MP_COST ?? 0);
-            return (
-              <div
-                key={`${leader?.tag ?? side}-${slot}`}
-                className={cn('grid grid-cols-[30px_minmax(0,1fr)_auto] items-center gap-3 py-3', index > 0 && 'border-t border-[#3d2c19]/80')}
-              >
-                <div className="flex h-7 w-7 items-center justify-center border border-[#b49664]/35 bg-[#b49664]/8 font-display text-[10px] uppercase tracking-[0.08em] text-[#d8b06c]">
-                  {slot.slice(1)}
-                </div>
-                <div className="min-w-0">
-                  <div className="truncate text-[11px] uppercase tracking-[0.14em] text-stone-200">{name}</div>
-                  {role && <div className="mt-1 truncate text-[8px] uppercase tracking-[0.2em] text-stone-600">{role}</div>}
-                </div>
-                {Number.isFinite(mpCost) && mpCost > 0 && (
-                  <div className="text-[8px] uppercase tracking-[0.16em] text-[#9f8761]">MP {mpCost}</div>
-                )}
-              </div>
-            );
-          }) : (
-            <div className="py-4 text-[9px] uppercase tracking-[0.2em] text-stone-700">No skill data</div>
-          )}
-        </div>
-      </div>
-
-      <div className="mt-5">
-        <div className="text-[10px] uppercase tracking-[0.28em] text-[#b49664]">Reserves</div>
-        <div className="mt-3 grid grid-cols-4 gap-2">
-          {Array.from({ length: 4 }, (_, index) => units[index] ?? null).map((unit, index) => {
-            const reserveImage = unit ? unitImage(unit) ?? CARD_FALLBACK_SRC : null;
-            return (
-            <div key={`${side}-reserve-${unit?.tag ?? index}`} className="relative flex h-16 flex-col justify-end overflow-hidden border border-[#3d2c19] bg-black/50 p-2">
-              <div className={cn('absolute inset-0 bg-gradient-to-br opacity-55', unitArtTone(unit))} />
-              {reserveImage && <img src={reserveImage} alt="" className="absolute inset-0 h-full w-full object-cover object-top opacity-75" />}
-              <div className="absolute inset-x-0 bottom-0 h-9 bg-gradient-to-t from-black/92 to-transparent" />
-              <div className="truncate text-[9px] uppercase tracking-[0.12em] text-stone-300">{unit?.name ?? 'Empty'}</div>
-            </div>
-            );
-          })}
-        </div>
-      </div>
-    </aside>
-  );
+  return <div className={`battle-team battle-team--${side}`}>
+    <Shield size={18} />
+    <div><span>{side === 'forger' ? 'Your formation' : 'Opposing formation'}</span><strong>{label}</strong></div>
+    <div className="battle-team__strength"><strong>{formatNumber(totals.hp)} <small>HP</small></strong><span>{totals.alive} / {totals.total} standing</span></div>
+  </div>;
 }
 
 function ActionRail({ board, currentEvent, started }: { board: BattleBoardState; currentEvent?: BattleEvent | null; started: boolean }) {
   const order = initiativeOrder(board);
   return (
-    <div className="min-w-0 border border-[#2b241b] bg-black/45 px-4 py-3 shadow-[inset_0_0_48px_rgba(0,0,0,0.45)]">
+    <div className="battle-action-rail">
       <div className="mb-3 flex items-center justify-between gap-3">
         <div className="text-[10px] uppercase tracking-[0.28em] text-[#b49664]">Action Order</div>
         <div className="text-[9px] uppercase tracking-[0.22em] text-stone-600">{started ? 'Speed initiative' : 'Ready by speed'}</div>
       </div>
-      <div className="grid grid-cols-6 gap-2 xl:grid-cols-12">
+      <div className="battle-action-rail__units">
         {order.map((unit, index) => (
-          <div key={`${unit.tag}-${index}`} className="min-w-0">
+          <div key={`${unit.tag}-${index}`} className="battle-action-rail__unit" title={`${unit.name} · Speed ${unitSpeed(unit)}`}>
             <div className={cn(
               'portrait-card relative mx-auto w-12 overflow-hidden border p-1 transition xl:w-14',
               unitMatchesTag(unit, currentEvent?.attacker)
@@ -746,10 +641,10 @@ function ActionRail({ board, currentEvent, started }: { board: BattleBoardState;
               <div className={cn('absolute inset-0 bg-gradient-to-br opacity-60', unit.side === 'A' ? 'from-[#412312] via-[#16110e] to-black' : 'from-[#3b1412] via-[#141010] to-black')} />
               <div
                 className="absolute inset-0 bg-cover bg-center opacity-45"
-                style={unit.image ? { backgroundImage: `url(${unit.image})` } : undefined}
+                style={{ backgroundImage: `url(${unitImage(unit) ?? CARD_FALLBACK_SRC})` }}
               />
               <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_20%,rgba(255,229,170,0.24),transparent_24%),linear-gradient(180deg,rgba(255,255,255,0.02),rgba(0,0,0,0.82))]" />
-              <div className="absolute left-1/2 top-5 h-10 w-7 -translate-x-1/2 rounded-t-full border border-white/10 bg-black/35 xl:h-12 xl:w-8" />
+
               <div className="absolute left-1 top-1 flex h-4 w-4 items-center justify-center border border-[#d8b06c]/45 bg-black/65 font-display text-[8px] text-[#f0d8ad]">
                 {index + 1}
               </div>
@@ -2223,6 +2118,8 @@ function renderPixiProjectileEmitter({
   onImpact?: () => void;
 }) {
   const beamPalette = palette;
+  const liftScale = ['arrow', 'bullet', 'lighting'].includes(event.typeEffect ?? '') ? .28 : 1;
+  const sampleFlight = (progress: number) => battleFlightSample(start, end, progress, profile.arcBend, profile.pathWobble, profile.pathWaves, liftScale);
   const aim = projectileAimBasis(start, end);
   const effectDx = aim.dir.x * dist;
   const effectDy = aim.dir.y * dist;
@@ -2233,6 +2130,11 @@ function renderPixiProjectileEmitter({
   const initialBeamFrame = beamSequenceFrames[0] ?? textures.projectileBeamFrames[0];
   let currentBeamFrameIndex = -1;
   const plan = createFastProjectilePlan(dist, profile);
+  const floorShadow = add(new Graphics(), 1);
+  const floorLight = add(new Graphics(), 2);
+  floorShadow.filters = [new BlurFilter({ strength: 5 })];
+  floorLight.blendMode = 'add';
+  floorLight.filters = [new BlurFilter({ strength: 8 })];
   const core = add(new Graphics(), 6);
   const bloom = add(new Graphics(), 5);
   const source = add(new Graphics(), 4);
@@ -2365,7 +2267,7 @@ function renderPixiProjectileEmitter({
     emitterBudget -= 1;
     const side = Math.random() > 0.5 ? 1 : -1;
     const backT = Math.max(0, headT - Math.random() * plan.trailFraction * 0.72);
-    const p = projectilePathSample(start, end, backT, profile.arcBend, profile.pathWobble, profile.pathWaves).point;
+    const p = sampleFlight(backT).point;
     const textureKey = profile.textureMix[(emitterBudget + Math.floor(Math.random() * profile.textureMix.length)) % profile.textureMix.length];
     const lateral = (Math.random() - 0.5) * profile.emitterJitter * 18;
     const backDrift = 0.012 + Math.random() * 0.026;
@@ -2456,6 +2358,8 @@ function renderPixiProjectileEmitter({
     });
     particleLayer.destroy();
     smokeLayer.destroy();
+    floorShadow.destroy();
+    floorLight.destroy();
     core.destroy();
     bloom.destroy();
     source.destroy();
@@ -2469,6 +2373,8 @@ function renderPixiProjectileEmitter({
     beam.visible = false;
     core.clear();
     bloom.clear();
+    floorShadow.clear();
+    floorLight.clear();
     onImpact?.();
     renderPixiImpact(add, tweens, end, palette, event, 0, textures, createImpactVfxPlan(event));
     renderPixiContactFlash(add, tweens, end, palette);
@@ -2502,7 +2408,7 @@ function renderPixiProjectileEmitter({
     const flightElapsedMs = Math.max(0, elapsedMs - plan.launchDelayMs);
     const travelT = Math.min(1, flightElapsedMs / plan.flightDurationMs);
     const headT = projectileHeadProgress(travelT);
-    const path = projectilePathSample(start, end, headT, profile.arcBend, profile.pathWobble, profile.pathWaves);
+    const path = sampleFlight(headT);
     const headPoint = path.point;
     const angle = path.angle;
     const trailSegments = projectileTrailSegments(headT, plan);
@@ -2530,10 +2436,15 @@ function renderPixiProjectileEmitter({
 
     core.clear();
     bloom.clear();
+    floorShadow.clear();
+    floorLight.clear();
     if (!impactDone && elapsedMs >= plan.launchDelayMs && elapsedMs < plan.impactDelayMs) {
       updateBeamSequenceTexture(travelT);
       const beamAlpha = Math.min(1, travelT / 0.08);
       const body = projectileBodyEnvelope(headT);
+      const spread = 15 + path.height * .38;
+      floorShadow.ellipse(path.ground.x + 5, path.ground.y + 12, spread, spread * .32).fill({ color: 0x030504, alpha: .26 * beamAlpha });
+      floorLight.ellipse(path.ground.x, path.ground.y + 7, spread * 1.65, spread * .54).fill({ color: beamPalette.core, alpha: (.2 - path.depthEnvelope * .07) * beamAlpha });
       const bodyScale = projectileBodyRenderScale(
         (profile.beamSequenceScale ?? 0.42) * body.scale,
         path.depthEnvelope,
@@ -2541,8 +2452,8 @@ function renderPixiProjectileEmitter({
       );
       if (PROJECTILE_TRAIL_MODE === 'strokes') {
         for (const segment of trailSegments) {
-          const segmentStart = projectilePathSample(start, end, segment.startT, profile.arcBend, profile.pathWobble, profile.pathWaves).point;
-          const segmentEnd = projectilePathSample(start, end, segment.endT, profile.arcBend, profile.pathWobble, profile.pathWaves).point;
+          const segmentStart = sampleFlight(segment.startT).point;
+          const segmentEnd = sampleFlight(segment.endT).point;
           const strength = segment.strength * beamAlpha;
 
           bloom.moveTo(segmentStart.x, segmentStart.y);
@@ -2639,11 +2550,12 @@ function findBattleUnitElement(root: ParentNode, ref?: string | null) {
   if (!ref || ref === '-') return null;
   const normalized = ref.trim().toLowerCase();
   const elements = Array.from(root.querySelectorAll<HTMLElement>('[data-battle-unit-tag]'));
-  return elements.find((element) => {
+  const matching = elements.find((element) => {
     const tag = element.dataset.battleUnitTag?.trim().toLowerCase();
     const name = element.dataset.battleUnitName?.trim().toLowerCase();
     return tag === normalized || name === normalized || (ref.length === 1 && Boolean(tag?.startsWith(normalized)));
   }) ?? null;
+  return matching?.querySelector<HTMLElement>('.battle-unit') ?? matching;
 }
 
 function resolvePixiAnchors(host: HTMLDivElement, board: BattleBoardState, event: BattleEvent, width: number, height: number) {
@@ -2728,8 +2640,7 @@ function BattleFloatingTextLayer({ event, disabled }: { event?: BattleEvent | nu
   const [anchor, setAnchor] = useState<FloatingTextAnchor | null>(null);
   const label = eventAmountLabel(event);
   const shouldRender = Boolean(event && !disabled && label && label !== '0');
-  const mode = eventVfxMode(event);
-  const hitDelay = mode === 'projectile' ? 0.34 : 0.06;
+  const hitDelay = 0;
 
   useLayoutEffect(() => {
     const host = hostRef.current;
@@ -2759,7 +2670,7 @@ function BattleFloatingTextLayer({ event, disabled }: { event?: BattleEvent | nu
               initial={{ opacity: 0, y: 26, scale: event.isCrit ? 0.68 : 0.78 }}
               animate={{ opacity: [0, 1, 1, 0], y: [26, -6, -20, -50], scale: event.isCrit ? [0.68, 1.46, 1.16, 1] : [0.78, 1.18, 1.04, 0.96] }}
               exit={{ opacity: 0, y: -54, scale: 0.92 }}
-              transition={{ duration: event.isCrit ? 1.12 : 0.94, delay: hitDelay, ease: [0.22, 1, 0.36, 1] }}
+              transition={{ duration: event.isCrit ? 0.44 : 0.38, delay: hitDelay, ease: [0.22, 1, 0.36, 1] }}
               className={cn(
                 'text-center font-display font-semibold leading-none tracking-normal [letter-spacing:0]',
                 event.isCrit ? 'text-[56px]' : 'text-[46px]',
@@ -2784,7 +2695,7 @@ function BattleFloatingTextLayer({ event, disabled }: { event?: BattleEvent | nu
   );
 }
 
-function BattleEffectLayer({ board, event, disabled }: { board: BattleBoardState; event?: BattleEvent | null; disabled?: boolean }) {
+function BattleEffectLayer({ board, event, disabled, onImpact, onReady }: { board: BattleBoardState; event?: BattleEvent | null; disabled?: boolean; onImpact: (key: string) => void; onReady: () => void }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const appRef = useRef<Application | null>(null);
   const layerRef = useRef<Container | null>(null);
@@ -2794,6 +2705,7 @@ function BattleEffectLayer({ board, event, disabled }: { board: BattleBoardState
   const tickerCleanupRef = useRef<TickerCleanup[]>([]);
   const persistentTickerCleanupRef = useRef<TickerCleanup[]>([]);
   const [renderToken, setRenderToken] = useState(0);
+  const [renderUnavailable, setRenderUnavailable] = useState(false);
   const textureSignature = battleVfxTextureAssets.map((asset) => `${asset.id}:${asset.src}`).join('|');
 
   useEffect(() => {
@@ -2801,6 +2713,7 @@ function BattleEffectLayer({ board, event, disabled }: { board: BattleBoardState
     if (!host) return;
     let disposed = false;
     let initialized = false;
+    let rendererInitialized = false;
     const app = new Application();
     appRef.current = app;
 
@@ -2813,6 +2726,7 @@ function BattleEffectLayer({ board, event, disabled }: { board: BattleBoardState
         resolution: Math.min(window.devicePixelRatio || 1, 2),
         preference: 'webgl',
       });
+      rendererInitialized = true;
       const loadedEntries = await Promise.all(battleVfxTextureAssets.map(
         async (asset) => [asset.id, await Assets.load<Texture>(asset.src)] as const,
       ));
@@ -2833,7 +2747,13 @@ function BattleEffectLayer({ board, event, disabled }: { board: BattleBoardState
       app.stage.addChild(persistentLayer);
       app.stage.addChild(layer);
       setRenderToken((value) => value + 1);
-    })();
+      onReady();
+    })().catch(() => {
+      if (rendererInitialized && !initialized) app.destroy(true);
+      if (disposed) return;
+      setRenderUnavailable(true);
+      onReady();
+    });
 
     return () => {
       disposed = true;
@@ -2851,7 +2771,13 @@ function BattleEffectLayer({ board, event, disabled }: { board: BattleBoardState
         app.destroy(true);
       }
     };
-  }, [textureSignature]);
+  }, [onReady, textureSignature]);
+
+  useEffect(() => {
+    if (!renderUnavailable || !event || disabled) return;
+    const timer = window.setTimeout(() => onImpact(eventKey(event)), BATTLE_PRESENTATION.anticipationMs);
+    return () => window.clearTimeout(timer);
+  }, [disabled, event, onImpact, renderUnavailable]);
 
   useEffect(() => {
     const app = appRef.current;
@@ -2871,26 +2797,35 @@ function BattleEffectLayer({ board, event, disabled }: { board: BattleBoardState
     const width = hostRect.width;
     const height = hostRect.height;
     const root = host.parentElement ?? host;
-    const add: PixiAdd = <T extends Container | Graphics | Text | Sprite>(node: T, zIndex = 1) => {
-      node.zIndex = zIndex;
-      layer.addChild(node);
-      return node;
-    };
 
     for (const unit of [...board.bottom, ...board.top]) {
       if (!unit?.alive) continue;
       const activeKeys = activeBattleBuffKeys(unit.buffs.map((buff) => buff.name));
       if (!activeKeys.length) continue;
-      const unitElement = findBattleUnitElement(root, unit.tag);
+      let unitElement = findBattleUnitElement(root, unit.tag);
       if (!unitElement) continue;
       const box = rectInHost(unitElement.getBoundingClientRect(), hostRect, { width, height });
-      const targetBox = {
-        x: Math.max(0, Math.min(width, box.x)),
-        y: Math.max(0, Math.min(height, box.y)),
-        width: Math.max(1, Math.min(width, box.width)),
-        height: Math.max(1, Math.min(height, box.height)),
+      const aura = new Container();
+      aura.sortableChildren = true;
+      layer.addChild(aura);
+      const addAura: PixiAdd = <T extends Container | Graphics | Text | Sprite>(node: T, zIndex = 1) => {
+        node.zIndex = zIndex;
+        aura.addChild(node);
+        return node;
       };
-      renderPixiBuffAuraLoop(add, app, activeKeys, targetBox, textures, (cleanup) => {
+      // Persistent auras stay attached while the inspection camera or card moves.
+      const followCard = () => {
+        if (!unitElement?.isConnected) unitElement = findBattleUnitElement(root, unit.tag);
+        if (!unitElement) { aura.visible = false; return; }
+        aura.visible = true;
+        const bounds = rectInHost(unitElement.getBoundingClientRect(), host.getBoundingClientRect(), { width: app.screen.width, height: app.screen.height });
+        aura.position.set(bounds.x, bounds.y);
+        aura.scale.set(bounds.width / Math.max(1, box.width), bounds.height / Math.max(1, box.height));
+      };
+      followCard();
+      app.ticker.add(followCard);
+      persistentTickerCleanupRef.current.push(() => app.ticker.remove(followCard));
+      renderPixiBuffAuraLoop(addAura, app, activeKeys, { x: 0, y: 0, width: Math.max(1, box.width), height: Math.max(1, box.height) }, textures, (cleanup) => {
         persistentTickerCleanupRef.current.push(cleanup);
       });
     }
@@ -2922,6 +2857,7 @@ function BattleEffectLayer({ board, event, disabled }: { board: BattleBoardState
     const palette = pixiPalette(tone);
     const profile = createProjectileVfxProfile(event);
     const textures = texturesRef.current ?? undefined;
+    const launch = () => {
     const hostRect = host.getBoundingClientRect();
     const width = hostRect.width;
     const height = hostRect.height;
@@ -2961,13 +2897,12 @@ function BattleEffectLayer({ board, event, disabled }: { board: BattleBoardState
     }
 
     if (mode === 'buff') {
+      onImpact(eventKey(event));
       renderPixiBuff(add, tweensRef.current, end, targetBox, palette, event, textures);
       return;
     }
 
     if (mode === 'projectile' && !selfTarget && textures) {
-      const targetElement = findBattleUnitElement(host.parentElement ?? host, event.defender);
-      const impactDirection = dx >= 0 ? 1 : -1;
       renderPixiProjectileEmitter({
         add,
         app,
@@ -2982,27 +2917,20 @@ function BattleEffectLayer({ board, event, disabled }: { board: BattleBoardState
         registerCleanup: (cleanup) => {
           tickerCleanupRef.current.push(cleanup);
         },
-        onImpact: () => {
-          if (!targetElement || typeof targetElement.animate !== 'function') return;
-          const strength = profile.impactStyle === 'crush' ? 6 : profile.impactStyle === 'pierce' ? 2.5 : 4;
-          targetElement.animate([
-            { translate: '0 0', filter: 'brightness(1)' },
-            { offset: 0.2, translate: `${impactDirection * strength}px 0`, filter: 'brightness(1.34)' },
-            { offset: 0.48, translate: `${impactDirection * -strength * 0.42}px 0`, filter: 'brightness(1.12)' },
-            { translate: '0 0', filter: 'brightness(1)' },
-          ], {
-            duration: profile.impactStyle === 'crush' ? 210 : 160,
-            easing: 'cubic-bezier(0.22, 1, 0.36, 1)',
-          });
-        },
+        onImpact: () => onImpact(eventKey(event)),
       });
     } else if (mode === 'projectile' && !selfTarget) {
+      onImpact(eventKey(event));
       renderPixiImpact(add, tweensRef.current, end, palette, event, 0, undefined, createImpactVfxPlan(event));
     } else {
+      onImpact(eventKey(event));
       renderPixiInstant(add, app, tweensRef.current, end, palette, event, textures, profile, (cleanup) => {
         tickerCleanupRef.current.push(cleanup);
       });
     }
+
+    };
+    tweensRef.current.push(gsap.delayedCall(BATTLE_PRESENTATION.anticipationMs / 1000, launch));
 
     return () => {
       tweensRef.current.forEach((tween) => tween.kill());
@@ -3010,59 +2938,18 @@ function BattleEffectLayer({ board, event, disabled }: { board: BattleBoardState
       tickerCleanupRef.current.forEach((cleanup) => cleanup());
       tickerCleanupRef.current = [];
     };
-  }, [board, disabled, event, renderToken]);
+  }, [board, disabled, event, onImpact, renderToken]);
 
   return <div ref={hostRef} className="pointer-events-none absolute inset-0 z-30 overflow-hidden" />;
 }
 
-function BattleLogPanel({ events, logs, currentEvent, orderBoard, started }: { events: BattleEvent[]; logs: string[]; currentEvent?: BattleEvent | null; orderBoard: BattleBoardState; started: boolean }) {
-  const recentEvents = events.slice(-2).reverse();
-  const recentLogs = logs.slice(-3).reverse();
-  return (
-    <div className="grid gap-3 xl:grid-cols-[240px_minmax(0,1fr)]">
-      <div className="border border-[#2b241b] bg-black/40 p-3">
-        <div className="flex items-center justify-between">
-          <div className="text-[10px] uppercase tracking-[0.28em] text-[#b49664]">Battle Log</div>
-          <Sparkles size={14} className="text-stone-600" />
-        </div>
-        <div className="mt-3 space-y-1.5">
-          {recentLogs.length ? recentLogs.map((log, index) => (
-            <div key={`${log}-${index}`} className="line-clamp-1 text-[11px] leading-5 text-stone-500">{log}</div>
-          )) : (
-            <div className="text-[11px] leading-5 text-stone-600">Preparation phase initiated.</div>
-          )}
-        </div>
-      </div>
-
-      <ActionRail board={orderBoard} currentEvent={currentEvent} started={started} />
-
-      <div className="xl:col-span-2">
-        {recentEvents.length ? (
-          <div className="grid gap-2 lg:grid-cols-2">
-            <AnimatePresence initial={false}>
-              {recentEvents.map((event, index) => (
-                <motion.div
-                  key={`${event.round}-${event.attacker}-${event.defender}-${index}`}
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -10 }}
-                  className={cn('border px-3 py-2 text-xs', actionTone(event))}
-                >
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="truncate uppercase tracking-[0.18em]">{event.attacker}</span>
-                    <span className="shrink-0 text-xs text-stone-500">R{event.round}</span>
-                  </div>
-                  <div className="mt-1 line-clamp-1 leading-5 text-stone-300">{event.log}</div>
-                </motion.div>
-              ))}
-            </AnimatePresence>
-          </div>
-        ) : (
-          <div className="border border-dashed border-[#2b241b] bg-black/30 px-4 py-3 text-xs text-stone-600">Combat events will populate this feed when the battle resolves.</div>
-        )}
-      </div>
-    </div>
-  );
+function BattleLogPanel({ logs, currentEvent, orderBoard, started }: { events: BattleEvent[]; logs: string[]; currentEvent?: BattleEvent | null; orderBoard: BattleBoardState; started: boolean }) {
+  return <div className="battle-timeline">
+    <ActionRail board={orderBoard} currentEvent={currentEvent} started={started} />
+    <details className="battle-journal"><summary>Battle journal <span>{logs.length} events</span></summary>
+      <div>{logs.length ? logs.map((log, index) => <p key={index}>{log}</p>) : <p>Waiting for the opening action.</p>}</div>
+    </details>
+  </div>;
 }
 
 function BattleResultReveal({
@@ -3086,6 +2973,7 @@ function BattleResultReveal({
         accent: '#e3c589',
         hot: '#fff1bd',
         muted: '#8f6b32',
+        markOpacity: 0.13,
         backdrop: 'radial-gradient(circle at 50% 48%, rgba(216,176,108,0.32), rgba(14,10,5,0.9) 48%, rgba(0,0,0,0.96) 100%)',
         Icon: null,
       }
@@ -3097,6 +2985,7 @@ function BattleResultReveal({
           accent: '#cf7568',
           hot: '#ffc1b5',
           muted: '#71352f',
+          markOpacity: 0.1,
           backdrop: 'radial-gradient(circle at 50% 48%, rgba(137,45,37,0.34), rgba(17,7,6,0.92) 48%, rgba(0,0,0,0.97) 100%)',
           Icon: null,
         }
@@ -3107,6 +2996,7 @@ function BattleResultReveal({
           accent: '#b8b0a1',
           hot: '#eee8da',
           muted: '#5f5a52',
+          markOpacity: 0.08,
           backdrop: 'radial-gradient(circle at 50% 48%, rgba(148,137,119,0.22), rgba(12,11,10,0.92) 48%, rgba(0,0,0,0.97) 100%)',
           Icon: Shield,
         };
@@ -3119,7 +3009,7 @@ function BattleResultReveal({
       key={`battle-result-${outcome}-${result.winner}`}
       role="status"
       aria-live="polite"
-      className="absolute inset-0 z-40 flex items-start justify-center overflow-hidden pt-8 sm:pt-12 lg:pt-16"
+      className="battle-result absolute inset-0 z-40 flex items-center justify-center overflow-hidden"
       style={{ backgroundImage: presentation.backdrop }}
       initial={reducedMotion ? false : { opacity: 0 }}
       animate={{ opacity: 1 }}
@@ -3128,19 +3018,39 @@ function BattleResultReveal({
     >
       <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(90deg,rgba(0,0,0,0.72),transparent_20%,transparent_80%,rgba(0,0,0,0.72))]" />
       <motion.div
-        className="pointer-events-none absolute left-1/2 top-[38%] h-[min(70vw,560px)] w-[min(70vw,560px)] -translate-x-1/2 -translate-y-1/2 rotate-45 border"
-        style={{ borderColor: `${presentation.accent}33`, boxShadow: `inset 0 0 80px ${presentation.accent}14, 0 0 80px ${presentation.accent}12` }}
-        initial={reducedMotion ? false : { opacity: 0, scale: 0.72, rotate: 34 }}
-        animate={{ opacity: 1, scale: 1, rotate: 45 }}
-        transition={enter}
-      />
-      <motion.div
-        className="pointer-events-none absolute left-1/2 top-[38%] h-[min(46vw,360px)] w-[min(46vw,360px)] -translate-x-1/2 -translate-y-1/2 rotate-45 border"
-        style={{ borderColor: `${presentation.hot}24` }}
-        initial={reducedMotion ? false : { opacity: 0, scale: 1.25 }}
-        animate={{ opacity: 1, scale: 1 }}
+        className="pointer-events-none absolute left-1/2 top-[38%] h-[min(46vw,360px)] w-[min(46vw,360px)] -translate-x-1/2 -translate-y-1/2"
+        initial={reducedMotion ? false : { opacity: 0 }}
+        animate={{ opacity: 1 }}
         transition={{ ...enter, delay: reducedMotion ? 0 : 0.1 }}
-      />
+      >
+        <motion.div
+          className="absolute inset-0 border"
+          style={{ borderColor: `${presentation.hot}24` }}
+          initial={reducedMotion ? false : { scale: 1.25, rotate: 45 }}
+          animate={{ scale: 1, rotate: 45 }}
+          transition={{ ...enter, delay: reducedMotion ? 0 : 0.1 }}
+        />
+      </motion.div>
+
+      <div className="pointer-events-none absolute left-1/2 top-[38%] h-[min(30vw,240px)] w-[min(30vw,240px)] -translate-x-1/2 -translate-y-1/2" aria-hidden="true">
+        <motion.div
+          className="absolute inset-0"
+          style={{
+            backgroundColor: presentation.hot,
+            WebkitMaskImage: 'url(/logo.png)',
+            maskImage: 'url(/logo.png)',
+            WebkitMaskPosition: 'center',
+            maskPosition: 'center',
+            WebkitMaskRepeat: 'no-repeat',
+            maskRepeat: 'no-repeat',
+            WebkitMaskSize: 'contain',
+            maskSize: 'contain',
+          }}
+          initial={reducedMotion ? { opacity: presentation.markOpacity } : { opacity: 0, scale: outcome === 'defeat' ? 1.08 : 0.82 }}
+          animate={{ opacity: presentation.markOpacity, scale: 1 }}
+          transition={{ ...enter, delay: reducedMotion ? 0 : 0.14 }}
+        />
+      </div>
 
       {!reducedMotion && Array.from({ length: 22 }, (_, index) => {
         const angle = index / 22 * Math.PI * 2;
@@ -3162,7 +3072,7 @@ function BattleResultReveal({
         );
       })}
 
-      <div className={cn('relative z-10 w-full max-w-3xl px-6 text-center', presentation.Icon ? '' : 'pt-8 sm:pt-12')}>
+      <div className="relative z-10 w-full max-w-3xl px-6 py-8 text-center">
         {presentation.Icon ? (
           <motion.div
             className="mx-auto flex h-16 w-16 rotate-45 items-center justify-center border bg-black/45 sm:h-20 sm:w-20 lg:h-24 lg:w-24"
@@ -3200,7 +3110,7 @@ function BattleResultReveal({
           transition={{ ...enter, delay: reducedMotion ? 0 : 0.24 }}
         >
           <div className="h-px flex-1" style={{ background: `linear-gradient(90deg, transparent, ${presentation.muted})` }} />
-          <Sparkles size={14} strokeWidth={1.25} style={{ color: presentation.accent }} />
+          <span className="h-1 w-1 shrink-0 rounded-full" style={{ backgroundColor: presentation.accent }} aria-hidden="true" />
           <div className="h-px flex-1" style={{ background: `linear-gradient(90deg, ${presentation.muted}, transparent)` }} />
         </motion.div>
         <motion.p
@@ -3212,14 +3122,14 @@ function BattleResultReveal({
           {presentation.statement}
         </motion.p>
         <motion.div
-          className="mt-5 flex flex-wrap items-center justify-center gap-x-8 gap-y-2 text-[10px] uppercase tracking-[0.26em] text-stone-500 sm:mt-7"
+          className="battle-result__stats"
           initial={reducedMotion ? false : { opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ ...enter, delay: reducedMotion ? 0 : 0.36 }}
         >
-          <span>Round {totalRounds}</span>
-          <span style={{ color: presentation.accent }}>Survivors {bottomAlive} · {topAlive}</span>
-          <span>Final HP {result.finalHpA ?? 0} · {result.finalHpB ?? 0}</span>
+          <span><span>Round</span><strong>{totalRounds}</strong></span>
+          <span style={{ color: presentation.accent }}><span>Survivors</span><strong>{bottomAlive} · {topAlive}</strong></span>
+          <span><span>Final HP</span><strong>{result.finalHpA ?? 0} · {result.finalHpB ?? 0}</strong></span>
         </motion.div>
       </div>
     </motion.div>
@@ -3228,78 +3138,79 @@ function BattleResultReveal({
 
 function ArenaStage({
   board,
+  beforeBoard,
+  onPresentImpact,
+  onReady,
   currentEvent,
   totalRounds,
   reducedMotion,
   resultReveal,
   editUnitSlots,
+  editableSide,
   onUnitSlotChange,
 }: {
   board: BattleBoardState;
+  beforeBoard?: BattleBoardState;
+  onPresentImpact: (key: string) => void;
+  onReady: () => void;
   currentEvent?: BattleEvent | null;
   totalRounds: number;
   reducedMotion?: boolean;
   resultReveal?: { outcome: BattleOutcome; result: BattleResult } | null;
   editUnitSlots?: boolean;
+  editableSide?: 'A' | 'B';
   onUnitSlotChange?: (unitTag: string, slot: number) => void;
 }) {
+  const stageRef = useRef<HTMLElement | null>(null);
+  const [impactedKey, setImpactedKey] = useState<string | null>(null);
+  const [impactPoint, setImpactPoint] = useState({ x: 0, y: 0, floorY: 0 });
+  const camera = useBattleCamera(stageRef, Boolean(reducedMotion));
+  const onImpact = useCallback((key: string) => {
+    const stage = stageRef.current;
+    const target = stage && currentEvent ? findBattleUnitElement(stage, currentEvent.defender) : null;
+    if (stage && target) {
+      const host = stage.getBoundingClientRect();
+      const bounds = target.getBoundingClientRect();
+      setImpactPoint({ x: bounds.left + bounds.width / 2 - host.left, y: bounds.top + bounds.height * .4 - host.top, floorY: bounds.bottom - host.top + 5 });
+    }
+    setImpactedKey(key);
+    onPresentImpact(key);
+  }, [currentEvent, onPresentImpact]);
+  const visibleBoard = currentEvent && impactedKey !== eventKey(currentEvent) && !reducedMotion ? beforeBoard ?? board : board;
+  const actor = currentEvent ? findEventUnit(board, currentEvent.attacker) : null;
+  const target = currentEvent ? findEventUnit(board, currentEvent.defender) : null;
   return (
-    <section className="relative min-h-[480px] overflow-hidden border border-[#2b241b] bg-[#050505] pb-6 sm:min-h-[590px] sm:pb-9 lg:min-h-[clamp(720px,78vh,820px)] lg:pb-12">
-      <div
-        className="pointer-events-none absolute inset-0 bg-cover bg-center opacity-80"
-        style={{
-          backgroundImage: `url(${arenaHallPerspective})`,
-        }}
-      />
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_22%,rgba(216,176,108,0.14),transparent_24%),radial-gradient(circle_at_50%_58%,rgba(216,176,108,0.16),transparent_28%),linear-gradient(180deg,rgba(0,0,0,0.2),rgba(0,0,0,0.34)_48%,rgba(0,0,0,0.78)_100%)]" />
-      <div className="pointer-events-none absolute inset-x-[7%] top-[96px] bottom-[46px] border-y border-[#b49664]/12 bg-[radial-gradient(circle_at_50%_54%,rgba(216,176,108,0.08),transparent_34%)] shadow-[inset_0_0_90px_rgba(0,0,0,0.72)]" />
-      <div className="pointer-events-none absolute bottom-[86px] left-1/2 top-[122px] w-px -translate-x-1/2 bg-gradient-to-b from-transparent via-[#d8b06c]/56 to-transparent" />
-      <div className="pointer-events-none absolute left-1/2 top-[53%] h-36 w-36 -translate-x-1/2 -translate-y-1/2 rounded-full border border-[#b49664]/22 shadow-[inset_0_0_28px_rgba(216,176,108,0.1),0_0_42px_rgba(216,176,108,0.08)]" />
-      <BattleEffectLayer board={board} event={currentEvent} disabled={reducedMotion} />
-      <BattleFloatingTextLayer event={currentEvent} disabled={reducedMotion} />
-
-      <div className="relative z-10 min-h-20 px-3 pt-4 sm:px-6 sm:pt-5">
-        <div className="absolute left-3 top-4 hidden sm:block sm:left-6 sm:top-5">
-          <div className="text-[10px] uppercase tracking-[0.3em] text-stone-600">Round</div>
-          <div className="mt-1 text-xl font-light text-stone-100">{board.round}</div>
+    <section ref={stageRef} className={cn('battle-stage', resultReveal && 'battle-stage--resolved')} aria-label="Battlefield" onPointerMove={camera.onPointerMove} onPointerLeave={camera.onPointerLeave}>
+      <div className="battle-stage__hall" style={{ backgroundImage: `url(${arenaHallPerspective})` }} />
+      <div className="battle-stage__light-shafts" />
+      <div className="battle-stage__haze" aria-hidden="true" />
+      {['far', 'middle', 'near'].map((depth, layer) => <div key={depth} className={`battle-stage__dust battle-stage__dust--${depth}`} aria-hidden="true">
+        {Array.from({ length: layer === 2 ? 8 : 16 }, (_, index) => <i key={index} style={{ left: `${(index * 37 + layer * 19 + 7) % 100}%`, top: `${(index * 23 + layer * 31 + 11) % 100}%`, animationDelay: `${-index * 2.7 - layer * 5}s`, animationDuration: `${12 + (index % 5) * 1.4 - layer * 2}s` }} />)}
+      </div>)}
+      {currentEvent && impactedKey === eventKey(currentEvent) && !reducedMotion && <div key={`light-${impactedKey}`} className="battle-stage__impact-light" style={{ left: impactPoint.x, top: impactPoint.y, width: currentEvent.isCrit ? 420 : 300, height: currentEvent.isCrit ? 360 : 260, background: `radial-gradient(ellipse,${paletteCss(pixiPalette(eventVfxTone(currentEvent)).hot, .28)},transparent 68%)` }} />}
+      {currentEvent && impactedKey === eventKey(currentEvent) && !reducedMotion && <div key={`ground-${impactedKey}`} className="battle-stage__ground-impact" aria-hidden="true" style={{ left: impactPoint.x, top: impactPoint.floorY, borderColor: paletteCss(pixiPalette(eventVfxTone(currentEvent)).core, .65), color: paletteCss(pixiPalette(eventVfxTone(currentEvent)).core, .3) }} />}
+      <header className="battle-stage__heading">
+        <span>Round <strong>{board.round}</strong> / {Math.max(board.round, totalRounds)}</span>
+        <div><h3>{currentEvent ? eventActionLabel(currentEvent) : 'The arena awaits'}</h3>
+          <p>{actor?.name ?? 'Your formation'} <span>→</span> {target?.name ?? 'Opposing formation'}</p>
         </div>
-        <div className="absolute left-1/2 top-5 -translate-x-1/2 text-center">
-          <div className="text-[10px] uppercase tracking-[0.34em] text-stone-500">Round {board.round} / {Math.max(board.round, totalRounds)}</div>
-          <div className="mt-1 max-w-[220px] truncate font-display text-lg font-light uppercase tracking-[0.2em] text-[#e3c589] sm:max-w-none sm:text-2xl sm:tracking-[0.28em]">
-            {currentEvent?.skillName ?? (currentEvent?.actionType === 'attack' ? 'Basic Attack' : 'Combat')}
+        <span className="battle-stage__status">{editUnitSlots ? (editableSide ? 'Arrange your cards' : 'Formation test') : 'Arena'}
+          {!reducedMotion && <button type="button" className="battle-camera-toggle" aria-pressed={camera.locked} onClick={camera.toggle} title="Move the pointer across the arena to shift perspective. Lock the view to keep this angle.">{camera.locked ? 'View locked' : 'Lock view'}</button>}
+        </span>
+      </header>
+      <BattleEffectLayer board={board} event={currentEvent} disabled={reducedMotion} onImpact={onImpact} onReady={onReady} />
+      <BattleFloatingTextLayer event={currentEvent && impactedKey === eventKey(currentEvent) ? currentEvent : null} disabled={reducedMotion} />
+      <p className="battle-stage__scroll-hint">Swipe the table to see both formations</p>
+      <BattleImpactContext.Provider value={impactedKey}>
+        <div className="battle-table-perspective">
+          <div className="battle-table">
+            <div className="battle-table__surface" aria-hidden="true"><div className="battle-table__rim" /><div className="battle-table__wash" /></div>
+            <FormationGrid units={visibleBoard.bottom} side="forger" currentEvent={currentEvent} editUnitSlots={editUnitSlots && (!editableSide || editableSide === 'A')} onUnitSlotChange={onUnitSlotChange} />
+            <div className="battle-table__divide"><span>VS</span></div>
+            <FormationGrid units={visibleBoard.top} side="rival" currentEvent={currentEvent} editUnitSlots={editUnitSlots && (!editableSide || editableSide === 'B')} onUnitSlotChange={onUnitSlotChange} />
           </div>
-          {currentEvent?.typeCatalog && currentEvent?.typeEffect ? (
-            <div className="mt-1 text-[9px] uppercase tracking-[0.24em] text-stone-500">{currentEvent.typeCatalog} / {currentEvent.typeEffect}</div>
-          ) : null}
-          <div className="mx-auto mt-2 h-px w-36 bg-gradient-to-r from-transparent via-[#b49664] to-transparent sm:w-52" />
         </div>
-      </div>
-
-      <div className="relative z-10 mx-auto mt-3 grid w-full max-w-[980px] grid-cols-[minmax(0,1fr)_32px_minmax(0,1fr)] items-center gap-1 px-1 pb-6 sm:mt-5 sm:grid-cols-[minmax(0,1fr)_52px_minmax(0,1fr)] sm:gap-2 sm:px-3 md:grid-cols-[minmax(0,1fr)_72px_minmax(0,1fr)] md:gap-4 lg:mt-7 lg:grid-cols-[minmax(0,1fr)_96px_minmax(0,1fr)] lg:gap-8 lg:px-6 lg:pb-10 2xl:max-w-[1040px] 2xl:gap-12">
-        <FormationGrid
-          units={board.bottom}
-          side="forger"
-          currentEvent={currentEvent}
-          editUnitSlots={editUnitSlots}
-          onUnitSlotChange={onUnitSlotChange}
-        />
-        <div className="flex min-h-[345px] flex-col items-center justify-center sm:min-h-[452px] md:min-h-[540px] lg:min-h-[628px] 2xl:min-h-[688px]">
-          <div className="h-20 w-px bg-gradient-to-b from-transparent via-[#b49664]/46 to-transparent sm:h-24 lg:h-32" />
-          <div className="relative my-3 flex h-8 w-8 items-center justify-center sm:my-4 sm:h-12 sm:w-12 md:h-16 md:w-16 lg:my-5 lg:h-28 lg:w-28">
-            <div className="pointer-events-none absolute inset-0 rounded-full border border-[#b49664]/18 shadow-[inset_0_0_24px_rgba(216,176,108,0.08),0_0_34px_rgba(216,176,108,0.08)]" />
-            <div className="pointer-events-none absolute inset-4 rounded-full border border-[#b49664]/10" />
-            <div className="font-display text-sm font-light tracking-[0.08em] text-[#d8b06c]/90 sm:text-lg lg:text-3xl">VS</div>
-          </div>
-          <div className="h-20 w-px bg-gradient-to-b from-transparent via-[#b49664]/46 to-transparent sm:h-24 lg:h-32" />
-        </div>
-        <FormationGrid
-          units={board.top}
-          side="rival"
-          currentEvent={currentEvent}
-          editUnitSlots={editUnitSlots}
-          onUnitSlotChange={onUnitSlotChange}
-        />
-      </div>
+      </BattleImpactContext.Provider>
       <AnimatePresence>
         {resultReveal ? (
           <BattleResultReveal
@@ -3323,11 +3234,19 @@ export function ArenaBattleScene({
   autoStartKey,
   showCommanders = true,
   showResultReveal = true,
+  resultPreviewOutcome = null,
+  showPlaybackControls = true,
   liveSession = false,
   editUnitSlots = false,
+  editableSide,
   onUnitSlotChange,
 }: ArenaBattleSceneProps) {
   const [eventIndex, setEventIndex] = useState(-1);
+  const [playbackRun, setPlaybackRun] = useState(0);
+  const [presentationReady, setPresentationReady] = useState(false);
+  const onReady = useCallback(() => setPresentationReady(true), []);
+  const [presentedEventKey, setPresentedEventKey] = useState<string | null>(null);
+  const onPresentImpact = useCallback((key: string) => setPresentedEventKey(key), []);
   const [reducedMotion, setReducedMotion] = useState(prefersReducedMotion);
   const [isPlaying, setIsPlaying] = useState(false);
 
@@ -3344,43 +3263,60 @@ export function ArenaBattleScene({
     return () => media.removeEventListener('change', handleChange);
   }, []);
 
+  const playbackKey = events[eventIndex] ? `${playbackRun}-${eventIndex}-${eventKey(events[eventIndex])}` : null;
+  const beatStarted = useRef<{ key: string; at: number } | null>(null);
   useEffect(() => {
-    if (reducedMotion || !isPlaying || events.length <= 1) return;
-    const timer = window.setInterval(() => {
-      setEventIndex((current) => {
-        if (current >= events.length - 1) {
-          window.clearInterval(timer);
-          setIsPlaying(false);
-          return current;
-        }
-        return current + 1;
-      });
-    }, PLAYBACK_STEP_MS);
-
-    return () => window.clearInterval(timer);
-  }, [events.length, isPlaying, reducedMotion]);
+    if (reducedMotion || !isPlaying || !presentationReady || !playbackKey) return;
+    const now = performance.now();
+    if (beatStarted.current?.key !== playbackKey) beatStarted.current = { key: playbackKey, at: now };
+    // Incoming live events cannot shorten the current action or its landing pause.
+    const timer = window.setTimeout(() => {
+      if (eventIndex >= events.length - 1) {
+        if (!liveSession) setIsPlaying(false);
+        return;
+      }
+      setEventIndex(current => nextBattlePlaybackIndex(current, events.length));
+    }, battleNextBeatDelay(beatStarted.current.at, now));
+    return () => window.clearTimeout(timer);
+  }, [eventIndex, events.length, isPlaying, liveSession, playbackKey, presentationReady, reducedMotion]);
 
   useEffect(() => {
-    if (autoStartKey === undefined || !events.length) return;
+    if (liveSession || autoStartKey === undefined || !events.length) return;
     setEventIndex(reducedMotion ? events.length - 1 : 0);
     setIsPlaying(!reducedMotion && events.length > 1);
-  }, [autoStartKey, events.length, reducedMotion]);
+  }, [autoStartKey, events.length, liveSession, reducedMotion]);
 
   useEffect(() => {
-    if (!liveSession) return;
-    setEventIndex(events.length - 1);
-    setIsPlaying(false);
-  }, [events.length, liveSession]);
+    if (!liveSession || !events.length) return;
+    if (reducedMotion) {
+      setEventIndex(events.length - 1);
+      setIsPlaying(false);
+    } else if (eventIndex < 0) {
+      setEventIndex(0);
+      setIsPlaying(true);
+    }
+  }, [eventIndex, events.length, liveSession, reducedMotion]);
 
   const started = eventIndex >= 0;
   const safeEventIndex = events.length && started ? Math.min(eventIndex, events.length - 1) : -1;
-  const currentEvent = safeEventIndex >= 0 ? events[safeEventIndex] ?? null : null;
+  // Polling can replace arrays while the same beat is on screen. Keep the
+  // presentation inputs stable so incoming events cannot restart its cast.
+  const eventSignature = JSON.stringify(safeEventIndex >= 0 ? events[safeEventIndex] ?? null : null);
+  const currentEvent = useMemo(() => JSON.parse(eventSignature) as BattleEvent | null, [eventSignature]);
   const currentRound = currentEvent?.round ?? board.round;
   const boardHistory = useMemo(() => result.boardHistory?.length ? result.boardHistory : [board], [board, result.boardHistory]);
   const reachedFinalEvent = started && events.length > 0 && safeEventIndex >= events.length - 1;
   const playbackFinished = reachedFinalEvent && !isPlaying;
+  const [settledKey, setSettledKey] = useState<string | null>(null);
+  const currentKey = currentEvent ? `${playbackRun}-${eventKey(currentEvent)}` : null;
+  const finalBeatSettled = reducedMotion || (currentKey !== null && settledKey === currentKey);
+  useEffect(() => {
+    if (!currentKey || (!presentationReady && !reducedMotion)) return;
+    const timer = window.setTimeout(() => setSettledKey(currentKey), PLAYBACK_STEP_MS);
+    return () => window.clearTimeout(timer);
+  }, [currentKey, presentationReady, reducedMotion]);
   const outcome = useMemo(() => battleOutcomeForBottom(result, result.board ?? board), [board, result]);
-  const playbackBoard = useMemo(() => {
+  const playbackBoardCandidate = useMemo(() => {
     if (!started) return boardHistory[0] ?? board;
     if (reachedFinalEvent) return result.board ?? boardHistory[boardHistory.length - 1] ?? board;
     if (boardHistory.length >= events.length) {
@@ -3392,6 +3328,17 @@ export function ArenaBattleScene({
     const eligibleBoards = boardHistory.filter((entry) => completesRound ? entry.round <= currentRound : entry.round < currentRound);
     return eligibleBoards[eligibleBoards.length - 1] ?? boardHistory[0] ?? board;
   }, [board, boardHistory, currentRound, events, reachedFinalEvent, result.board, safeEventIndex, started]);
+  const boardSignature = JSON.stringify(playbackBoardCandidate);
+  const playbackBoard = useMemo(() => JSON.parse(boardSignature) as BattleBoardState, [boardSignature]);
+  const beforeBoard = useMemo(() => {
+    if (safeEventIndex < 0) return boardHistory[0] ?? board;
+    if (boardHistory.length >= events.length) {
+      const index = battlePlaybackHistoryIndex(boardHistory.length, events.length, safeEventIndex);
+      return boardHistory[Math.max(0, index - 1)] ?? board;
+    }
+    return boardHistory.filter((entry) => entry.round < currentRound).at(-1) ?? boardHistory[0] ?? board;
+  }, [board, boardHistory, currentRound, events.length, safeEventIndex]);
+  const shownBoard = currentEvent && presentedEventKey !== eventKey(currentEvent) && !reducedMotion ? beforeBoard : playbackBoard;
   const visibleEvents = useMemo(() => (started ? events.slice(0, safeEventIndex + 1) : []), [events, safeEventIndex, started]);
   const visibleLogs = useMemo(() => {
     if (!started) return [];
@@ -3406,6 +3353,9 @@ export function ArenaBattleScene({
 
   const startPlayback = () => {
     if (!events.length) return;
+    setPresentationReady(false);
+    setPlaybackRun((value) => value + 1);
+    setPresentedEventKey(null);
     setEventIndex(reducedMotion ? events.length - 1 : 0);
     setIsPlaying(!reducedMotion && events.length > 1);
   };
@@ -3416,8 +3366,8 @@ export function ArenaBattleScene({
   };
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-col items-stretch justify-between gap-3 border border-[#2b241b] bg-black/30 px-3 py-3 sm:flex-row sm:items-center sm:gap-4 sm:px-4">
+    <div className="battle-scene space-y-4">
+      {showPlaybackControls && <div className="battle-controls flex flex-col items-stretch justify-between gap-3 border border-[#2b241b] bg-black/30 px-3 py-3 sm:flex-row sm:items-center sm:gap-4 sm:px-4">
         <div className="min-w-0">
           <div className="text-[10px] uppercase tracking-[0.28em] text-[#b49664]">Battle Control</div>
           <div className="mt-1 truncate text-xs text-stone-500">
@@ -3425,6 +3375,8 @@ export function ArenaBattleScene({
               ? currentEvent
                 ? `Live · ${eventActionLabel(currentEvent)} - ${currentEvent.attacker} to ${currentEvent.defender}`
                 : 'Live session connected. Waiting for the opening action.'
+              : !showResultReveal
+              ? `Effect preview · ${currentEvent ? eventActionLabel(currentEvent) : 'Ready'}`
               : playbackFinished
               ? `Battle resolved · ${result.winnerLabel ?? result.winner}`
               : currentEvent
@@ -3467,39 +3419,30 @@ export function ArenaBattleScene({
             <RotateCcw size={15} />
           </button>
         </div>
-      </div>
-      {showCommanders ? (
-        <div className="grid gap-4 lg:grid-cols-2 2xl:grid-cols-[260px_minmax(0,1fr)_260px]">
-          <div className="order-2 min-w-0 2xl:order-1">
-            <CommanderPanel label={playbackBoard.bottomLabel} units={playbackBoard.bottom} side="forger" />
-          </div>
-          <div className="order-1 min-w-0 lg:col-span-2 2xl:order-2 2xl:col-span-1">
-            <ArenaStage
-              board={playbackBoard}
-              currentEvent={currentEvent}
-              totalRounds={totalRounds}
-              reducedMotion={reducedMotion}
-              resultReveal={showResultReveal && playbackFinished ? { outcome, result } : null}
-              editUnitSlots={editUnitSlots}
-              onUnitSlotChange={onUnitSlotChange}
-            />
-          </div>
-          <div className="order-3 min-w-0">
-            <CommanderPanel label={playbackBoard.topLabel} units={playbackBoard.top} side="rival" />
-          </div>
-        </div>
-      ) : (
-        <ArenaStage
-          board={playbackBoard}
-          currentEvent={currentEvent}
-          totalRounds={totalRounds}
-          reducedMotion={reducedMotion}
-          resultReveal={showResultReveal && playbackFinished ? { outcome, result } : null}
-          editUnitSlots={editUnitSlots}
-          onUnitSlotChange={onUnitSlotChange}
-        />
-      )}
-      <BattleLogPanel events={visibleEvents} logs={visibleLogs} currentEvent={currentEvent} orderBoard={playbackBoard} started={started} />
+      </div>}
+      {showCommanders && <div className="battle-matchup">
+        <BattleTeamSummary label={playbackBoard.bottomLabel} units={shownBoard.bottom} side="forger" />
+        <BattleTeamSummary label={playbackBoard.topLabel} units={shownBoard.top} side="rival" />
+      </div>}
+      <ArenaStage
+        key={playbackRun}
+        board={playbackBoard}
+        beforeBoard={beforeBoard}
+        onPresentImpact={onPresentImpact}
+        onReady={onReady}
+        currentEvent={presentationReady || reducedMotion ? currentEvent : null}
+        totalRounds={totalRounds}
+        reducedMotion={reducedMotion}
+        resultReveal={resultPreviewOutcome
+          ? { outcome: resultPreviewOutcome, result }
+          : showResultReveal && playbackFinished && finalBeatSettled
+            ? { outcome, result }
+            : null}
+        editUnitSlots={editUnitSlots}
+        editableSide={editableSide}
+        onUnitSlotChange={onUnitSlotChange}
+      />
+      <BattleLogPanel events={visibleEvents} logs={visibleLogs} currentEvent={currentEvent} orderBoard={shownBoard} started={started} />
     </div>
   );
 }

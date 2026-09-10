@@ -543,7 +543,7 @@ function HomePage({
                 <div className="mt-6 border-t border-white/8 pt-5">
                   <div className="flex items-center justify-between text-[10px] uppercase tracking-[0.24em] text-stone-600">
                     <span>Recent Battles</span>
-                    <span>{battleHistory?.length ? `${battleHistory.length} recorded` : ''}</span>
+                    <span>{battleHistory?.length ? `${battleHistory.length} / 25 saved` : ''}</span>
                   </div>
                   {battleHistory === null ? (
                     <div className="mt-4 flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-stone-500">

@@ -27,7 +27,11 @@ interface BattleVisualizerProps {
   heroB: CharacterData | null;
   result: BattleResult | null;
   liveSession?: boolean;
+  showPlaybackControls?: boolean;
   onClose?: () => void;
+  editUnitSlots?: boolean;
+  editableSide?: 'A' | 'B';
+  onUnitSlotChange?: (tag: string, slot: number) => void;
 }
 
 function hpPercent(current: number | undefined, max: number | undefined) {
@@ -275,7 +279,7 @@ function BattleEventCard({ event }: { event: BattleResult['events'][number] }) {
   );
 }
 
-export function BattleVisualizer({ heroA, heroB, result, liveSession = false, onClose }: BattleVisualizerProps) {
+export function BattleVisualizer({ heroA, heroB, result, liveSession = false, showPlaybackControls = false, editUnitSlots = false, editableSide, onUnitSlotChange, onClose }: BattleVisualizerProps) {
   const board = result?.board ?? result?.details?.board ?? null;
   const lastLog = result?.logs?.[result.logs.length - 1];
   const winner = result?.winnerLabel || result?.winner || 'Pending';
@@ -301,7 +305,12 @@ export function BattleVisualizer({ heroA, heroB, result, liveSession = false, on
         logs={result?.logs ?? []}
         result={result}
         liveSession={liveSession}
+        editUnitSlots={editUnitSlots}
+        editableSide={editableSide}
+        onUnitSlotChange={onUnitSlotChange}
         showResultReveal={!liveSession}
+        showPlaybackControls={showPlaybackControls}
+        autoStartKey={showPlaybackControls ? undefined : `${result.winner}-${eventCount}-${result.events?.at(-1)?.timestamp ?? 'ready'}`}
       />
     );
   }

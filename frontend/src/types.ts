@@ -372,10 +372,13 @@ export interface BattleSessionObservation {
 export interface BattleSessionSnapshot {
   sessionId: string;
   battleMode: PvpBattleMode;
-  controlMode: 'rest';
+  controlMode: 'rest' | 'program';
   labelA: string;
   labelB: string;
-  status: 'awaiting_action' | 'resolved';
+  status: 'preparing' | 'awaiting_action' | 'resolved';
+  viewerSide?: 'A' | 'B';
+  readiness?: { A: boolean; B: boolean } | null;
+  opponentAutoReady?: boolean;
   round: number;
   waitingUntil?: number | null;
   waitSeconds: number;

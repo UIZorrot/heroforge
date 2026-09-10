@@ -63,6 +63,7 @@ function unit({
     side,
     slot: 0,
     name,
+    image: side === 'A' ? '/test/奥术法师.png' : '/test/铁甲骑士.png',
     alive: true,
     hp: side === 'A' ? 2200 : 1800,
     maxHp: side === 'A' ? 2200 : 1800,
@@ -80,9 +81,18 @@ function unit({
   };
 }
 
-export function createVfxTestBoard(category: VfxTestCategory, effect: string): BattleBoardState {
+function fillFormation(leader: BattleBoardUnit): BattleBoardUnit[] {
+  const portraits = ['奥术法师', '圣洁牧师', '枪火游侠', '自然射手', '虚空术士', '野蛮氏族'];
+  return Array.from({ length: 6 }, (_, slot) => slot === 0 ? leader : {
+    ...leader, tag: `${leader.side}${slot + 1}`, slot, name: `${leader.side === 'A' ? 'Ally' : 'Rival'} ${slot + 1}`,
+    image: `/test/${portraits[(slot + (leader.side === 'A' ? 0 : 2)) % portraits.length]}.png`, buffs: [],
+  });
+}
+
+export function createVfxTestBoard(category: VfxTestCategory, effect: string, fullFormation = false): BattleBoardState {
   const buff = category === 'buff' ? [{ name: effect, duration: 3, value: 2 }] : [];
   const caster = unit({ tag: 'A1', side: 'A', name: 'VFX CASTER', typeEffect: effect, buffs: buff });
+  if (category === 'buff' && effect === 'heal') caster.hp = 1500;
   const target = unit({ tag: 'B1', side: 'B', name: 'TARGET CARD', typeEffect: 'flesh' });
 
   return {
@@ -90,8 +100,8 @@ export function createVfxTestBoard(category: VfxTestCategory, effect: string): B
     riverLabel: 'VFX',
     bottomLabel: 'Tester',
     topLabel: 'Target',
-    bottom: emptySlots(caster),
-    top: emptySlots(target),
+    bottom: fullFormation ? fillFormation(caster) : emptySlots(caster),
+    top: fullFormation ? fillFormation(target) : emptySlots(target),
   };
 }
 
@@ -147,7 +157,7 @@ export function createVfxTestEvent(
       rangeMode: 'self',
       damage: 0,
       heal,
-      hpA: 2200 + heal,
+      hpA: heal > 0 ? Math.min(2200, 1500 + heal) : 2200,
       hpB: 1800,
       buffsA: [{ name: effect, duration: 3, value: 2 }],
       log: `A1 applies ${effect}.`,
@@ -194,13 +204,18 @@ export function createVfxTestEvent(
 }
 
 export function createVfxTestResult(board: BattleBoardState, event: BattleEvent): BattleResult {
+  const finalBoard: BattleBoardState = {
+    ...board,
+    bottom: board.bottom.map((unit) => unit?.tag === event.attacker ? { ...unit, hp: Math.min(unit.maxHp, event.hpA), mp: event.mpA } : unit),
+    top: board.top.map((unit) => unit?.tag === event.defender ? { ...unit, hp: Math.min(unit.maxHp, event.hpB), mp: event.mpB } : unit),
+  };
   return {
     winner: 'A',
     winnerLabel: 'Tester',
     logs: [event.log],
     events: [event],
-    board,
-    boardHistory: [board],
+    board: finalBoard,
+    boardHistory: [board, finalBoard],
     finalHpA: event.hpA,
     finalHpB: event.hpB,
     maxHpA: event.maxHpA,

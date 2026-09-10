@@ -51,9 +51,9 @@
 .vault-item-detail__surface > header { position: sticky; top: 0; z-index: 30; background: #12100cf5; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 22px 32px; border-bottom: 1px solid #b4966433; font-size: 10px; letter-spacing: .1em; text-transform: uppercase; }
 .vault-item-detail__surface > header button { display: grid; place-items: center; width: 36px; height: 36px; border: 1px solid #ffffff25; cursor: pointer; }
 .vault-item-detail__body { display: grid; grid-template-columns: minmax(200px, 300px) minmax(0, 1fr); gap: 36px; padding: 32px; }
-.vault-item-detail__art { align-self: start; padding: 16px; border: 1px solid #ae945d88; background: radial-gradient(ellipse at center, #7f602529, transparent 70%), #15120d; }
-.vault-item-detail__art .vault-item-art { width: 100%; aspect-ratio: 1; }
-.vault-item-detail__art > span:last-child { display: block; padding-top: 16px; color: #c2ab80; font-size: 11px; text-align: center; }
+.vault-item-detail__art { width: 100%; }
+.vault-item-detail__art .vault-item-art { width: 100%; aspect-ratio: 1; mask-image: radial-gradient(ellipse, #000 55%, transparent 72%); }
+.vault-item-detail__quantity { margin-top: 18px; color: #c2ab80; font-size: 11px; text-align: center; }
 .vault-item-detail__content { min-width: 0; }
 .vault-item-detail h2 { margin-block: 8px 14px; color: #e8d6b5; font-size: 32px; line-height: 1.1; }
 .vault-item-detail__purpose { color: #b3a68f; font-size: 12px; line-height: 1.7; }
@@ -66,8 +66,7 @@
 .vault-item-detail__use:disabled { opacity: .4; cursor: default; }
 .vault-item-detail.is-material { border-color: #80947b; background: #111612; }
 .is-material .vault-item-detail__body { grid-template-columns: 160px minmax(0, 1fr); }
-.is-material .vault-item-detail__art { padding: 10px; border-color: #8e9b8538; background: #0d100d; }
-.is-material .vault-item-detail__art > span:last-child { color: #bdcbb8; }
+.is-material .vault-item-detail__quantity { color: #bdcbb8; }
 .is-material .vault-item-detail__use { background: #4b6147; }
 @media(max-width: 760px) {
   .vault-items__toolbar { align-items: stretch; }

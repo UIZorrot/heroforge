@@ -1196,6 +1196,30 @@ def test_forge_and_battle_persistence(harness):
 
 
 @pytest.mark.integration
+def test_battle_history_keeps_only_latest_25_records_per_user(harness):
+    headers = harness.login("integration-battle-retention@example.com")
+
+    for index in range(26):
+        harness.app_module.save_battle_history(
+            harness.last_user,
+            "retention_test",
+            {"sequence": index},
+            {"winner": "Forger", "events": []},
+        )
+
+    battles = harness.battles(headers)
+    assert len(battles) == 25
+    assert battles[0]["payload"]["sequence"] == 25
+    assert {record["payload"]["sequence"] for record in battles} == set(range(1, 26))
+
+    battle_count_row = harness.db_module.fetch_one(
+        "SELECT count(*) AS count FROM battles WHERE user_id = %s",
+        (harness.last_user["id"],),
+    )
+    assert int(battle_count_row["count"]) == 25
+
+
+@pytest.mark.integration
 def test_repair_pvp_and_pve_entry_costs(harness):
     email = "integration-economy@example.com"
     headers = harness.login(email)
@@ -1407,9 +1431,21 @@ def test_friend_request_and_stake_free_friend_challenge_resolve_end_to_end(harne
     )
     assert resolved.status_code == 200, resolved.get_data(as_text=True)
     payload = resolved.get_json()
-    assert payload["data"]["status"] == "resolved"
-    assert payload["battle"]["controlMode"] == "program"
-    assert payload["battle"]["boardHistory"]
+    assert payload["data"]["status"] == "accepted"
+    assert payload["battle"] is None
+    session_id = payload["battle_session"]["sessionId"]
+    assert payload["battle_session"]["viewerSide"] == "B"
+    outgoing = harness.client.get("/api/friends", headers=headers_a).get_json()["data"]["outgoing_challenges"]
+    assert outgoing[0]["status"] == "accepted" and outgoing[0]["battle_session_id"] == session_id
+    ready_b = harness.client.post(f"/api/battle/sessions/{session_id}/confirm", headers=headers_b, json={"positions": {"B1": 4}})
+    assert ready_b.status_code == 200 and ready_b.get_json()["data"]["status"] == "preparing"
+    ready_a = harness.client.post(f"/api/battle/sessions/{session_id}/confirm", headers=headers_a, json={"positions": {"A1": 2}})
+    assert ready_a.status_code == 200, ready_a.get_data(as_text=True)
+    assert ready_a.get_json()["data"]["status"] == "resolved"
+    assert ready_a.get_json()["data"]["result"]["controlMode"] == "program"
+    assert ready_a.get_json()["data"]["boardHistory"][0]["top"][4]["name"] == "Friendly Beta"
+    outgoing = harness.client.get("/api/friends", headers=headers_a).get_json()["data"]["outgoing_challenges"]
+    assert outgoing[0]["status"] == "resolved"
     assert harness.economy(headers_a)["wallet"]["dust_balance"] == 500
     assert harness.economy(headers_b)["wallet"]["dust_balance"] == 500
 
@@ -1447,10 +1483,29 @@ def test_browser_arena_ranked_match_resolves_server_side_without_turn_timeouts(h
     assert second.status_code == 200, second.get_data(as_text=True)
     payload = second.get_json()
     assert payload["status"] == "matched"
-    assert payload["match"]["status"] == "resolved"
-    assert payload["battle_session"]["status"] == "resolved"
-    assert payload["battle"]["controlMode"] == "program"
-    assert len(payload["battle"]["boardHistory"]) > 1
+    assert payload["match"]["status"] == "running"
+    assert payload["battle_session"]["status"] == "preparing"
+    assert payload["battle"] is None
+    session_id = payload["battle_session"]["sessionId"]
+    outsider = harness.login("integration-ready-outsider@example.com")
+    forbidden = harness.client.post(f"/api/battle/sessions/{session_id}/confirm", headers=outsider, json={"positions": {"A1": 0}})
+    assert forbidden.status_code == 403
+    wrong_side = harness.client.post(f"/api/battle/sessions/{session_id}/confirm", headers=headers_b, json={"positions": {"A1": 0}})
+    assert wrong_side.status_code == 409
+    first_ready = harness.client.post(f"/api/battle/sessions/{session_id}/confirm", headers=headers_a, json={"positions": {"A1": 5}})
+    assert first_ready.status_code == 200, first_ready.get_data(as_text=True)
+    assert first_ready.get_json()["data"]["readiness"] == {"A": True, "B": False}
+    waiting = harness.client.get(f"/api/battle/sessions/{session_id}", headers=headers_b).get_json()["data"]
+    assert waiting["status"] == "preparing" and not waiting["events"]
+    locked = harness.client.post(f"/api/battle/sessions/{session_id}/confirm", headers=headers_a, json={"positions": {"A1": 0}})
+    assert locked.status_code == 409
+    second_ready = harness.client.post(f"/api/battle/sessions/{session_id}/confirm", headers=headers_b, json={"positions": {"B1": 0}})
+    assert second_ready.status_code == 200, second_ready.get_data(as_text=True)
+    finished = second_ready.get_json()["data"]
+    assert finished["status"] == "resolved" and finished["result"]["controlMode"] == "program"
+    assert finished["boardHistory"][0]["bottom"][5]["name"] == "Auto Alpha"
+    retry = harness.client.post(f"/api/battle/sessions/{session_id}/confirm", headers=headers_b, json={"positions": {"B1": 0}})
+    assert retry.status_code == 200 and len(retry.get_json()["data"]["events"]) == len(finished["events"])
 
 
 @pytest.mark.integration
@@ -2286,3 +2341,26 @@ def test_legacy_auto_duel_self_buff_skill_does_not_damage_the_actor(monkeypatch)
     assert first_event["hpA"] == result["maxHpA"]
     # Legacy bless resolves through the merged aliases and is stored as pray.
     assert any(buff["name"] == "pray" and buff["value"] == 12 for buff in first_event["buffsA"])
+
+
+@pytest.mark.integration
+def test_simulation_preparation_api_requires_creator_confirmation(harness):
+    headers = harness.login("integration-prepare-simulation@example.com")
+    response = harness.client.post("/api/battle/sessions", headers=headers, json={
+        "battleMode": "arena_2x3", "controlMode": "program", "preparation": True,
+        "teamA": [_board_hero("Sim Alpha", hp=900, atk=95, defense=22, speed=50)],
+        "teamB": [_board_hero("Sim Beta", hp=900, atk=90, defense=22, speed=45)],
+    })
+    assert response.status_code == 201, response.get_data(as_text=True)
+    prepared = response.get_json()["data"]
+    assert prepared["status"] == "preparing" and not prepared["events"]
+    assert prepared["readiness"] == {"A": False, "B": True}
+    session_id = prepared["sessionId"]
+    response = harness.client.post(f"/api/battle/sessions/{session_id}/confirm", headers=headers, json={"positions": {"A1": 5}})
+    assert response.status_code == 200, response.get_data(as_text=True)
+    assert response.get_json()["data"]["status"] == "resolved"
+    assert response.get_json()["data"]["boardHistory"][0]["bottom"][5]["name"] == "Sim Alpha"
+    assert len(harness.battles(headers)) == 1
+    retry = harness.client.post(f"/api/battle/sessions/{session_id}/confirm", headers=headers, json={"positions": {"A1": 5}})
+    assert retry.status_code == 200
+    assert len(harness.battles(headers)) == 1

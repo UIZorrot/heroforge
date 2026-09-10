@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Crosshair, Move, Play, RotateCcw, Shield, Sparkles, Zap } from 'lucide-react';
-import { ArenaBattleScene } from './ArenaBattleScene';
-import { PageHeader, PageHeaderStat } from './PageHeader';
+import { ArenaBattleScene, type BattleOutcome } from './ArenaBattleScene';
+import { PageHeader } from './PageHeader';
 import { cn } from '../lib/utils';
 import {
   createVfxTestBoard,
@@ -11,6 +11,7 @@ import {
   vfxTestOptions,
   type VfxTestCategory,
 } from '../lib/vfxTestHarness';
+import './VfxTestPage.css';
 import type { BattleBoardState, BattleBoardUnit } from '../lib/battleTypes';
 
 const categoryIcons: Record<VfxTestCategory, typeof Zap> = {
@@ -64,10 +65,12 @@ export function VfxTestPage() {
   const [sequence, setSequence] = useState(1);
   const [amount, setAmount] = useState(360);
   const [crit, setCrit] = useState(false);
+  const [fullFormation, setFullFormation] = useState(false);
+  const [resultPreview, setResultPreview] = useState<Exclude<BattleOutcome, 'draw'> | null>(null);
 
   const options = vfxTestOptions[category];
   const selectedEffect = options.some((option) => option.value === effect) ? effect : options[0]?.value ?? effect;
-  const defaultBoard = useMemo(() => createVfxTestBoard(category, selectedEffect), [category, selectedEffect]);
+  const defaultBoard = useMemo(() => createVfxTestBoard(category, selectedEffect, fullFormation), [category, selectedEffect, fullFormation]);
   const [board, setBoard] = useState<BattleBoardState>(() => createVfxTestBoard('projectile', vfxTestOptions.projectile[0]?.value ?? ''));
 
   useEffect(() => {
@@ -79,6 +82,33 @@ export function VfxTestPage() {
     [amount, category, crit, selectedEffect, sequence]
   );
   const result = useMemo(() => createVfxTestResult(board, event), [board, event]);
+  const previewBoard = useMemo<BattleBoardState>(() => {
+    if (!resultPreview) return board;
+    const defeatedSide = resultPreview === 'victory' ? 'top' : 'bottom';
+    return {
+      ...board,
+      [defeatedSide]: board[defeatedSide].map((unit) => unit ? { ...unit, hp: 0, alive: false } : null),
+    };
+  }, [board, resultPreview]);
+  const previewResult = useMemo(() => {
+    if (!resultPreview) return result;
+    const victory = resultPreview === 'victory';
+    const finalHpA = previewBoard.bottom.reduce((sum, unit) => sum + (unit?.hp ?? 0), 0);
+    const finalHpB = previewBoard.top.reduce((sum, unit) => sum + (unit?.hp ?? 0), 0);
+    return {
+      ...result,
+      winner: victory ? 'A' : 'B',
+      winnerLabel: victory ? previewBoard.bottomLabel : previewBoard.topLabel,
+      events: [],
+      logs: [],
+      board: previewBoard,
+      boardHistory: [previewBoard],
+      finalHpA,
+      finalHpB,
+      aliveA: previewBoard.bottom.filter((unit) => unit?.alive && unit.hp > 0).length,
+      aliveB: previewBoard.top.filter((unit) => unit?.alive && unit.hp > 0).length,
+    };
+  }, [previewBoard, result, resultPreview]);
 
   function resetFormation() {
     setBoard(defaultBoard);
@@ -113,17 +143,11 @@ export function VfxTestPage() {
         eyebrow="Battle Lab"
         subtitle="Effect Test"
         description="The same action events, renderer, textures, and timing used by Battle."
-        stats={
-          <>
-            <PageHeaderStat label="Projectiles" value={vfxTestOptions.projectile.length} />
-            <PageHeaderStat label="Instant" value={vfxTestOptions.instant.length} />
-            <PageHeaderStat label="Buffs" value={vfxTestOptions.buff.length} />
-          </>
-        }
+
       />
 
-      <div className="mt-6 grid gap-5 xl:grid-cols-[340px_minmax(0,1fr)]">
-        <section className="border border-white/8 bg-black/24">
+      <div className="vfx-lab">
+        <section className="vfx-lab__controls border border-white/8 bg-black/24">
           <div className="border-b border-white/8 px-5 py-4">
             <div className="flex items-center gap-3">
               <Sparkles size={17} className="text-[#d8b06c]" />
@@ -131,7 +155,7 @@ export function VfxTestPage() {
             </div>
           </div>
 
-          <div className="space-y-6 p-5">
+          <div className="vfx-lab__settings space-y-6 p-5">
             <div>
               <div className="mb-3 text-[10px] font-semibold uppercase tracking-[0.24em] text-stone-600">Category</div>
               <div className="grid grid-cols-2 gap-2">
@@ -142,7 +166,8 @@ export function VfxTestPage() {
                     <button
                       key={item.value}
                       type="button"
-                      onClick={() => {
+                    onClick={() => {
+                        setResultPreview(null);
                         setCategory(item.value);
                         setEffect(vfxTestOptions[item.value][0]?.value ?? '');
                         setSequence((value) => value + 1);
@@ -172,6 +197,7 @@ export function VfxTestPage() {
                       key={option.value}
                       type="button"
                       onClick={() => {
+                        setResultPreview(null);
                         setEffect(option.value);
                         setSequence((value) => value + 1);
                       }}
@@ -183,6 +209,40 @@ export function VfxTestPage() {
                       )}
                     >
                       {option.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="border-t border-white/8 pt-5">
+              <div className="mb-3 text-[10px] font-semibold uppercase tracking-[0.24em] text-stone-600">Battle Result</div>
+              <div className="grid grid-cols-3 gap-2" role="group" aria-label="Battle result preview">
+                {([
+                  { value: null, label: 'Effect' },
+                  { value: 'victory', label: 'Victory' },
+                  { value: 'defeat', label: 'Defeat' },
+                ] as const).map((item) => {
+                  const active = resultPreview === item.value;
+                  return (
+                    <button
+                      key={item.label}
+                      type="button"
+                      aria-pressed={active}
+                      onClick={() => {
+                        setResultPreview(item.value);
+                        setSequence((value) => value + 1);
+                      }}
+                      className={cn(
+                        'h-10 border px-2 text-[9px] font-semibold uppercase tracking-[0.12em] transition',
+                        active
+                          ? item.value === 'defeat'
+                            ? 'border-[#b95f54]/70 bg-[#8f332c]/14 text-[#efb0a6]'
+                            : 'border-[#d8b06c]/70 bg-[#d8b06c]/10 text-stone-100'
+                          : 'border-white/8 bg-black/28 text-stone-500 hover:border-white/18 hover:text-stone-300'
+                      )}
+                    >
+                      {item.label}
                     </button>
                   );
                 })}
@@ -231,13 +291,22 @@ export function VfxTestPage() {
             </div>
 
             <div className="border-t border-white/8 pt-5">
+              <label className="vfx-lab__formation-toggle"><input type="checkbox" checked={fullFormation} onChange={(event) => setFullFormation(event.target.checked)} />Full formation · 6 vs 6</label>
               <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.24em] text-stone-600">
                 <Move size={14} />
                 Slot Drag
               </div>
               <p className="mt-2 text-xs leading-6 text-stone-500">
-                Drag cards from one slot to another. Only the card moves; the battlefield layout stays fixed.
+                Drag a card onto another slot to test attack paths and impact positions on the arena table.
               </p>
+              <div className="vfx-lab__slots">
+                {(['A1', 'B1'] as const).map((tag) => {
+                  const team = tag === 'A1' ? board.bottom : board.top;
+                  return <label key={tag}>{tag === 'A1' ? 'Caster slot' : 'Target slot'}<select aria-label={tag === 'A1' ? 'Caster slot' : 'Target slot'} value={team.find(unit => unit?.tag === tag)?.slot ?? 0} onChange={(event) => moveUnitToSlot(tag, Number(event.target.value))}>
+                    {Array.from({ length: 6 }, (_, slot) => <option key={slot} value={slot}>{slot < 3 ? 'Front' : 'Back'} · {slot % 3 + 1}</option>)}
+                  </select></label>;
+                })}
+              </div>
               <button
                 type="button"
                 onClick={resetFormation}
@@ -250,16 +319,19 @@ export function VfxTestPage() {
           </div>
         </section>
 
-        <section className="min-w-0">
+        <section className="vfx-lab__preview min-w-0">
           <ArenaBattleScene
-            board={board}
-            events={[event]}
-            logs={[event.log]}
-            result={result}
-            autoStartKey={`${category}-${selectedEffect}-${sequence}-${amount}-${crit ? 'crit' : 'normal'}`}
+            key={`${category}-${selectedEffect}-${sequence}-${amount}-${crit ? 'crit' : 'normal'}-${fullFormation}-${resultPreview ?? 'effect'}`}
+            board={previewBoard}
+            events={resultPreview ? [] : [event]}
+            logs={resultPreview ? [] : [event.log]}
+            result={previewResult}
+            autoStartKey={`${category}-${selectedEffect}-${sequence}-${amount}-${crit ? 'crit' : 'normal'}-${fullFormation}-${resultPreview ?? 'effect'}`}
             showCommanders={false}
             showResultReveal={false}
-            editUnitSlots={true}
+            resultPreviewOutcome={resultPreview}
+            showPlaybackControls={false}
+            editUnitSlots={!resultPreview}
             onUnitSlotChange={moveUnitToSlot}
           />
         </section>

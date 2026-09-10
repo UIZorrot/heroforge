@@ -47,6 +47,9 @@ import battle_sessions
 settings = get_settings()
 PVP_SESSION_SETTLEMENT_LOCK = threading.RLock()
 PVP_BATTLE_SESSION_IDS: set[str] = set()
+FRIEND_BATTLE_SESSION_IDS: dict[str, str] = {}
+PREPARED_BATTLE_HISTORY_IDS: set[str] = set()
+BATTLE_HISTORY_LIMIT = 25
 
 app = Flask(__name__)
 CORS(app, resources={r"/api/*": {"origins": "*"}})
@@ -583,6 +586,22 @@ def save_battle_history(user, battle_type, payload, result):
                         _coerce_uuid(snapshot.get("id")),
                         serialize_json(snapshot),
                     ),
+                )
+
+            if user:
+                cur.execute(
+                    """
+                    WITH stale_battles AS (
+                        SELECT id
+                        FROM battles
+                        WHERE user_id = %s
+                        ORDER BY created_at DESC, id DESC
+                        OFFSET %s
+                    )
+                    DELETE FROM battles
+                    WHERE id IN (SELECT id FROM stale_battles)
+                    """,
+                    (user["id"], BATTLE_HISTORY_LIMIT),
                 )
         conn.commit()
     return battle_row
@@ -1779,9 +1798,8 @@ def _join_pvp_queue(user, data, require_team_payload: bool = False):
     team_b = entry_b["team_snapshot"].get("team", []) if isinstance(entry_b.get("team_snapshot"), dict) else []
     label_a = "Player A"
     label_b = "Player B"
-    # The browser Arena is a fully server-authoritative auto battler. REST
-    # control remains available for explicit agent 1v1/4v4 queues, while the
-    # normal 2x3 ladder resolves immediately and returns a complete replay.
+    # Browser matches wait for both formations, then resolve server-side.
+    # Explicit REST controller queues retain their turn-based contract.
     session_control_mode = "program" if battle_mode == "arena_2x3" else "rest"
 
     try:
@@ -1793,6 +1811,8 @@ def _join_pvp_queue(user, data, require_team_payload: bool = False):
             team_a=[item["hero_payload"] for item in team_a],
             team_b=[item["hero_payload"] for item in team_b],
             wait_seconds=max(1, min(60, int(settings.pvp_battle_session_wait_seconds))),
+            require_confirmation=battle_mode == "arena_2x3",
+            participant_ids={"A": str(entry_a["user_id"]), "B": str(entry_b["user_id"])},
         )
         PVP_BATTLE_SESSION_IDS.add(session.session_id)
         execute(
@@ -2251,6 +2271,68 @@ def battle_team():
         return jsonify({"error": str(e)}), 500
 
 
+def _sync_friendly_battle_session(session):
+    challenge_id = FRIEND_BATTLE_SESSION_IDS.get(session.session_id)
+    if not challenge_id or session.status != "resolved" or not session.result:
+        return
+    with PVP_SESSION_SETTLEMENT_LOCK:
+        challenge = fetch_one("SELECT * FROM friend_challenges WHERE id = %s", (challenge_id,))
+        if not challenge or challenge["status"] == "resolved":
+            return
+        result = session.result
+        hp_a, hp_b = result.get("finalHpA", 0), result.get("finalHpB", 0)
+        winner = session.participant_ids.get("A" if hp_a > hp_b else "B") if hp_a != hp_b else None
+        execute("""UPDATE friend_challenges SET status = 'resolved', battle_result = %s::jsonb,
+                   winner_user_id = %s, resolved_at = now() WHERE id = %s""",
+                (serialize_json(result), winner, challenge_id))
+        payload = {"challengeId": challenge_id, "teamA": session.team_a_payload, "teamB": session.team_b_payload, "friendly": True}
+        for user_id in session.participant_ids.values():
+            player = fetch_one("SELECT id, email FROM users WHERE id = %s", (user_id,))
+            if player:
+                save_battle_history(player, "friendly_arena_2x3", payload, result)
+
+
+def _battle_session_view(session, user):
+    snapshot = session.public_snapshot()
+    if session.participant_ids:
+        side = next((side for side, user_id in session.participant_ids.items() if user_id == str(user["id"])), None)
+        if not side:
+            raise PermissionError("You are not a participant in this battle")
+        snapshot["viewerSide"] = side
+    return snapshot
+
+
+@app.route("/api/battle/sessions/<session_id>/confirm", methods=["POST"])
+@auth_required
+def confirm_battle_session_route(session_id):
+    try:
+        session = battle_sessions.get_battle_session(session_id)
+        if not session:
+            return jsonify({"error": "Battle session not found"}), 404
+        view = _battle_session_view(session, current_user())
+        side = view.get("viewerSide")
+        if not side:
+            raise PermissionError("This session has no participant assigned for confirmation")
+        session.confirm_preparation(side, (request.json or {}).get("positions"))
+        _sync_pvp_match_session_by_session_id(session_id)
+        _sync_friendly_battle_session(session)
+        if session.auto_ready_b and session.status == "resolved":
+            with PVP_SESSION_SETTLEMENT_LOCK:
+                if session_id not in PREPARED_BATTLE_HISTORY_IDS:
+                    save_battle_history(current_user(), f"battle_session_{session.battle_mode}", {
+                        "sessionId": session_id, "teamA": session.team_a_payload, "teamB": session.team_b_payload,
+                    }, session.result)
+                    PREPARED_BATTLE_HISTORY_IDS.add(session_id)
+        return jsonify({"data": _battle_session_view(session, current_user())})
+    except PermissionError as exc:
+        return jsonify({"error": str(exc)}), 403
+    except battle_sessions.BattleSessionError as exc:
+        return jsonify({"error": str(exc)}), 409
+    except Exception:
+        logging.exception("Failed to confirm battle formation")
+        return jsonify({"error": "Unable to confirm formation. Please retry."}), 500
+
+
 @app.route("/api/battle/sessions", methods=["POST"])
 @auth_required
 def create_battle_session_route():
@@ -2268,7 +2350,8 @@ def create_battle_session_route():
             wait_seconds = 30
         wait_seconds = max(1, min(60, wait_seconds))
 
-        if control_mode != "rest":
+        preparing = data.get("preparation") is True
+        if control_mode != "rest" and not (preparing and control_mode == "program"):
             return jsonify({"error": "Battle sessions currently support rest control only"}), 400
         if not isinstance(team_a, list) or not isinstance(team_b, list) or not team_a or not team_b:
             return jsonify({"error": "Two teams are required"}), 400
@@ -2281,8 +2364,11 @@ def create_battle_session_route():
             team_a=team_a,
             team_b=team_b,
             wait_seconds=wait_seconds,
+            require_confirmation=preparing,
+            auto_ready_b=preparing,
+            participant_ids={"A": str(current_user()["id"])} if preparing else {},
         )
-        return jsonify({"data": session.public_snapshot()}), 201
+        return jsonify({"data": _battle_session_view(session, current_user())}), 201
     except Exception as e:
         logging.exception(e)
         return jsonify({"error": str(e)}), 500
@@ -2297,8 +2383,10 @@ def get_battle_session_route(session_id):
         if not session:
             return jsonify({"error": "Battle session not found"}), 404
         _assert_pvp_session_access(session_id, current_user())
+        _battle_session_view(session, current_user())
         _sync_pvp_match_session_by_session_id(session_id)
-        return jsonify({"data": session.public_snapshot()})
+        _sync_friendly_battle_session(session)
+        return jsonify({"data": _battle_session_view(session, current_user())})
     except PermissionError as e:
         return jsonify({"error": str(e)}), 403
     except Exception as e:
@@ -2321,6 +2409,7 @@ def advance_battle_session_route(session_id):
             return jsonify({"error": "action is required"}), 400
 
         pvp_match = _assert_pvp_session_access(session_id, current_user(), action)
+        _battle_session_view(session, current_user())
         snapshot = session.submit_action(action)
         if snapshot.get("status") == "resolved":
             if pvp_match:
@@ -2622,7 +2711,7 @@ def _friends_snapshot(user_id):
         """
         SELECT c.*, u.email AS challenger_email
         FROM friend_challenges c JOIN users u ON u.id = c.challenger_user_id
-        WHERE c.challenged_user_id = %s AND c.status = 'pending'
+        WHERE c.challenged_user_id = %s AND c.status IN ('pending', 'accepted')
         ORDER BY c.created_at DESC
         """,
         (user_id,),
@@ -2631,7 +2720,7 @@ def _friends_snapshot(user_id):
         """
         SELECT c.*, u.email AS challenged_email
         FROM friend_challenges c JOIN users u ON u.id = c.challenged_user_id
-        WHERE c.challenger_user_id = %s AND c.status IN ('pending', 'resolved')
+        WHERE c.challenger_user_id = %s AND c.status IN ('pending', 'accepted', 'resolved')
         ORDER BY c.created_at DESC LIMIT 20
         """,
         (user_id,),
@@ -2853,44 +2942,25 @@ def friend_challenge_respond(challenge_id, action):
         challenger = fetch_one("SELECT id, email FROM users WHERE id = %s", (challenge["challenger_user_id"],))
         challenged = fetch_one("SELECT id, email FROM users WHERE id = %s", (challenge["challenged_user_id"],))
         session = battle_sessions.create_battle_session(
-            battle_mode="arena_2x3",
-            control_mode="program",
+            battle_mode="arena_2x3", control_mode="program",
             label_a=str(challenger["email"]).split("@", 1)[0],
             label_b=str(challenged["email"]).split("@", 1)[0],
             team_a=[item["hero_payload"] for item in challenger_team],
             team_b=[item["hero_payload"] for item in challenged_team],
-            wait_seconds=1,
+            wait_seconds=1, require_confirmation=True,
+            participant_ids={"A": str(challenger["id"]), "B": str(challenged["id"])},
         )
-        result = session.public_snapshot()["result"]
-        winner_user_id = None
-        if result.get("winnerLabel") == str(challenger["email"]).split("@", 1)[0]:
-            winner_user_id = challenger["id"]
-        elif result.get("winnerLabel") == str(challenged["email"]).split("@", 1)[0]:
-            winner_user_id = challenged["id"]
+        FRIEND_BATTLE_SESSION_IDS[session.session_id] = str(challenge_id)
         challenged_snapshot = {"hero_ids": hero_ids, "team": challenged_team, "total_bp": challenged_bp}
         execute(
-            """
-            UPDATE friend_challenges
-            SET status = 'resolved', challenged_formation = %s::jsonb, challenged_team_snapshot = %s::jsonb,
-                battle_result = %s::jsonb, battle_session_id = %s, winner_user_id = %s,
-                responded_at = now(), resolved_at = now()
-            WHERE id = %s
-            """,
-            (
-                serialize_json({"mode": "arena_2x3", "board": formation}), serialize_json(challenged_snapshot),
-                serialize_json(result), session.session_id, winner_user_id, challenge_id,
-            ),
+            """UPDATE friend_challenges
+               SET challenged_formation = %s::jsonb, challenged_team_snapshot = %s::jsonb,
+                   battle_session_id = %s, responded_at = now()
+               WHERE id = %s""",
+            (serialize_json({"mode": "arena_2x3", "board": formation}), serialize_json(challenged_snapshot), session.session_id, challenge_id),
         )
-        history_payload = {
-            "challengeId": str(challenge_id),
-            "teamA": [item["hero_payload"] for item in challenger_team],
-            "teamB": [item["hero_payload"] for item in challenged_team],
-            "friendly": True,
-        }
-        save_battle_history(challenger, "friendly_arena_2x3", history_payload, result)
-        save_battle_history(challenged, "friendly_arena_2x3", history_payload, result)
-        resolved = fetch_one("SELECT * FROM friend_challenges WHERE id = %s", (challenge_id,))
-        return jsonify({"ok": True, "data": normalize_json_value(resolved), "battle": result})
+        prepared = fetch_one("SELECT * FROM friend_challenges WHERE id = %s", (challenge_id,))
+        return jsonify({"ok": True, "data": normalize_json_value(prepared), "battle": None, "battle_session": _battle_session_view(session, user)})
     except ValueError as exc:
         if claimed_challenge_id:
             execute("UPDATE friend_challenges SET status = 'pending', responded_at = NULL WHERE id = %s AND status = 'accepted'", (claimed_challenge_id,))
@@ -3939,9 +4009,9 @@ def list_my_battles():
         FROM battles
         WHERE user_id = %s
         ORDER BY created_at DESC
-        LIMIT 50
+        LIMIT %s
         """,
-        (user["id"],),
+        (user["id"], BATTLE_HISTORY_LIMIT),
     )
     return jsonify({"data": normalize_rows(rows)})
 
