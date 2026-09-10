@@ -70,7 +70,7 @@ export function HeroCard({
     <div
       onClick={onClick}
       className={cn(
-        'group relative overflow-hidden border bg-[#090909] text-left transition duration-300',
+        'portrait-card group relative w-full overflow-hidden border bg-[#090909] text-left transition duration-300',
         rarity.border,
         disabled ? 'opacity-55 grayscale-[0.35]' : '',
         isSelected ? 'scale-[1.01] border-[#c59a5a]/70 shadow-[0_0_0_1px_rgba(197,154,90,0.25)]' : 'hover:-translate-y-1 hover:border-stone-600',

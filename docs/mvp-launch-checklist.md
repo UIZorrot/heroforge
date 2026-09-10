@@ -11,6 +11,10 @@ First public MVP includes only:
 - Daily rewards
 - Relic market
 
+Vault MVP navigation currently opens directly on `Card`. The combined `Overview`
+screen is intentionally hidden, not removed; its implementation remains available
+for restoration after the card, shard, and relic views have stable information density.
+
 Not in MVP:
 
 - Chronicle / PvE campaign

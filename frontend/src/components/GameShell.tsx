@@ -6,10 +6,11 @@ import type { AuthUser } from '../types';
 import { IS_MOCK_MODE } from '../lib/runtimeMode';
 
 export type GameSectionKey = 'home' | 'forge' | 'vault' | 'arena' | 'vfx' | 'chronicle' | 'market' | 'settings';
-export type ArenaSideKey = 'queue' | 'train' | 'friends' | 'battle';
-export type HomeSideKey = 'welcome' | 'profile';
-export type ForgeSideKey = 'create' | 'enchant' | 'break';
-export type VaultSideKey = 'overview' | 'card' | 'shard' | 'relic';
+export type ArenaSideKey = 'queue' | 'train' | 'battle';
+export type HomeSideKey = 'welcome' | 'profile' | 'friends';
+export type ForgeSideKey = 'create' | 'enchant';
+export type VaultSideKey = 'overview' | 'card' | 'item';
+export const VAULT_OVERVIEW_VISIBLE = false;
 
 type NavItem = {
   key: GameSectionKey;
@@ -60,13 +61,11 @@ const sideItemsBySection: Record<GameSectionKey, SideItem[]> = {
   forge: [
     { key: 'create', label: 'Create', icon: <Gem size={20} /> },
     { key: 'enchant', label: 'Enchant', icon: <Sparkles size={20} /> },
-    { key: 'break', label: 'Break', icon: <Landmark size={20} /> },
   ],
   vault: [
-    { key: 'overview', label: 'Overview', icon: <WalletCards size={20} /> },
+    ...(VAULT_OVERVIEW_VISIBLE ? [{ key: 'overview' as const, label: 'Overview', icon: <WalletCards size={20} /> }] : []),
     { key: 'card', label: 'Card', icon: <Gem size={20} /> },
-    { key: 'shard', label: 'Shard', icon: <Sparkles size={20} /> },
-    { key: 'relic', label: 'Relic', icon: <Shield size={20} /> },
+    { key: 'item', label: 'Item', icon: <Shield size={20} /> },
   ],
   arena: [],
   vfx: [
@@ -103,7 +102,7 @@ export function GameShell({
   homeTab = 'welcome',
   forgeTab = 'create',
   arenaTab = 'queue',
-  vaultTab = 'overview',
+  vaultTab = 'card',
   arenaLocked = false,
   onHomeTabChange,
   onForgeTabChange,
@@ -118,6 +117,7 @@ export function GameShell({
       ? [
         { key: 'welcome' as const, label: 'Welcome', icon: <Home size={20} />, active: homeTab === 'welcome' },
         { key: 'profile' as const, label: 'Profile', icon: <User size={20} />, active: Boolean(user && homeTab === 'profile'), disabled: !user },
+        { key: 'friends' as const, label: 'Friends', icon: <Users size={20} />, active: Boolean(user && homeTab === 'friends'), disabled: !user || arenaLocked },
       ]
       : activeSection === 'forge'
       ? sideItemsBySection.forge.map((item) => ({ ...item, active: item.key === forgeTab }))
@@ -127,7 +127,6 @@ export function GameShell({
       ? [
         { key: 'queue' as const, label: 'Queue', icon: <Swords size={20} />, active: arenaTab === 'queue', disabled: arenaLocked },
         { key: 'train' as const, label: 'Train', icon: <Shield size={20} />, active: arenaTab === 'train', disabled: arenaLocked },
-        { key: 'friends' as const, label: 'Friends', icon: <Users size={20} />, active: arenaTab === 'friends', disabled: arenaLocked },
         { key: 'battle' as const, label: 'Battle', icon: <Landmark size={20} />, active: arenaTab === 'battle' },
       ]
       : sideItemsBySection[activeSection];

@@ -513,6 +513,11 @@ Vault should include:
 - card state filters,
 - mode eligibility filters.
 
+Current MVP visibility decision: the combined `Overview` tab is temporarily hidden
+from navigation and Vault opens on `Card`. The Overview implementation is retained
+behind `VAULT_OVERVIEW_VISIBLE` and may be restored when a consolidated dashboard
+adds clear value beyond the dedicated Card, Shard, and Relic views.
+
 ### 9.4 Required Filters
 
 - Search text.

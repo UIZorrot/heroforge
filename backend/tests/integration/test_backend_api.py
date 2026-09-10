@@ -1981,6 +1981,7 @@ def test_battle_session_program_flow_resolves_with_board_history(monkeypatch):
     assert snapshot["result"]["winnerLabel"] == "Forger"
     assert snapshot["result"]["finalHpB"] == 0
     assert snapshot["result"]["board"]["top"][0]["alive"] is False
+    assert snapshot["result"]["board"]["bottom"][0]["skills"]["s1"]["name"] == "Executioner Strike"
     assert snapshot["result"]["boardHistory"]
     assert snapshot["result"]["events"][0]["damage"] >= 1
 

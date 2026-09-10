@@ -1,12 +1,15 @@
 import { useMemo, useRef, useState } from 'react';
-import { BookOpen, ChevronLeft, ChevronRight, Grid2X2, ListFilter, Rows3, ScrollText, Search, Shield, Sparkles, Sword } from 'lucide-react';
-import { PageHeader, PageHeaderStat } from './PageHeader';
-import type { VaultSideKey } from './GameShell';
+import { BookOpen, ChevronLeft, ChevronRight, Grid2X2, Search, Sparkles, Sword } from 'lucide-react';
+import { PageHeader } from './PageHeader';
+import { VaultCardShowcase } from './VaultCardShowcase';
+import { CardCarousel } from './CardCarousel';
+import { VaultItems, type VaultItem as RelicCard } from './VaultItems';
+import { VAULT_OVERVIEW_VISIBLE, type VaultSideKey } from './GameShell';
 import { normalizeCardType, resolveRarity, toNumber, type Rarity } from '../lib/gameLogic';
 import { CARD_FALLBACK_SRC } from '../lib/cards';
 import { mockHeroes, mockRelicCatalog, mockRelicInventory } from '../lib/mockContent';
-import { getRelicCategory, getRelicIconSrc, getRelicKind, type RelicCategory } from '../lib/relics';
-import type { EconomySnapshot, RelicDefinition, RelicKind, SavedHero } from '../types';
+import { getRelicCategory, getRelicIconSrc, getRelicKind } from '../lib/relics';
+import type { EconomySnapshot, SavedHero } from '../types';
 
 type VaultSort = 'date' | 'bp' | 'name';
 
@@ -24,27 +27,17 @@ type VaultPageProps = {
   onEquipRelic?: (heroId: string, relicId: string | null) => Promise<void> | void;
   demoMode?: boolean;
   activeTab?: VaultSideKey;
+  onTabChange: (tab: VaultSideKey) => void;
+  onOpenEnchant: () => void;
 };
 
 type DisplayHero = SavedHero & {
   placeholderArt?: string;
 };
 
-type RelicCard = {
-  id: string;
-  name: string;
-  rarity: Rarity;
-  family: string;
-  kind: RelicKind;
-  amount: number;
-  icon?: string | null;
-  category: RelicCategory;
-  definition?: RelicDefinition;
-};
 
 const demoHeroes = mockHeroes as DisplayHero[];
 const CARD_PAGE_SIZE = 10;
-const RELIC_PAGE_SIZE = 10;
 
 const rarityTone: Record<Rarity, { text: string; border: string; glow: string; label: string; chip: string }> = {
   mythic: { text: 'text-[#d7a852]', border: 'border-[#b49664]/75', glow: 'shadow-[0_0_24px_rgba(180,150,100,0.22)]', label: 'MYTHIC', chip: 'bg-[#b49664]/12 text-[#d9b06b]' },
@@ -125,13 +118,13 @@ function SectionHeader({
   children?: React.ReactNode;
 }) {
   return (
-    <div className="flex flex-col gap-5 border-b border-white/8 px-6 py-5 xl:flex-row xl:items-center xl:justify-between">
+    <div className="flex flex-col gap-5 border-b border-white/8 px-4 py-5 sm:px-6">
       <div className="flex flex-wrap items-center gap-x-8 gap-y-4">
         <h2 className="font-body text-xl font-light uppercase tracking-[0.18em] text-stone-100">{title}</h2>
         <div className="flex flex-wrap items-center gap-6">{filters}</div>
       </div>
       <div className="flex flex-wrap items-center gap-3">
-        <div className="flex h-9 min-w-[240px] items-center border border-white/10 bg-black/35 px-3">
+        <div className="flex h-9 w-full min-w-0 items-center border border-white/10 bg-black/35 px-3">
           <Search size={15} className="mr-2 text-stone-600" />
           {children ?? (
             <input
@@ -200,7 +193,7 @@ function HeroTile({
     <button
       type="button"
       onClick={onSelect}
-      className={`group relative h-[266px] overflow-hidden border bg-[#090909] text-left transition duration-200 hover:-translate-y-0.5 hover:border-stone-500 ${
+      className={`portrait-card group relative w-full overflow-hidden border bg-[#090909] text-left transition duration-200 hover:-translate-y-0.5 hover:border-stone-500 ${
         active ? `${tone.border} ${tone.glow}` : 'border-white/10'
       }`}
     >
@@ -240,57 +233,6 @@ function HeroTile({
   );
 }
 
-function RelicTile({
-  relic,
-  active,
-  onSelect,
-}: {
-  relic: RelicCard;
-  active: boolean;
-  onSelect: () => void;
-}) {
-  const tone = rarityTone[relic.rarity];
-  return (
-    <button
-      type="button"
-      onClick={onSelect}
-      className={`group relative h-[168px] overflow-hidden border bg-[#090909] text-left transition hover:-translate-y-0.5 hover:border-stone-500 ${
-        active ? `${tone.border} ${tone.glow}` : 'border-white/10'
-      }`}
-    >
-      {relic.icon ? (
-        <img
-          src={relic.icon}
-          alt={relic.name}
-          className="absolute inset-0 h-full w-full object-cover object-center opacity-[0.92] brightness-[1.05] contrast-[1.08] saturate-[1.08] transition duration-200 group-hover:scale-[1.03]"
-        />
-      ) : (
-        <div className="absolute inset-0 flex items-center justify-center bg-[radial-gradient(circle_at_50%_34%,rgba(180,150,100,0.10),transparent_36%)]">
-          <Sword size={26} className={tone.text} />
-        </div>
-      )}
-      <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(0,0,0,0.14)_0%,rgba(0,0,0,0.02)_28%,rgba(0,0,0,0.46)_76%,rgba(0,0,0,0.70)_100%)]" />
-      <div className="absolute inset-x-0 top-0 h-14 bg-[linear-gradient(180deg,rgba(0,0,0,0.24)_0%,rgba(0,0,0,0.0)_100%)]" />
-
-      <div className="relative flex h-full flex-col justify-between px-5 py-4">
-        <div className="flex items-start justify-between gap-3">
-          <div className={`text-[9px] font-semibold uppercase tracking-[0.18em] ${tone.text}`}>{tone.label}</div>
-          <div className="text-[10px] uppercase tracking-[0.18em] text-stone-500">x{relic.amount}</div>
-        </div>
-
-        <div className="min-w-0">
-          <div className="truncate text-[1.05rem] font-light text-stone-100">{relic.name}</div>
-          <div className="mt-2 flex items-center gap-2 text-[10px] uppercase tracking-[0.18em] text-stone-400">
-            <span>{relic.category}</span>
-            <span className="text-stone-700">•</span>
-            <span>{relic.family}</span>
-          </div>
-        </div>
-      </div>
-    </button>
-  );
-}
-
 function DetailStat({ label, value }: { label: string; value: string }) {
   return (
     <div className="border-t border-white/8 pt-3">
@@ -316,14 +258,9 @@ function AbilityRow({ skill }: { skill: NonNullable<SavedHero['character']['skil
 
 function Trait({ label, value }: { label: string; value: string }) {
   return (
-    <div className="grid grid-cols-[34px_1fr] gap-3">
-      <div className="flex h-8 w-8 items-center justify-center border border-white/8 bg-white/[0.03]">
-        <Shield size={15} className="text-stone-500" />
-      </div>
-      <div>
-        <div className="text-sm text-stone-300">{label}</div>
-        <div className="mt-0.5 text-xs text-stone-600">{value}</div>
-      </div>
+    <div className="grid grid-cols-[90px_minmax(0,1fr)] items-baseline gap-3 text-xs leading-5">
+      <span className="text-stone-500">{label}</span>
+      <span className="break-words text-stone-300">{value}</span>
     </div>
   );
 }
@@ -372,35 +309,35 @@ function HeroDetailPanel({
         </div>
       </div>
 
-      <div className="mt-5 flex items-end justify-between border-b border-white/8 pb-5">
-        <div className="text-3xl font-light tracking-[0.03em] text-stone-200">LV. {level} / 50</div>
+      <div className="mt-3 flex items-end justify-between border-b border-white/8 pb-3">
+        <div className="text-base font-light tracking-[0.03em] text-stone-200">LV. {level} / 50</div>
         <div className="text-[10px] uppercase tracking-[0.18em] text-stone-600">{formatNumber(heroBp(hero) + 60)} power</div>
       </div>
 
-      <div className="mt-5 grid grid-cols-2 gap-x-8 gap-y-5">
+      <div className="mt-4 grid grid-cols-2 gap-x-8 gap-y-3 sm:grid-cols-4">
         <DetailStat label="HP" value={formatNumber(hero.character.state.HP)} />
         <DetailStat label="ATK" value={formatNumber(hero.character.state.ATK)} />
         <DetailStat label="DEF" value={formatNumber(hero.character.state.DEF)} />
         <DetailStat label="SPD" value={formatNumber(hero.character.state.SPEED)} />
       </div>
 
-      <div className="mt-7">
+      <div className="mt-5">
         <div className="text-[10px] uppercase tracking-[0.24em] text-stone-600">Abilities</div>
-        <div className="mt-4 space-y-4">
+        <div className="mt-3 space-y-3">
           {skills.map((skill, indexKey) => (
             <AbilityRow key={`${skill.name}-${indexKey}`} skill={skill} />
           ))}
         </div>
       </div>
 
-      <div className="mt-7">
+      <div className="mt-5">
         <div className="flex items-end justify-between gap-3">
           <div className="text-[10px] uppercase tracking-[0.24em] text-stone-600">Equip Relic</div>
           <div className="text-[10px] uppercase tracking-[0.16em] text-stone-600">
             {equippedRelic ? equippedRelic.name : 'None equipped'}
           </div>
         </div>
-        <div className="mt-4 grid grid-cols-3 gap-2">
+        <div className="mt-3 grid grid-cols-3 gap-2">
           <button
             type="button"
             onClick={() => onEquipRelic?.(hero.id, null)}
@@ -425,9 +362,9 @@ function HeroDetailPanel({
                 title={relic.name}
               >
                 {relic.icon ? (
-                  <img src={relic.icon} alt={relic.name} className="h-16 w-full object-cover opacity-90" />
+                  <img src={relic.icon} alt={relic.name} className="h-12 w-full object-contain opacity-90" />
                 ) : (
-                  <div className="flex h-16 items-center justify-center bg-black/40">
+                  <div className="flex h-12 items-center justify-center bg-black/40">
                     <Sword size={16} className="text-stone-500" />
                   </div>
                 )}
@@ -445,60 +382,14 @@ function HeroDetailPanel({
         )}
       </div>
 
-      <div className="mt-7">
+      <div className="mt-5 border-t border-white/8 pt-4">
         <div className="text-[10px] uppercase tracking-[0.24em] text-stone-600">Traits</div>
-        <div className="mt-4 space-y-3">
+        <div className="mt-3 space-y-2">
           <Trait label="Battle Type" value={hero.character.state.TYPE || 'Unknown'} />
           <Trait label="Equipped Relic" value={equippedRelic?.name ?? 'None'} />
           <Trait label="Enchant" value={enchantRelic ?? 'Clean'} />
         </div>
       </div>
-    </section>
-  );
-}
-
-function RelicDetailPanel({ relic }: { relic: RelicCard | null }) {
-  if (!relic) {
-    return (
-      <section className="h-full border border-white/8 bg-[#0a0a0a]/90 p-5">
-        <div className="text-[10px] uppercase tracking-[0.24em] text-stone-600">Relic Detail</div>
-        <div className="mt-4 text-sm leading-6 text-stone-400">Select a relic to inspect its lore, category, and effect profile.</div>
-      </section>
-    );
-  }
-
-  const tone = rarityTone[relic.rarity];
-  return (
-    <section className="h-full border border-white/8 bg-[#0a0a0a]/90 p-5">
-      <div className="flex items-start gap-4 border-b border-white/8 pb-5">
-        <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden border border-white/10 bg-white/[0.03]">
-          {relic.icon ? <img src={relic.icon} alt={relic.name} className="h-12 w-12 object-contain" /> : <ScrollText size={20} className={tone.text} />}
-        </div>
-        <div className="min-w-0">
-          <h3 className="text-3xl font-light tracking-[0.02em] text-stone-100">{relic.name}</h3>
-          <div className="mt-3 flex flex-wrap items-center gap-2 text-[10px] uppercase tracking-[0.18em]">
-            <span className={`${tone.chip} px-2 py-1`}>{tone.label}</span>
-            <span className="text-stone-500">{relic.category}</span>
-            <span className="border border-white/10 px-2 py-1 text-stone-400">
-              {relic.kind === 'shard' ? 'Shard · Enchant material' : 'Relic · Equipment'}
-            </span>
-          </div>
-        </div>
-      </div>
-
-      <div className="mt-5 text-2xl font-light text-stone-100">+{formatNumber(relic.amount * 125)} power</div>
-
-      <div className="mt-6 space-y-4">
-        <DetailStat label="Family" value={relic.family} />
-        <DetailStat label="Enchant Bias" value={relic.definition?.forge_bias ?? 'Unknown'} />
-        <DetailStat label="Battle Bias" value={relic.definition?.battle_bias ?? 'Unknown'} />
-        <DetailStat label="Effect" value={relic.definition?.effect_profile ?? 'No effect profile recorded.'} />
-        <DetailStat label="Lore" value={relic.definition?.lore_summary ?? 'No lore recorded.'} />
-      </div>
-
-      <button type="button" className="mt-7 w-full bg-[#806838] px-5 py-3 text-[11px] font-semibold uppercase tracking-[0.22em] text-stone-100 transition hover:bg-[#9a7d4a]">
-        View Details
-      </button>
     </section>
   );
 }
@@ -516,23 +407,18 @@ export function VaultPage({
   onSortChange,
   onEquipRelic,
   demoMode,
-  activeTab = 'overview',
+  activeTab = 'card',
+  onTabChange,
+  onOpenEnchant,
 }: VaultPageProps) {
-  const [relicQuery, setRelicQuery] = useState('');
-  const [relicFilter, setRelicFilter] = useState<RelicCategory | 'all'>('all');
   const [cardPage, setCardPage] = useState(1);
-  const [relicPage, setRelicPage] = useState(1);
-  const [selectedRelicId, setSelectedRelicId] = useState('');
-  const [overviewRelicKind, setOverviewRelicKind] = useState<RelicKind>('relic');
+  const isCardDetail = activeTab === 'card';
   const cardsRef = useRef<HTMLElement | null>(null);
-  const relicsRef = useRef<HTMLElement | null>(null);
 
   const showCardsSection = activeTab === 'overview' || activeTab === 'card';
-  const showRelicSection = activeTab === 'overview' || activeTab === 'shard' || activeTab === 'relic';
-  const relicKind: RelicKind = activeTab === 'shard' || activeTab === 'relic' ? activeTab : overviewRelicKind;
-  const showKindToggle = activeTab === 'overview';
+  const showItemSection = activeTab === 'overview' || activeTab === 'item';
 
-  const displayHeroes = (heroes.length > 0 ? heroes : demoMode ? demoHeroes : []) as DisplayHero[];
+  const displayHeroes = useMemo(() => (heroes.length > 0 ? heroes : demoMode ? demoHeroes : []) as DisplayHero[], [heroes, demoMode]);
   const relicCards = useMemo(() => relicsFromEconomy(economy, Boolean(demoMode)), [demoMode, economy]);
 
   const filteredHeroes = useMemo(() => (
@@ -550,21 +436,6 @@ export function VaultPage({
       })
   ), [displayHeroes, query, rarityFilter, sort]);
 
-  const filteredRelics = useMemo(() => (
-    relicCards
-      .filter((relic) => relic.kind === relicKind)
-      .filter((relic) => {
-        const needle = relicQuery.trim().toLowerCase();
-        if (!needle) return true;
-        return (
-          relic.name.toLowerCase().includes(needle) ||
-          relic.family.toLowerCase().includes(needle) ||
-          relic.category.toLowerCase().includes(needle)
-        );
-      })
-      .filter((relic) => relicFilter === 'all' || relic.category === relicFilter)
-  ), [relicCards, relicKind, relicFilter, relicQuery]);
-
   const cardQueryKey = `${query}|${rarityFilter}|${sort}`;
   const [prevCardQueryKey, setPrevCardQueryKey] = useState(cardQueryKey);
   if (prevCardQueryKey !== cardQueryKey) {
@@ -572,60 +443,63 @@ export function VaultPage({
     setCardPage(1);
   }
 
-  const relicQueryKey = `${relicKind}|${relicFilter}|${relicQuery}`;
-  const [prevRelicQueryKey, setPrevRelicQueryKey] = useState(relicQueryKey);
-  if (prevRelicQueryKey !== relicQueryKey) {
-    setPrevRelicQueryKey(relicQueryKey);
-    setRelicPage(1);
-  }
-
   const pagedHeroes = paginate(filteredHeroes, cardPage, CARD_PAGE_SIZE);
-  const pagedRelics = paginate(filteredRelics, relicPage, RELIC_PAGE_SIZE);
 
   const selectedHero =
-    displayHeroes.find((hero) => hero.id === selectedHeroId) ||
+    (isCardDetail ? filteredHeroes : pagedHeroes.items).find((hero) => hero.id === selectedHeroId) ||
     pagedHeroes.items[0] ||
-    displayHeroes[0] ||
     null;
   const selectedIndex = selectedHero ? displayHeroes.findIndex((hero) => hero.id === selectedHero.id) : 0;
+  const showcaseIndex = selectedHero ? filteredHeroes.findIndex((hero) => hero.id === selectedHero.id) : 0;
 
-  const selectedRelic =
-    filteredRelics.find((relic) => relic.id === selectedRelicId) ||
-    pagedRelics.items[0] ||
-    filteredRelics[0] ||
-    null;
+  function stepCard(direction: number) {
+    if (!filteredHeroes.length) return;
+    const nextIndex = (showcaseIndex + direction + filteredHeroes.length) % filteredHeroes.length;
+    onSelectHero(filteredHeroes[nextIndex].id);
+    setCardPage(Math.floor(nextIndex / CARD_PAGE_SIZE) + 1);
+  }
+
+  function openCard(heroId: string) {
+    onSelectHero(heroId);
+    onTabChange('card');
+    requestAnimationFrame(() => cardsRef.current?.scrollIntoView({ block: 'start' }));
+  }
 
   const totalPower = displayHeroes.reduce((sum, hero) => sum + heroBp(hero), 0);
 
   return (
-    <div className="mx-auto max-w-[1540px] px-6 py-6 2xl:px-8">
+    <div className="mx-auto max-w-[1540px] px-3 py-6 sm:px-6 2xl:px-8">
       <PageHeader
         title="Vault"
         eyebrow="Archive"
-        subtitle={activeTab === 'card' ? 'Card Index' : activeTab === 'shard' ? 'Shard Archive' : activeTab === 'relic' ? 'Relic Archive' : 'Collection Index'}
+        subtitle={activeTab === 'card' ? 'Card Collection' : activeTab === 'item' ? 'Item' : 'Collection Index'}
         description={
           activeTab === 'card'
-            ? 'Inspect forged cards.'
-            : activeTab === 'shard'
-              ? 'Consumable enchant materials.'
-              : activeTab === 'relic'
-                ? 'Card equipment for the battle slot.'
-                : 'Inspect cards, shards, and relics.'
+            ? 'Inspect, admire, and equip your heroes.'
+            : activeTab === 'item'
+              ? 'Relic equipment and enchanting materials, in one inventory.'
+              : 'Inspect cards, shards, and relics.'
         }
         stats={
           <>
-            <PageHeaderStat label="Cards Owned" value={`${displayHeroes.length} / 500`} />
-            <PageHeaderStat label="Shards" value={relicCards.filter((relic) => relic.kind === 'shard').length} />
-            <PageHeaderStat label="Relics" value={relicCards.filter((relic) => relic.kind === 'relic').length} />
-            <PageHeaderStat label="Total Power" value={formatNumber(totalPower)} />
+            {[
+              ['Cards Owned', `${displayHeroes.length} / 500`],
+              ['Shards', relicCards.filter((relic) => relic.kind === 'shard').length],
+              ['Relics', relicCards.filter((relic) => relic.kind === 'relic').length],
+              ['Total Power', formatNumber(totalPower)],
+            ].map(([label, value]) => (
+              <div key={label} className="flex flex-wrap items-baseline gap-x-3 gap-y-1 py-1">
+                <span className="text-[9px] uppercase tracking-[0.16em] text-stone-500">{label}</span>
+                <span className="text-sm text-stone-200">{value}</span>
+              </div>
+            ))}
           </>
         }
       />
 
       <div className="mt-5 space-y-5">
         {showCardsSection && (
-        <div className="grid items-stretch gap-5 xl:grid-cols-[minmax(0,1fr)_300px]">
-          <section ref={cardsRef} className="flex h-full flex-col border border-white/8 bg-[#0a0a0a]/92">
+          <section ref={cardsRef} className="min-w-0 scroll-mt-[94px] border border-white/8 bg-[#0a0a0a]/92">
             <SectionHeader
               title="Cards"
               searchPlaceholder="Search cards..."
@@ -644,6 +518,7 @@ export function VaultPage({
               ))}
             >
               <input
+                aria-label="Search cards"
                 value={query}
                 onChange={(event) => onQueryChange(event.target.value)}
                 placeholder="Search cards..."
@@ -653,12 +528,9 @@ export function VaultPage({
 
             <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-4">
               <div className="text-[10px] uppercase tracking-[0.18em] text-stone-600">
-                {filteredHeroes.length} cards in archive
+                {filteredHeroes.length} cards in archive{!isCardDetail && ' · Select a card to view & configure'}
               </div>
               <div className="flex flex-wrap items-center gap-3">
-                <button type="button" className="flex h-9 w-9 items-center justify-center border border-white/10 bg-black/35 text-stone-500 hover:text-stone-200">
-                  <ListFilter size={15} />
-                </button>
                 <label className="flex h-9 items-center border border-white/10 bg-black/35 px-3 text-[10px] uppercase tracking-[0.18em] text-stone-600">
                   Sort by
                   <select
@@ -671,118 +543,56 @@ export function VaultPage({
                     <option value="name">Name</option>
                   </select>
                 </label>
-                <button type="button" className="flex h-9 w-9 items-center justify-center border border-white/10 bg-black/35 text-stone-500 hover:text-stone-200">
-                  <Grid2X2 size={15} />
-                </button>
-                <button type="button" className="flex h-9 w-9 items-center justify-center border border-[#b49664]/30 bg-[#b49664]/10 text-stone-200">
-                  <Rows3 size={15} />
-                </button>
+                {isCardDetail && VAULT_OVERVIEW_VISIBLE && (
+                  <button type="button" onClick={() => onTabChange('overview')} className="flex h-9 items-center gap-2 border border-white/10 px-3 text-[10px] text-stone-300 transition hover:border-[#b49664]/50 hover:text-stone-100">
+                    <Grid2X2 size={14} />Overview
+                  </button>
+                )}
               </div>
             </div>
 
-            <div className="flex-1 px-6 pb-6">
+            <div className="min-w-0 px-4 pb-6 sm:px-6">
               {pagedHeroes.items.length > 0 ? (
                 <>
-                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2 2xl:grid-cols-5">
+                  {isCardDetail && selectedHero ? (
+                    <>
+                      <div className="vault-card-layout">
+                        <VaultCardShowcase key={selectedHero.id} hero={selectedHero} position={showcaseIndex} count={filteredHeroes.length} onPrevious={() => stepCard(-1)} onNext={() => stepCard(1)} />
+                        <HeroDetailPanel hero={selectedHero} index={selectedIndex} relics={relicCards} onEquipRelic={onEquipRelic} />
+                        <CardCarousel heroes={filteredHeroes} selectedHeroId={selectedHero.id} onSelectHero={(id) => {
+                          onSelectHero(id);
+                          setCardPage(Math.floor(filteredHeroes.findIndex((hero) => hero.id === id) / CARD_PAGE_SIZE) + 1);
+                        }} />
+                      </div>
+                    </>
+                  ) : (
+                  <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,190px),1fr))] gap-4">
                     {pagedHeroes.items.map((hero, index) => (
                       <HeroTile
                         key={hero.id}
                         hero={hero}
                         index={index}
                         active={selectedHero?.id === hero.id}
-                        onSelect={() => onSelectHero(hero.id)}
+                        onSelect={() => openCard(hero.id)}
                       />
                     ))}
                   </div>
-                  <PageControl page={pagedHeroes.page} maxPage={pagedHeroes.maxPage} onChange={setCardPage} />
+                  )}
+                  {!isCardDetail && <PageControl page={pagedHeroes.page} maxPage={pagedHeroes.maxPage} onChange={setCardPage} />}
                 </>
               ) : (
                 <div className="flex min-h-[280px] flex-col items-center justify-center border border-dashed border-white/10 bg-black/25 text-center">
                   <BookOpen size={34} className="text-stone-600" />
-                  <div className="mt-4 text-sm uppercase tracking-[0.22em] text-stone-400">No cards forged</div>
-                  <div className="mt-2 max-w-sm text-sm leading-6 text-stone-600">Forge your first hero to populate the vault with playable cards.</div>
+                  <div className="mt-4 text-sm uppercase tracking-[0.22em] text-stone-400">{displayHeroes.length ? 'No matching cards' : 'No cards forged'}</div>
+                  <div className="mt-2 max-w-sm text-sm leading-6 text-stone-500">{displayHeroes.length ? 'Try a different search or rarity to explore your collection.' : 'Forge your first hero to populate the vault with playable cards.'}</div>
                 </div>
               )}
             </div>
           </section>
 
-          <HeroDetailPanel hero={selectedHero} index={selectedIndex} relics={relicCards} onEquipRelic={onEquipRelic} />
-        </div>
         )}
 
-        {showRelicSection && (
-        <div className="grid items-stretch gap-5 xl:grid-cols-[minmax(0,1fr)_300px]">
-          <section ref={relicsRef} className="flex h-full flex-col border border-white/8 bg-[#0a0a0a]/92">
-            <SectionHeader
-              title={relicKind === 'shard' ? 'Shards' : 'Relics'}
-              searchPlaceholder={relicKind === 'shard' ? 'Search shards...' : 'Search relics...'}
-              filters={([
-                ...(showKindToggle ? [
-                  <div key="kind" className="mr-3 flex items-center gap-1 border border-white/10 bg-black/35 p-1">
-                    {(['relic', 'shard'] as RelicKind[]).map((kind) => (
-                      <button
-                        key={kind}
-                        type="button"
-                        onClick={() => setOverviewRelicKind(kind)}
-                        className={`px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.18em] transition-colors ${
-                          relicKind === kind ? 'bg-[#b49664]/15 text-[#f0d8ad]' : 'text-stone-500 hover:text-stone-300'
-                        }`}
-                      >
-                        {kind === 'shard' ? 'Shards' : 'Relics'}
-                      </button>
-                    ))}
-                  </div>,
-                ] : []),
-                ...(['all', 'weapon', 'armor', 'accessory', 'artifact'] as Array<RelicCategory | 'all'>).map((item) => (
-                  <button
-                    key={item}
-                    type="button"
-                    onClick={() => setRelicFilter(item)}
-                    className={`relative pb-2 text-[10px] font-semibold uppercase tracking-[0.22em] transition-colors ${
-                      relicFilter === item ? 'text-stone-100' : 'text-stone-600 hover:text-stone-300'
-                    }`}
-                  >
-                    {item}
-                    {relicFilter === item && <span className="absolute inset-x-0 bottom-0 h-px bg-[#b49664]" />}
-                  </button>
-                )),
-              ])}
-            >
-              <input
-                value={relicQuery}
-                onChange={(event) => setRelicQuery(event.target.value)}
-                placeholder={relicKind === 'shard' ? 'Search shards...' : 'Search relics...'}
-                className="w-full bg-transparent text-sm text-stone-300 outline-none placeholder:text-stone-600"
-              />
-            </SectionHeader>
-
-            <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-4">
-              <div className="text-[10px] uppercase tracking-[0.18em] text-stone-600">
-                {filteredRelics.length} {relicKind === 'shard' ? 'shards' : 'relics'} in archive
-                {relicKind === 'shard' ? ' · consumable enchant materials' : ' · card equipment'}
-              </div>
-              <div className="flex items-center gap-3">
-                <button type="button" className="flex h-9 w-9 items-center justify-center border border-white/10 bg-black/35 text-stone-500 hover:text-stone-200">
-                  <ListFilter size={15} />
-                </button>
-                <button type="button" className="flex h-9 w-9 items-center justify-center border border-white/10 bg-black/35 text-stone-500 hover:text-stone-200">
-                  <Grid2X2 size={15} />
-                </button>
-              </div>
-            </div>
-
-            <div className="flex-1 px-6 pb-6">
-              <div className="grid grid-cols-1 gap-4 md:grid-cols-2 2xl:grid-cols-5">
-                {pagedRelics.items.map((relic) => (
-                  <RelicTile key={relic.id} relic={relic} active={selectedRelic?.id === relic.id} onSelect={() => setSelectedRelicId(relic.id)} />
-                ))}
-              </div>
-              <PageControl page={pagedRelics.page} maxPage={pagedRelics.maxPage} onChange={setRelicPage} />
-            </div>
-          </section>
-          <RelicDetailPanel relic={selectedRelic} />
-        </div>
-        )}
+        {showItemSection && <VaultItems items={relicCards} onOpenCards={() => onTabChange('card')} onOpenEnchant={onOpenEnchant} />}
       </div>
     </div>
   );

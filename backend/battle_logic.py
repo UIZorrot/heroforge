@@ -277,6 +277,8 @@ def _buff_value_from_skill(skill: Dict[str, Any]) -> int:
 
 
 def _unit_snapshot(unit: Battler, side: str, slot_index: int) -> Dict[str, Any]:
+    skills = unit.character.get("skill", {})
+    fallback_type = unit.character.get("state", {}).get("TYPE")
     return {
         "tag": unit.tag,
         "side": side,
@@ -289,6 +291,11 @@ def _unit_snapshot(unit: Battler, side: str, slot_index: int) -> Dict[str, Any]:
         "maxMp": unit.max_mp,
         "buffs": [buff.copy() for buff in unit.buffs],
         "state": _state_snapshot(unit),
+        "skills": {
+            key: _public_skill_snapshot(skill, fallback_type)
+            for key, skill in skills.items()
+            if isinstance(skill, dict)
+        },
     }
 
 

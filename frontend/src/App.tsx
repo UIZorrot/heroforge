@@ -1191,7 +1191,7 @@ const App: React.FC = () => {
   const [forgeTab, setForgeTab] = useState<ForgeSideKey>('create');
   const [arenaTab, setArenaTab] = useState<ArenaSideKey>('queue');
   const [arenaLocked, setArenaLocked] = useState(false);
-  const [vaultTab, setVaultTab] = useState<VaultSideKey>('overview');
+  const [vaultTab, setVaultTab] = useState<VaultSideKey>('card');
   const [replayRecord, setReplayRecord] = useState<BattleHistoryRecord | null>(null);
   const [authOpen, setAuthOpen] = useState(false);
   const [booting, setBooting] = useState(true);
@@ -1505,6 +1505,7 @@ const App: React.FC = () => {
   };
 
   const handleEnchantHero = async (heroId: string, relicId: string) => {
+    setError(null);
     const token = session?.token ?? getStoredToken();
     if (token && token !== 'mock-token') {
       try {
@@ -1546,6 +1547,7 @@ const App: React.FC = () => {
   };
 
   const handleWashEnchant = async (heroId: string) => {
+    setError(null);
     const token = session?.token ?? getStoredToken();
     if (token && token !== 'mock-token') {
       try {
@@ -1576,6 +1578,7 @@ const App: React.FC = () => {
   };
 
   const handleBreakHero = async (heroId: string): Promise<number | null> => {
+    setError(null);
     const token = session?.token ?? getStoredToken();
     if (token && token !== 'mock-token') {
       try {
@@ -1609,6 +1612,26 @@ const App: React.FC = () => {
 
   const content = (() => {
     if (activeSection === 'home') {
+      if (homeTab === 'friends') {
+        return (
+          <ArenaPage
+            heroes={savedHeroes}
+            economy={economy}
+            token={session?.token ?? getStoredToken()}
+            demoMode={demoMode}
+            activeTab="friends"
+            onTabChange={(tab) => {
+              setArenaTab(tab === 'friends' ? 'queue' : tab);
+              setActiveSection('arena');
+            }}
+            onBattleLockChange={setArenaLocked}
+            onRefresh={async () => {
+              await reloadCollections();
+            }}
+            sectionTitle="Home"
+          />
+        );
+      }
       return (
         <HomePage
           user={user}
@@ -1653,6 +1676,8 @@ const App: React.FC = () => {
           onEquipRelic={handleEquipRelic}
           demoMode={demoMode}
           activeTab={vaultTab}
+          onTabChange={setVaultTab}
+          onOpenEnchant={() => { setForgeTab('enchant'); setActiveSection('forge'); }}
         />
       );
     }
@@ -1685,7 +1710,7 @@ const App: React.FC = () => {
           token={session?.token ?? getStoredToken()}
           demoMode={demoMode}
           activeTab={arenaTab}
-          onTabChange={setArenaTab}
+          onTabChange={(tab) => setArenaTab(tab === 'friends' ? 'queue' : tab)}
           onBattleLockChange={setArenaLocked}
           replayRecord={replayRecord}
           onReplayClose={handleCloseBattleReplay}

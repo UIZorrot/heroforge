@@ -1,0 +1,85 @@
+.vault-items { min-width: 0; }
+.vault-items__toolbar { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 16px; align-items: center; padding-bottom: 22px; border-bottom: 1px solid #b4966430; }
+.vault-items__filters { display: flex; gap: 6px; }
+.vault-items__filters button { padding: 10px 15px; border: 1px solid transparent; color: #a89e8f; font-size: 11px; cursor: pointer; }
+.vault-items__filters button[aria-pressed='true'] { border-color: #b4966466; color: #e3c895; background: #b4966412; }
+.vault-items__search { display: flex; align-items: center; gap: 10px; width: min(100%, 340px); padding: 10px 12px; border: 1px solid #ffffff20; color: #998e7b; }
+.vault-items__search input { width: 100%; min-width: 0; background: transparent; outline: none; color: #d6ccbc; font-size: 12px; }
+.vault-items__search:focus-within { border-color: #b49664; }
+.vault-items__section-heading { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 18px; padding-block: 25px 20px; }
+.vault-items__eyebrow { color: #b99c69; font-size: 9px; letter-spacing: .17em; text-transform: uppercase; }
+.vault-items__section-heading h2 { display: flex; align-items: center; gap: 10px; margin-top: 6px; color: #e5d3b1; font-size: 30px; }
+.vault-items__section-heading h2 svg { color: #b99c69; }
+.vault-items__section-heading h2 small { margin-left: 4px; color: #a69a85; font: 10px Manrope, sans-serif; }
+.vault-items__section-heading p { margin-top: 6px; color: #a49a8b; font-size: 12px; line-height: 1.6; }
+.vault-items__category { display: flex; flex-direction: column; gap: 7px; color: #a49782; font-size: 9px; }
+.vault-items__category select { max-width: 100%; padding: 8px 12px; border: 1px solid #ffffff20; background: #14110c; color: #d5c4a7; font-size: 11px; text-transform: capitalize; }
+.vault-items__relic-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 210px), 1fr)); gap: 16px; }
+.vault-relic { position: relative; display: flex; flex-direction: column; min-width: 0; height: 258px; padding: 15px 18px 18px; border: 1px solid #a38b5b88; background: radial-gradient(ellipse at 50% 38%, #76562228, transparent 65%), #12100c; cursor: pointer; text-align: left; transition: transform 180ms, border-color 180ms; }
+.vault-relic::after { content: ''; position: absolute; inset: 4px; border: 1px solid #b69b6230; pointer-events: none; }
+.vault-relic:hover { transform: translateY(-3px); border-color: #d3b678; }
+.vault-relic__meta { display: flex; justify-content: space-between; gap: 8px; color: #a49780; font-size: 9px; }
+.vault-item-rarity { color: #a9a294; text-transform: uppercase; font-size: 9px; letter-spacing: .1em; }
+.vault-item-rarity[data-rarity='rare'] { color: #a6bdc9; }
+.vault-item-rarity[data-rarity='epic'] { color: #c6b2ce; }
+.vault-item-rarity[data-rarity='mythic'] { color: #e5bf78; }
+.vault-item-art { position: relative; display: grid; place-items: center; overflow: hidden; color: #8d816c; }
+.vault-item-art img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+.vault-relic > .vault-item-art { width: 100%; flex: 1; margin-block: 10px 7px; }
+.vault-relic__identity { display: flex; flex-direction: column; gap: 8px; padding-top: 12px; border-top: 1px solid #b4966433; }
+.vault-relic__identity strong { overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; color: #eddbb9; font: 22px/1.08 'Cormorant Garamond', serif; }
+.vault-relic__identity > span { color: #b09f82; font-size: 9px; text-transform: uppercase; letter-spacing: .08em; }
+.vault-items__shard-section { margin-top: 30px; border-top: 1px solid #ffffff18; }
+.vault-items__shard-section .vault-items__eyebrow, .vault-items__shard-section h2 svg { color: #9ba6a0; }
+.vault-items__shard-section h2 { color: #c5ccc5; font-size: 24px; }
+.vault-items__stock { color: #adb7af; font-size: 11px; font-variant-numeric: tabular-nums; }
+.vault-items__shard-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr)); gap: 8px; }
+.vault-shard { display: flex; align-items: center; gap: 12px; min-width: 0; padding: 10px 12px; border: 1px solid #89978b2e; background: #111512; color: #c5cdc5; text-align: left; cursor: pointer; }
+.vault-shard:hover { border-color: #9bab9477; background: #181e19; }
+.vault-shard > .vault-item-art { flex: 0 0 48px; height: 48px; border: 1px solid #a3b09826; background: #0d100d; }
+.vault-shard__identity { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 6px; }
+.vault-shard__identity strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 500; }
+.vault-shard__identity > span { color: #9aa79b; font-size: 10px; }
+.vault-shard__amount { flex-shrink: 0; color: #ced8c9; font-size: 15px; font-variant-numeric: tabular-nums; }
+.vault-items__empty { padding: 32px 18px; border: 1px dashed #ffffff20; color: #ada391; font-size: 12px; text-align: center; }
+.vault-items__pages { display: flex; align-items: center; justify-content: center; gap: 20px; padding-top: 18px; color: #b3a287; font-size: 11px; }
+.vault-items__pages button { display: grid; place-items: center; width: 34px; height: 34px; border: 1px solid #b4966440; cursor: pointer; }
+.vault-items__pages button:disabled { opacity: .3; cursor: default; }
+.vault-items :focus-visible, .vault-item-detail :focus-visible { outline: 2px solid #d5b77c; outline-offset: 3px; }
+.vault-item-detail { width: min(920px, calc(100vw - 96px)); max-width: none; max-height: calc(100dvh - 80px); margin: auto; padding: 0; overflow: auto; border: 1px solid #ac8d58; color: #d7cab4; background: #12100c; }
+.vault-item-detail::backdrop { background: #080907e8; }
+.vault-item-detail__surface > header { position: sticky; top: 0; z-index: 30; background: #12100cf5; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 22px 32px; border-bottom: 1px solid #b4966433; font-size: 10px; letter-spacing: .1em; text-transform: uppercase; }
+.vault-item-detail__surface > header button { display: grid; place-items: center; width: 36px; height: 36px; border: 1px solid #ffffff25; cursor: pointer; }
+.vault-item-detail__body { display: grid; grid-template-columns: minmax(200px, 300px) minmax(0, 1fr); gap: 36px; padding: 32px; }
+.vault-item-detail__art { align-self: start; padding: 16px; border: 1px solid #ae945d88; background: radial-gradient(ellipse at center, #7f602529, transparent 70%), #15120d; }
+.vault-item-detail__art .vault-item-art { width: 100%; aspect-ratio: 1; }
+.vault-item-detail__art > span:last-child { display: block; padding-top: 16px; color: #c2ab80; font-size: 11px; text-align: center; }
+.vault-item-detail__content { min-width: 0; }
+.vault-item-detail h2 { margin-block: 8px 14px; color: #e8d6b5; font-size: 32px; line-height: 1.1; }
+.vault-item-detail__purpose { color: #b3a68f; font-size: 12px; line-height: 1.7; }
+.vault-item-detail dl { margin-top: 18px; }
+.vault-item-detail dl > div { padding-block: 10px; border-top: 1px solid #ffffff18; }
+.vault-item-detail dt { margin-bottom: 6px; color: #a59982; font-size: 9px; letter-spacing: .1em; text-transform: uppercase; }
+.vault-item-detail dd { color: #d3c7b3; font-size: 12px; line-height: 1.7; overflow-wrap: anywhere; }
+.vault-item-detail__lore { margin-top: 14px; color: #b3a184; font: italic 17px/1.5 'Cormorant Garamond', serif; }
+.vault-item-detail__use { width: 100%; margin-top: 22px; padding: 13px 16px; background: #80643b; color: #f0e0c3; font-size: 11px; cursor: pointer; }
+.vault-item-detail__use:disabled { opacity: .4; cursor: default; }
+.vault-item-detail.is-material { border-color: #80947b; background: #111612; }
+.is-material .vault-item-detail__body { grid-template-columns: 160px minmax(0, 1fr); }
+.is-material .vault-item-detail__art { padding: 10px; border-color: #8e9b8538; background: #0d100d; }
+.is-material .vault-item-detail__art > span:last-child { color: #bdcbb8; }
+.is-material .vault-item-detail__use { background: #4b6147; }
+@media(max-width: 760px) {
+  .vault-items__toolbar { align-items: stretch; }
+  .vault-items__search { width: 100%; }
+  .vault-item-detail__body, .is-material .vault-item-detail__body { grid-template-columns: minmax(0, 1fr); padding: 24px; }
+  .vault-item-detail { width: calc(100vw - 40px); max-height: calc(100dvh - 48px); }
+  .vault-item-detail__surface > header { padding: 18px 24px; }
+  .vault-item-detail__preview { width: min(300px, 100%); margin-inline: auto; }
+  .is-material .vault-item-detail__preview { width: min(180px, 100%); }
+  .vault-items__filters button { padding-inline: 11px; }
+}
+@media(prefers-reduced-motion: reduce) { .vault-relic { transition: none; } }
+
+.vault-item-detail__preview { min-width: 0; align-self: start; }
+.is-material .vault-item-detail__surface > header { background: #111612f5; }

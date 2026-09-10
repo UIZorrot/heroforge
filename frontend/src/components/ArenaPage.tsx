@@ -44,6 +44,7 @@ type ArenaPageProps = {
   replayRecord?: BattleHistoryRecord | null;
   onReplayClose?: () => void;
   onRefresh: () => Promise<void>;
+  sectionTitle?: 'Arena' | 'Home';
 };
 
 const STORAGE_KEY = `${STORAGE_NAMESPACE}.pvp.arena.v1`;
@@ -352,6 +353,7 @@ function unitFromHero(hero: SavedHero, side: 'A' | 'B', slot: number): BattleBoa
     mp,
     maxMp: mp,
     buffs: [],
+    skills: hero.character.skill,
     state: { ...hero.character.state } as BattleBoardUnit['state'],
   };
 }
@@ -361,6 +363,9 @@ function cloneBattleUnit(unit: BattleBoardUnit | null): BattleBoardUnit | null {
   return {
     ...unit,
     buffs: unit.buffs.map((buff) => ({ ...buff })),
+    skills: unit.skills
+      ? Object.fromEntries(Object.entries(unit.skills).map(([key, skill]) => [key, skill ? { ...skill } : undefined]))
+      : undefined,
     state: unit.state ? { ...unit.state } : undefined,
   };
 }
@@ -473,13 +478,16 @@ function simulateTrainingBattle(bottom: Array<BattleBoardUnit | null>, top: Arra
 }
 
 function enrichBoardUnits(units: Array<BattleBoardUnit | null> | undefined, heroes: SavedHero[]) {
-  const imageBySlot = new Map(heroes.map((hero, index) => [index, hero.image ?? null]));
-  const imageByName = new Map(heroes.map((hero) => [hero.character.name.toLowerCase(), hero.image ?? null]));
+  const heroBySlot = new Map(heroes.map((hero, index) => [index, hero]));
+  const heroByName = new Map(heroes.map((hero) => [hero.character.name.toLowerCase(), hero]));
   return (units ?? []).map((unit) => {
-    if (!unit || unit.image) return unit ?? null;
+    if (!unit) return null;
+    const hero = heroBySlot.get(unit.slot) ?? heroByName.get(unit.name.toLowerCase());
+    if (!hero) return unit;
     return {
       ...unit,
-      image: imageBySlot.get(unit.slot) ?? imageByName.get(unit.name.toLowerCase()) ?? null,
+      image: unit.image ?? hero.image ?? null,
+      skills: unit.skills ?? hero.character.skill,
     };
   });
 }
@@ -675,7 +683,7 @@ function ArenaHeroTile({
   return (
     <div
       className={cn(
-        'group relative h-[248px] overflow-hidden border bg-[#090909] text-left transition duration-200',
+        'portrait-card group relative w-full overflow-hidden border bg-[#090909] text-left transition duration-200',
         borderClass,
         disabled ? 'opacity-45' : 'hover:-translate-y-0.5 hover:border-stone-500'
       )}
@@ -756,7 +764,7 @@ function RosterThumb({ hero, tone }: { hero: SavedHero | null; tone: 'gold' | 'r
   return (
     <div
       className={cn(
-        'relative aspect-[3/4] overflow-hidden border bg-black/35',
+        'portrait-card relative w-full overflow-hidden border bg-black/35',
         hero ? (tone === 'gold' ? 'border-[#b49664]/55' : 'border-rose-500/45') : 'border-dashed border-white/10'
       )}
     >
@@ -819,7 +827,7 @@ function PowerComparison({ left, right = 0, leftLabel = 'Forger', rightLabel = '
   );
 }
 
-export function ArenaPage({ heroes, economy, token, demoMode = false, activeTab, onTabChange, onBattleLockChange, replayRecord = null, onReplayClose, onRefresh }: ArenaPageProps) {
+export function ArenaPage({ heroes, economy, token, demoMode = false, activeTab, onTabChange, onBattleLockChange, replayRecord = null, onReplayClose, onRefresh, sectionTitle = 'Arena' }: ArenaPageProps) {
   const displayHeroes = demoMode && heroes.length === 0 ? demoHeroes : heroes;
   const [search, setSearch] = useState('');
   const [queuePage, setQueuePage] = useState(1);
@@ -1434,11 +1442,11 @@ export function ArenaPage({ heroes, economy, token, demoMode = false, activeTab,
     <div className={cn('mx-auto max-w-[1540px] px-6 2xl:px-8', battleLoaded ? 'py-5' : 'py-8')}>
       {!battleLoaded && (
         <section className="flex flex-col gap-5 border-b border-white/8 pb-6 xl:flex-row xl:items-end">
-          <h1 className="font-display text-5xl font-light uppercase tracking-[0.34em] text-stone-100 xl:text-6xl">Arena</h1>
+          <h1 className="font-display text-5xl font-light uppercase tracking-[0.34em] text-stone-100 xl:text-6xl">{sectionTitle}</h1>
           <div className="hidden h-14 border-l border-white/10 xl:block" />
           <div className="pb-1">
             <div className="text-[10px] font-semibold uppercase tracking-[0.32em] text-[#b49664]">
-              {activeTab === 'train' ? 'Simulation' : activeTab === 'queue' ? 'Matchmaking' : activeTab === 'friends' ? 'Social Arena' : 'Combat'}
+              {activeTab === 'train' ? 'Simulation' : activeTab === 'queue' ? 'Matchmaking' : activeTab === 'friends' ? 'Community' : 'Combat'}
             </div>
             <div className="mt-2 flex flex-wrap items-center gap-5">
               <h2 className="font-display text-3xl font-light uppercase tracking-[0.24em] text-stone-100">{activeTab}</h2>
@@ -1453,36 +1461,36 @@ export function ArenaPage({ heroes, economy, token, demoMode = false, activeTab,
 
       {activeTab === 'battle' && (liveBattleResult ?? replayResult) ? (
         <section className="space-y-4">
-          <div className="flex items-center justify-between gap-4 border border-[#2b241b] bg-black/30 px-5 py-3">
-            <div>
-              <div className="text-[10px] uppercase tracking-[0.28em] text-[#b49664]">
-                {replayResult ? 'Battle Replay' : battleResult ? 'Battle Resolved' : 'Arena Battle Live'}
-              </div>
-              <div className="mt-1 text-xs text-stone-500">
-                {replayResult
-                  ? 'Read-only replay loaded from your combat record.'
-                  : battleResult
-                    ? 'Settlement and replay are ready.'
+          {(!battleResult || replayResult) && (
+            <div className="flex items-center justify-between gap-4 border border-[#2b241b] bg-black/30 px-5 py-3">
+              <div>
+                <div className="text-[10px] uppercase tracking-[0.28em] text-[#b49664]">
+                  {replayResult ? 'Battle Replay' : 'Arena Battle Live'}
+                </div>
+                <div className="mt-1 text-xs text-stone-500">
+                  {replayResult
+                    ? 'Read-only replay loaded from your combat record.'
                     : battleSession?.lastActionSource === 'program'
                       ? 'Program controller advanced the latest turn.'
                       : 'Observing the shared Agent battle session.'}
+                </div>
               </div>
+              {replayResult ? (
+                <button
+                  type="button"
+                  onClick={onReplayClose}
+                  className="flex shrink-0 items-center gap-2 border border-[#b49664]/40 px-4 py-2 text-[10px] uppercase tracking-[0.22em] text-[#b49664] transition-colors hover:bg-[#b49664]/10"
+                >
+                  <X size={12} />
+                  Exit Replay
+                </button>
+              ) : (
+                <div className="text-right text-[10px] uppercase tracking-[0.2em] text-stone-500">
+                  {battleSession?.activeActorTag ? `Active ${battleSession.activeActorTag}` : 'Syncing'}
+                </div>
+              )}
             </div>
-            {replayResult ? (
-              <button
-                type="button"
-                onClick={onReplayClose}
-                className="flex shrink-0 items-center gap-2 border border-[#b49664]/40 px-4 py-2 text-[10px] uppercase tracking-[0.22em] text-[#b49664] transition-colors hover:bg-[#b49664]/10"
-              >
-                <X size={12} />
-                Exit Replay
-              </button>
-            ) : (
-              <div className="text-right text-[10px] uppercase tracking-[0.2em] text-stone-500">
-                {battleSession?.activeActorTag ? `Active ${battleSession.activeActorTag}` : battleResult ? 'Complete' : 'Syncing'}
-              </div>
-            )}
-          </div>
+          )}
           <BattleVisualizer heroA={null} heroB={null} result={liveBattleResult ?? replayResult} liveSession={!battleResult && !replayResult} />
         </section>
       ) : activeTab === 'battle' ? (

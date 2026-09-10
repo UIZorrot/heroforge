@@ -433,7 +433,7 @@ export function PvpArena({ heroes, economy, token, onRefresh }: PvpArenaProps) {
                           disabled={!eligible}
                           statusLabel={dead ? 'Dead' : !eligible ? 'Locked' : undefined}
                           className={cn(
-                            'min-h-[340px]',
+                            'w-full',
                             selectedHeroIds.includes(hero.id) && 'ring-1 ring-[#c59a5a]/60 shadow-[0_0_0_1px_rgba(197,154,90,0.25)]'
                           )}
                           isSelected={selectedHeroIds.includes(hero.id)}

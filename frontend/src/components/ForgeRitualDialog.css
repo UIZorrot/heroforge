@@ -1,0 +1,63 @@
+.forge-ritual { width: min(1060px, calc(100vw - 96px)); max-width: none; max-height: calc(100dvh - 80px); margin: auto; padding: 0; overflow: auto; border: 1px solid #a78c5c; color: #e4d8c4; background: #100e0b; box-shadow: 0 28px 100px #000c; }
+.forge-ritual::backdrop { background: #080705e8; }
+.forge-ritual__surface { background: radial-gradient(ellipse at 20% 45%, #72562b25, transparent 55%), #100e0b; }
+.forge-ritual__header { position: sticky; top: 0; z-index: 30; display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 24px 36px; border-bottom: 1px solid #b4966433; background: #100e0bf5; }
+.forge-ritual__header p { color: #ad956f; font-size: 9px; letter-spacing: .18em; text-transform: uppercase; }
+.forge-ritual__header h2 { margin-top: 5px; color: #ecdfc6; font-size: 32px; line-height: 1.15; overflow-wrap: anywhere; }
+.forge-ritual__header button { display: grid; place-items: center; flex-shrink: 0; width: 40px; height: 40px; border: 1px solid #b4966444; cursor: pointer; }
+.forge-ritual__header button:disabled { opacity: .35; cursor: wait; }
+.forge-ritual__body { display: grid; grid-template-columns: minmax(240px, 340px) minmax(0, 1fr); gap: 40px; padding: 36px; }
+.forge-ritual__portrait { align-self: start; position: sticky; top: 130px; min-width: 0; }
+.forge-ritual__card { position: relative; width: 100%; overflow: hidden; border: 1px solid #bfa06c; border-radius: 6px; box-shadow: 0 14px 28px #0008; }
+.forge-ritual__card img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: top; }
+.forge-ritual__rarity { position: absolute; top: 20px; left: 20px; color: #e1c795; font-size: 10px; letter-spacing: .15em; text-transform: uppercase; text-shadow: 0 1px 4px #000; }
+.forge-ritual__identity { position: absolute; inset: auto 0 0; padding: 65px 22px 24px; background: linear-gradient(transparent, #100d08ee 48%); }
+.forge-ritual__identity h3 { margin-bottom: 18px; color: #f0e2c9; font-size: 32px; }
+.forge-ritual__identity > div { display: flex; justify-content: space-between; gap: 10px; padding-top: 12px; border-top: 1px solid #b4966444; }
+.forge-ritual__identity span { display: flex; flex-direction: column; font-size: 16px; }
+.forge-ritual__identity small { margin-bottom: 4px; color: #a69474; font-size: 9px; letter-spacing: .14em; }
+.forge-ritual__portrait > p { margin-top: 18px; color: #aa9879; font: italic 18px 'Cormorant Garamond', serif; text-align: center; }
+.forge-ritual__content { min-width: 0; align-self: stretch; display: flex; flex-direction: column; }
+.forge-ritual__inventory { max-height: 196px; overflow-y: auto; overscroll-behavior: contain; padding: 2px 6px 2px 2px; scrollbar-color: #826b46 #19140d; scrollbar-width: thin; }
+.forge-ritual__inventory button { aspect-ratio: auto; height: 92px; }
+.forge-ritual :focus-visible { outline: 2px solid #e1bd7d; outline-offset: 3px; }
+.forge-ritual--break .forge-ritual__surface { background: radial-gradient(ellipse at 20% 45%, #75341e25, transparent 55%), #100e0b; }
+@media (max-width: 760px) {
+  .forge-ritual { width: calc(100vw - 40px); max-height: calc(100dvh - 48px); }
+  .forge-ritual__header { padding: 20px 24px; }
+  .forge-ritual__header h2 { font-size: 26px; }
+  .forge-ritual__body { grid-template-columns: minmax(0, 1fr); padding: 24px; gap: 30px; }
+  .forge-ritual__portrait { position: static; width: min(280px, 100%); margin-inline: auto; }
+  .forge-ritual__identity { padding: 48px 16px 18px; }
+  .forge-ritual__identity h3 { font-size: 26px; margin-bottom: 12px; }
+  .forge-ritual__identity span { font-size: 13px; }
+}
+
+.forge-ritual__modes { display: flex; gap: 24px; flex-shrink: 0; border-bottom: 1px solid #b4966433; }
+.forge-ritual__modes button { padding: 2px 2px 14px; border-bottom: 2px solid transparent; color: #a69985; font-size: 12px; letter-spacing: .08em; cursor: pointer; }
+.forge-ritual__modes button[aria-pressed='true'] { color: #edcf97; border-bottom-color: #c5a26a; }
+.forge-ritual__modes button:disabled { opacity: .4; cursor: wait; }
+.forge-ritual__operation { margin-top: 18px; }
+.forge-ritual__salvage { display: flex; flex: 1; flex-direction: column; padding-top: 22px; }
+.forge-ritual__yield > p { color: #b4a386; font-size: 9px; letter-spacing: .18em; text-transform: uppercase; }
+.forge-ritual__yield > div { display: flex; align-items: baseline; gap: 10px; margin-top: 6px; }
+.forge-ritual__yield strong { font: 54px/1.05 'Cormorant Garamond', serif; color: #efd7a6; }
+.forge-ritual__yield span { color: #ccb48b; font-size: 14px; }
+.forge-ritual__yield > small { display: block; margin-top: 8px; color: #a89b87; font-size: 10px; }
+.forge-ritual__consequences { margin-top: 26px; }
+.forge-ritual__consequences h3 { margin-bottom: 10px; color: #c6b292; font: 10px Manrope, sans-serif; letter-spacing: .14em; text-transform: uppercase; }
+.forge-ritual__consequences dl > div { display: grid; grid-template-columns: 116px minmax(0, 1fr); gap: 16px; padding: 11px 0; border-top: 1px solid #b4966426; font-size: 12px; }
+.forge-ritual__consequences dt { color: #a99b84; }
+.forge-ritual__consequences dd { color: #e1d2b9; overflow-wrap: anywhere; }
+.forge-ritual__consequences dd small { display: block; margin-top: 4px; color: #af9980; font-size: 10px; }
+.forge-ritual__salvage-action { margin-top: auto; padding-top: 20px; }
+.forge-ritual__salvage-action p { margin-bottom: 12px; color: #bda992; font-size: 11px; line-height: 1.7; }
+.forge-ritual__salvage-action button { width: 100%; padding: 13px 16px; background: #725231; color: #f0dfc5; font-size: 10px; letter-spacing: .15em; text-transform: uppercase; cursor: pointer; }
+.forge-ritual__salvage-action button:hover { background: #87613b; }
+.forge-ritual__salvage-action button.is-confirming { background: #783b2c; }
+.forge-ritual__salvage-action button:disabled { opacity: .4; cursor: default; }
+.forge-ritual__salvage-action .forge-ritual__cancel { margin-top: 8px; border: 1px solid #b4966444; background: transparent; }
+@media (max-width: 640px) {
+  .forge-ritual__consequences dl > div { grid-template-columns: 95px minmax(0, 1fr); gap: 10px; }
+  .forge-ritual__yield strong { font-size: 46px; }
+}

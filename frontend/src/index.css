@@ -1,6 +1,32 @@
 @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;500;600;700;800&family=Cormorant+Garamond:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Manrope:wght@300;400;500;600;700;800&display=swap');
 @import "tailwindcss";
 
+:root {
+  --hero-card-aspect: 2 / 3;
+}
+
+/* Portrait cards are sized by width; all surfaces share the same printed format. */
+.portrait-card {
+  aspect-ratio: var(--hero-card-aspect);
+  height: auto;
+  min-height: 0;
+  min-width: 0;
+}
+
+/* Printed metal edges remain visible even when a card is not selected. */
+.portrait-card::after {
+  content: '';
+  position: absolute;
+  inset: 4px;
+  z-index: 20;
+  border: 1px solid #b89c6d70;
+  border-radius: 2px;
+  outline: 1px solid #a18a64;
+  outline-offset: 3px;
+  box-shadow: 0 0 0 3px #19150f99;
+  pointer-events: none;
+}
+
 @layer base {
   body {
     @apply bg-[#080808] text-stone-200 antialiased;

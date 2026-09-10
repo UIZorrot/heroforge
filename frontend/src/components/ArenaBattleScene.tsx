@@ -34,7 +34,7 @@ import {
   battleDebrisRecipeForEvent,
   type BattleDebrisRecipe,
 } from '../lib/battleVfxDebris';
-import type { BattleBoardState, BattleBoardUnit, BattleEvent, BattleResult } from '../lib/battleTypes';
+import type { BattleBoardSkill, BattleBoardState, BattleBoardUnit, BattleEvent, BattleResult } from '../lib/battleTypes';
 import {
   createFastProjectilePlan,
   createImpactVfxPlan,
@@ -538,7 +538,7 @@ function SlotCell({
   return (
     <div
       className={cn(
-        'relative h-[196px] w-[130px] shrink-0 xl:h-[204px] xl:w-[136px] 2xl:h-[216px] 2xl:w-36',
+        'portrait-card relative w-[130px] shrink-0 xl:w-[136px] 2xl:w-36',
         isDropTarget ? 'ring-1 ring-[#d8b06c]/70 ring-offset-2 ring-offset-black/80' : ''
       )}
       onDragOver={handleDragOver}
@@ -588,7 +588,7 @@ function FormationGrid({
 
   return (
     <div className="relative h-[345px] w-[158px] shrink-0 sm:h-[452px] sm:w-[204px] md:h-[540px] md:w-[244px] lg:h-[628px] lg:w-[284px] xl:h-[652px] xl:w-[300px] 2xl:h-[688px] 2xl:w-[316px]">
-      <div className="absolute left-1/2 top-0 grid origin-top -translate-x-1/2 scale-[0.55] grid-cols-[130px_130px] grid-rows-[196px_196px_196px] justify-center gap-x-6 gap-y-5 sm:scale-[0.72] md:scale-[0.86] lg:scale-100 xl:grid-cols-[136px_136px] xl:grid-rows-[204px_204px_204px] 2xl:grid-cols-[144px_144px] 2xl:grid-rows-[216px_216px_216px]">
+      <div className="absolute left-1/2 top-0 grid origin-top -translate-x-1/2 scale-[0.55] grid-cols-[130px_130px] auto-rows-auto justify-center gap-x-6 gap-y-5 sm:scale-[0.72] md:scale-[0.86] lg:scale-100 xl:grid-cols-[136px_136px] 2xl:grid-cols-[144px_144px]">
         {slots.map((slot) => {
           const unit = boardSlotUnit(units, slot.slot);
           return (
@@ -621,6 +621,9 @@ function CommanderPanel({ label, units, side }: { label: string; units: Array<Ba
   const leader = units.find((unit) => unit && unit.alive) ?? units.find(Boolean);
   const ratio = totals.maxHp > 0 ? totals.hp / totals.maxHp : 0;
   const leaderImage = leader ? unitImage(leader) ?? CARD_FALLBACK_SRC : null;
+  const leaderSkills = (['s1', 's2'] as const)
+    .map((slot) => ({ slot, skill: leader?.skills?.[slot] }))
+    .filter((entry): entry is { slot: 's1' | 's2'; skill: BattleBoardSkill } => Boolean(entry.skill));
 
   return (
     <aside className="relative min-h-[760px] overflow-hidden border border-[#40311f] bg-[#050403]/90 p-4 shadow-[0_22px_80px_rgba(0,0,0,0.52)]">
@@ -669,6 +672,39 @@ function CommanderPanel({ label, units, side }: { label: string; units: Array<Ba
       </div>
 
       <div className="mt-5">
+        <div className="flex items-center justify-between gap-3">
+          <div className="text-[10px] uppercase tracking-[0.28em] text-[#b49664]">Skills</div>
+          <div className="text-[8px] uppercase tracking-[0.2em] text-stone-600">Leader</div>
+        </div>
+        <div className="mt-3 border-y border-[#3d2c19]">
+          {leaderSkills.length > 0 ? leaderSkills.map(({ slot, skill }, index) => {
+            const name = String(skill.name ?? '').trim() || slot.toUpperCase();
+            const role = String(skill.ROLE ?? skill.TYPE ?? '').trim();
+            const mpCost = Number(skill.MP_COST ?? 0);
+            return (
+              <div
+                key={`${leader?.tag ?? side}-${slot}`}
+                className={cn('grid grid-cols-[30px_minmax(0,1fr)_auto] items-center gap-3 py-3', index > 0 && 'border-t border-[#3d2c19]/80')}
+              >
+                <div className="flex h-7 w-7 items-center justify-center border border-[#b49664]/35 bg-[#b49664]/8 font-display text-[10px] uppercase tracking-[0.08em] text-[#d8b06c]">
+                  {slot.slice(1)}
+                </div>
+                <div className="min-w-0">
+                  <div className="truncate text-[11px] uppercase tracking-[0.14em] text-stone-200">{name}</div>
+                  {role && <div className="mt-1 truncate text-[8px] uppercase tracking-[0.2em] text-stone-600">{role}</div>}
+                </div>
+                {Number.isFinite(mpCost) && mpCost > 0 && (
+                  <div className="text-[8px] uppercase tracking-[0.16em] text-[#9f8761]">MP {mpCost}</div>
+                )}
+              </div>
+            );
+          }) : (
+            <div className="py-4 text-[9px] uppercase tracking-[0.2em] text-stone-700">No skill data</div>
+          )}
+        </div>
+      </div>
+
+      <div className="mt-5">
         <div className="text-[10px] uppercase tracking-[0.28em] text-[#b49664]">Reserves</div>
         <div className="mt-3 grid grid-cols-4 gap-2">
           {Array.from({ length: 4 }, (_, index) => units[index] ?? null).map((unit, index) => {
@@ -700,7 +736,7 @@ function ActionRail({ board, currentEvent, started }: { board: BattleBoardState;
         {order.map((unit, index) => (
           <div key={`${unit.tag}-${index}`} className="min-w-0">
             <div className={cn(
-              'relative mx-auto aspect-[2/3] w-12 overflow-hidden border p-1 transition xl:w-14',
+              'portrait-card relative mx-auto w-12 overflow-hidden border p-1 transition xl:w-14',
               unitMatchesTag(unit, currentEvent?.attacker)
                 ? 'border-[#d8b06c]/90 bg-[#d8b06c]/10 shadow-[0_0_26px_rgba(216,176,108,0.26)]'
                 : unit.side === 'A'

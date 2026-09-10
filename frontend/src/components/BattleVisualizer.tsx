@@ -336,7 +336,7 @@ export function BattleVisualizer({ heroA, heroB, result, liveSession = false, on
 
       <div className="grid gap-4 lg:grid-cols-[1fr_minmax(220px,0.8fr)_1fr]">
         <div className="space-y-3">
-          <HeroCard character={heroA} className="h-full min-h-[420px]" compact />
+          <HeroCard character={heroA} compact />
           <div className="border border-stone-800 bg-black/40 p-4">
             <div className="flex items-center justify-between text-xs uppercase tracking-[0.24em] text-stone-500">
               <span>{heroA.name}</span>
@@ -387,7 +387,7 @@ export function BattleVisualizer({ heroA, heroB, result, liveSession = false, on
         </div>
 
         <div className="space-y-3">
-          <HeroCard character={heroB} className="h-full min-h-[420px]" compact />
+          <HeroCard character={heroB} compact />
           <div className="border border-stone-800 bg-black/40 p-4">
             <div className="flex items-center justify-between text-xs uppercase tracking-[0.24em] text-stone-500">
               <span>{heroB.name}</span>

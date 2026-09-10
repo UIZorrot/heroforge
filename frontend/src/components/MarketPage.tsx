@@ -481,13 +481,12 @@ export function MarketPage({ heroes, economy, token, demoMode = false, onEconomy
   }
 
   return (
-    <div className="mx-auto max-w-[1540px] px-6 py-6 2xl:px-8">
+    <div className="mx-auto max-w-[1540px] px-6 py-8 2xl:px-8">
       <PageHeader
         title="Market"
         eyebrow="Exchange"
-        subtitle="Shard & Relic Shop"
-        titleClassName="xl:w-[421px] xl:tracking-[0.2em]"
-        description="Shards stay open for purchase. Equipment relics appear only as a small stock shelf and rotating weekly specials. Currency covers Gem top-ups and Dust packs. Cards are not sold here."
+        subtitle="Exchange Hall"
+        description="Trade shards, relics, and currency."
         stats={
           <>
             <PageHeaderStat label="Shard SKUs" value={shardListings.length} />
@@ -498,7 +497,7 @@ export function MarketPage({ heroes, economy, token, demoMode = false, onEconomy
         }
       />
 
-      <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1fr)_320px]">
+      <div className="mt-7 grid gap-5 xl:grid-cols-[minmax(0,1fr)_320px]">
         <section className="border border-white/8 bg-[#0a0a0a]/92">
           <div className="flex flex-col gap-5 border-b border-white/8 px-6 py-5 xl:flex-row xl:items-center xl:justify-between">
             <div className="flex flex-wrap items-center gap-x-8 gap-y-4">

@@ -1,0 +1,42 @@
+.card-carousel { min-width: 0; container-type: inline-size; border-top: 1px solid #b4966426; }
+.card-carousel__heading { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; padding: 18px 2px 0; color: #c5ae87; font-size: 9px; letter-spacing: .18em; text-transform: uppercase; }
+.card-carousel__heading > :last-child { color: #a09788; letter-spacing: .04em; text-transform: none; }
+.card-carousel__stage { position: relative; }
+.card-carousel__viewport { --carousel-width: clamp(104px, 23cqw, 160px); --carousel-step: calc(var(--carousel-width) * .66); position: relative; height: 296px; margin-inline: 42px; overflow: hidden; touch-action: pan-y; user-select: none; cursor: grab; }
+.card-carousel__viewport:active { cursor: grabbing; }
+.card-carousel__card { position: absolute; left: 50%; top: 50%; width: var(--carousel-width); border: 1px solid #a98e62; border-radius: 5px; background: #18140f; text-align: left; cursor: pointer; overflow: hidden; transform: translate(-50%, -50%) translateX(calc(var(--card-offset) * var(--carousel-step))) scale(var(--card-scale)); opacity: var(--card-opacity); filter: brightness(var(--card-brightness)); transition: transform 340ms cubic-bezier(.22,.68,0,1), opacity 240ms ease-out; box-shadow: 0 8px 16px #0008; }
+.card-carousel__card img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: center top; }
+.card-carousel__card[aria-hidden='true'] { pointer-events: none; visibility: hidden; }
+.card-carousel__card[aria-pressed='true'] { border-color: #e5c58a; box-shadow: 0 0 0 2px #1c1710, 0 0 0 3px #d3ae70, 0 12px 24px #0009; }
+.card-carousel__card:hover { filter: brightness(1); }
+.card-carousel__name { position: absolute; inset: auto 0 0; padding: 30px 12px 16px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; background: linear-gradient(transparent, #15110bf2 55%); color: #eee0c8; font: 20px 'Cormorant Garamond', serif; }
+.card-carousel__rarity { position: absolute; top: 14px; left: 12px; color: #ead9b9; font-size: 7px; letter-spacing: .14em; text-transform: uppercase; text-shadow: 0 1px 4px #000; }
+.card-carousel__badge { position: absolute; top: 34px; left: 12px; max-width: calc(100% - 24px); overflow: hidden; text-overflow: ellipsis; padding: 3px 5px; background: #19130de6; color: #d9c092; font-size: 8px; }
+.card-carousel__arrow { position: absolute; top: 50%; z-index: 20; display: grid; place-items: center; transform: translateY(-50%); width: 36px; height: 48px; border: 1px solid #b4966466; color: #d7bd92; background: #1a160f; cursor: pointer; }
+.card-carousel__arrow--previous { left: 0; }
+.card-carousel__arrow--next { right: 0; }
+.card-carousel__arrow:hover { border-color: #d7b67c; background: #302618; }
+.card-carousel__arrow:disabled { opacity: .3; cursor: default; }
+.card-carousel :focus-visible { outline: 2px solid #e1bd7d; outline-offset: 4px; }
+.card-carousel__position { display: flex; align-items: center; justify-content: center; gap: 14px; padding: 0 8px 18px; color: #cdb78f; font-size: 11px; }
+.card-carousel__position > :last-child { padding-left: 14px; border-left: 1px solid #b4966440; color: #a79a85; font-size: 10px; font-variant-numeric: tabular-nums; }
+.card-carousel__empty { padding: 50px 16px; text-align: center; color: #a79a85; font-size: 12px; }
+.vault-card-layout > .card-carousel { order: 2; grid-column: 1 / -1; margin-top: 4px; }
+@container (max-width: 420px) {
+  .card-carousel__viewport { height: 216px; margin-inline: 30px; }
+  .card-carousel__arrow { width: 28px; height: 44px; }
+  .card-carousel__name { font-size: 16px; padding-inline: 9px; }
+  .card-carousel__heading { font-size: 8px; letter-spacing: .08em; }
+}
+@media (prefers-reduced-motion: reduce) { .card-carousel__card { transition: none; } }
+
+.card-carousel--large .card-carousel__viewport { --carousel-width: clamp(160px, 26cqw, 280px); height: clamp(340px, 48cqw, 500px); }
+.card-carousel--large .card-carousel__name { font-size: 28px; padding: 42px 20px 24px; }
+.card-carousel--large .card-carousel__rarity { top: 20px; left: 20px; font-size: 9px; }
+.card-carousel--large .card-carousel__badge { top: 42px; left: 20px; }
+.card-carousel__open-hint { margin: -4px 0 24px; color: #a99a81; font-size: 11px; text-align: center; }
+@container (max-width: 420px) {
+  .card-carousel--large .card-carousel__viewport { --carousel-width: clamp(132px, 46cqw, 180px); height: 320px; }
+  .card-carousel--large .card-carousel__name { font-size: 22px; padding: 30px 12px 18px; }
+  .card-carousel--large .card-carousel__rarity { top: 14px; left: 12px; font-size: 7px; }
+}

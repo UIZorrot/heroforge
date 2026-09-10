@@ -4,6 +4,14 @@ export interface BuffState {
   value: number;
 }
 
+export interface BattleBoardSkill {
+  name?: string;
+  description?: string;
+  TYPE?: string;
+  ROLE?: string;
+  MP_COST?: string | number;
+}
+
 export interface BattleEvent {
   round: number;
   attacker: string;
@@ -56,6 +64,7 @@ export interface BattleBoardUnit {
   mp: number;
   maxMp: number;
   buffs: BuffState[];
+  skills?: Record<string, BattleBoardSkill | undefined>;
   state?: Record<string, string | number> & {
     TYPE?: string;
     type_catalog?: string;
