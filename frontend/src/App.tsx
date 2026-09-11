@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ArrowRight, CalendarDays, Gem, Gift, Mail, Newspaper, RefreshCw, Send, ShoppingBag, Sparkles, Swords, WalletCards, X } from 'lucide-react';
+import { ArrowRight, CalendarDays, Gift, Mail, Newspaper, RefreshCw, Send, ShoppingBag, Sparkles, Swords, WalletCards, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { GameShell, type ArenaSideKey, type ForgeSideKey, type GameSectionKey, type HomeSideKey, type VaultSideKey } from './components/GameShell';
 import { VaultPage } from './components/VaultPage';
@@ -19,7 +19,9 @@ import {
   fetchBattles,
   fetchCurrentUser,
   fetchEconomy,
+  fetchFriends,
   fetchHeroes,
+  fetchLadder,
   forgeHero,
   getStoredSession,
   getStoredToken,
@@ -30,13 +32,13 @@ import {
 } from './lib/api';
 import { normalizeCharacterData, type CharacterData, type Rarity } from './lib/gameLogic';
 import { createMockEconomy, createMockHeroes, mockEconomy, mockHeroes, mockRelicCatalog } from './lib/mockContent';
-import { IS_MOCK_MODE } from './lib/runtimeMode';
-import type { AuthUser, BattleHistoryRecord, EconomySnapshot, HeroHistoryRecord, SavedHero } from './types';
+import { IS_MOCK_MODE, MOCK_STORAGE_KEYS } from './lib/runtimeMode';
+import type { AuthUser, BattleHistoryRecord, EconomySnapshot, HeroHistoryRecord, LadderSnapshot, SavedHero } from './types';
 
 type VaultSort = 'date' | 'bp' | 'name';
 
 const LOGIN_RESEND_SECONDS = 60;
-const MOCK_SANDBOX_KEY = 'hf.mock.sandbox.v1';
+const MOCK_SANDBOX_KEY = MOCK_STORAGE_KEYS.sandbox;
 
 function createMockSession() {
   return { token: 'mock-token', email: 'forger@example.com', expiresAt: new Date(Date.now() + 86400000).toISOString() };
@@ -363,6 +365,7 @@ function HomePage({
   user,
   activeTab,
   heroCount,
+  bestHeroBp,
   dust,
   relics,
   economy,
@@ -370,12 +373,14 @@ function HomePage({
   onNavigate,
   onEconomyChange,
   onOpenAuth,
+  onOpenFriends,
   onOpenBattleReplay,
   previewContentEnabled,
 }: {
   user: AuthUser | null;
   activeTab: HomeSideKey;
   heroCount: number;
+  bestHeroBp: number | null;
   dust: number;
   relics: number;
   economy: EconomySnapshot | null;
@@ -383,73 +388,102 @@ function HomePage({
   onNavigate: (section: GameSectionKey) => void;
   onEconomyChange: (economy: EconomySnapshot) => void;
   onOpenAuth: () => void;
+  onOpenFriends: () => void;
   onOpenBattleReplay: (record: BattleHistoryRecord) => void;
   previewContentEnabled: boolean;
 }) {
   const dailyToken = token && token !== 'mock-token' ? token : null;
-  const [battleHistory, setBattleHistory] = useState<BattleHistoryRecord[] | null>(null);
+  const [loadedBattleHistory, setLoadedBattleHistory] = useState<BattleHistoryRecord[] | null>(null);
+  const [ladder, setLadder] = useState<LadderSnapshot | null>(null);
+  const [battleHistoryError, setBattleHistoryError] = useState<string | null>(null);
+  const [ladderError, setLadderError] = useState<string | null>(null);
+  const [profileLoadNonce, setProfileLoadNonce] = useState(0);
+  const battleHistory = dailyToken ? loadedBattleHistory : [];
 
   useEffect(() => {
-    if (activeTab !== 'profile' || !dailyToken) return;
+    if (activeTab !== 'profile') return;
+    if (!dailyToken) return;
     let cancelled = false;
     fetchBattles(dailyToken)
       .then((records) => {
-        if (!cancelled) setBattleHistory(records);
+        if (!cancelled) {
+          setLoadedBattleHistory(records);
+          setBattleHistoryError(null);
+        }
       })
       .catch(() => {
-        if (!cancelled) setBattleHistory([]);
+        if (!cancelled) {
+          setLoadedBattleHistory([]);
+          setBattleHistoryError('Combat history is temporarily unavailable.');
+        }
+      });
+    fetchLadder(dailyToken)
+      .then((snapshot) => {
+        if (!cancelled) {
+          setLadder(snapshot);
+          setLadderError(null);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setLadder(null);
+          setLadderError('Ladder data is temporarily unavailable.');
+        }
       });
     return () => {
       cancelled = true;
     };
-  }, [activeTab, dailyToken]);
+  }, [activeTab, dailyToken, profileLoadNonce]);
+  const retryProfile = () => {
+    setLoadedBattleHistory(null);
+    setBattleHistoryError(null);
+    setLadder(null);
+    setLadderError(null);
+    setProfileLoadNonce((value) => value + 1);
+  };
   const playerName = user?.email?.split('@')[0] || 'Visitor';
   const news = [
     {
       title: 'Arena 2x3 Opens',
       tag: 'Season',
       description: 'Deploy front and back lanes, resolve ranked battles, and inspect every combat event.',
-      tone: 'from-[#4b2118] via-[#17110e] to-[#050505]',
+      target: 'arena' as const,
+      action: 'Enter Arena',
     },
     {
       title: 'Shard Enchanting',
       tag: 'Forge',
       description: 'New relic rituals are applied to cards after generation.',
-      tone: 'from-[#34244f] via-[#111014] to-[#050505]',
+      target: 'forge' as const,
+      action: 'Open Forge',
     },
     {
       title: 'Vault Audit',
       tag: 'Archive',
       description: 'Power sorting and relic panels have been rebuilt for faster roster review.',
-      tone: 'from-[#17313a] via-[#0d1112] to-[#050505]',
+      target: 'vault' as const,
+      action: 'Review Vault',
     },
   ];
-  const offers = previewContentEnabled ? [
-    ['新手大礼', '$6.99', 'Starter dust, relic rolls, and first-week forge boosts'],
-    ['粉尘包', '$9.99', 'A direct Dust pack for forge costs and Arena stakes'],
-    ['遗物包', '$9.99', 'Relic rolls for enchantment and collection growth'],
-  ] : [
-    ['Dust Economy', 'Internal', 'Dust currently circulates through forge, revive, Arena entry, and relic trading.'],
-    ['Relic Loop', 'Live', 'Shards enchant cards, relics equip into the battle slot, and both circulate through drops and the market.'],
-    ['Recharge', 'Deferred', 'Real-money recharge and Stripe settlement are intentionally out of scope for the first release.'],
-  ];
-  const quickLinks: Array<[GameSectionKey, string, string, React.ReactNode]> = [
-    ['forge', 'Forge', 'Create or break a hero card.', <Sparkles size={16} />],
-    ['vault', 'Vault', 'Inspect cards and relics.', <WalletCards size={16} />],
-    ['arena', 'Arena', 'Queue, train, and battle.', <Swords size={16} />],
-    ['market', 'Market', 'Browse offers and orders.', <ShoppingBag size={16} />],
-  ];
-  const profileLevel = previewContentEnabled ? '12' : 'Beta';
-  const profileTitle = previewContentEnabled ? 'Forger' : 'Player';
-  const profileProgress = previewContentEnabled ? 68 : 0;
-  const combatRating = previewContentEnabled ? 'Elite III' : 'Season 0';
-  const combatWinRate = previewContentEnabled ? '63.2%' : 'Not tracked';
-  const combatStreak = previewContentEnabled ? '8' : 'Pending';
-  const bestBp = previewContentEnabled ? '11,500' : heroCount ? 'Recorded in Vault' : '--';
-  const relicUses = previewContentEnabled ? '10' : 'Tracked after live play';
-  const membershipTitle = previewContentEnabled ? 'Standard Forger' : 'Founders Beta';
+  const profileLevel = previewContentEnabled ? 'Demo' : 'Beta';
+  const profileTitle = previewContentEnabled ? 'Simulation' : 'Player';
+  const combatRating = previewContentEnabled ? 'Not tracked' : ladder ? `${ladder.tier} · ${ladder.rating}` : ladderError ? 'Unavailable' : 'Loading';
+  const combatWinRate = previewContentEnabled ? 'Not tracked' : ladder ? `${ladder.win_rate}%` : '--';
+  const combatStreak = previewContentEnabled || !ladder
+    ? '--'
+    : String(ladder.recent_matches.findIndex((match) => match.result !== 'win') === -1
+      ? ladder.recent_matches.length
+      : ladder.recent_matches.findIndex((match) => match.result !== 'win'));
+  const todayKey = new Date().toISOString().slice(0, 10);
+  const creationsToday = (economy?.transactions ?? []).filter((transaction) =>
+    ['forge_entry', 'forge_card'].includes(transaction.reason)
+    && transaction.created_at?.slice(0, 10) === todayKey
+  ).length;
+  const relicUses = (economy?.transactions ?? []).filter((transaction) => transaction.reason === 'card_enchant').length;
+  const bestBp = bestHeroBp === null ? '--' : bestHeroBp.toLocaleString();
+  const membershipTitle = previewContentEnabled ? 'Local Simulation' : 'Founders Beta';
   const membershipDescription = previewContentEnabled
-    ? 'Daily rewards, Arena queue, Forge, and Vault are available.'
+    ? 'Local test data is isolated from live accounts and may be reset.'
     : 'Core beta scope is live: Forge, Vault, Train, Arena, Daily rewards, and the internal relic market.';
   const header = (
     <PageHeader
@@ -458,7 +492,9 @@ function HomePage({
       subtitle={activeTab === 'profile' ? 'Player Profile' : user ? 'Command Center' : 'Guest Lobby'}
       description={
         activeTab === 'profile'
-          ? 'Account state, progression, and unlocks.'
+          ? previewContentEnabled
+            ? 'Local simulation profile. These values do not affect a live account.'
+            : 'Account state, progression, and unlocks.'
           : user
             ? 'Navigate your forge, vault, and battle lanes.'
             : 'Forge images into playable heroes.'
@@ -493,7 +529,7 @@ function HomePage({
                     {user ? playerName.slice(0, 2).toUpperCase() : 'HF'}
                   </div>
                   <div className="min-w-0">
-                    <div className="text-[10px] uppercase tracking-[0.28em] text-[#b49664]">Profile</div>
+                    <div className="text-[10px] uppercase tracking-[0.28em] text-[#b49664]">{previewContentEnabled ? 'Profile · Simulation' : 'Profile'}</div>
                     <h2 className="mt-2 truncate font-display text-3xl font-light tracking-[0.12em] text-stone-100">{playerName}</h2>
                     <div className="mt-2 text-xs uppercase tracking-[0.18em] text-stone-500">{user ? user.email : 'Not signed in'}</div>
                   </div>
@@ -504,18 +540,6 @@ function HomePage({
                   <SmallProfileStat label="Cards" value={heroCount} />
                   <SmallProfileStat label="Relics" value={relics} />
                 </div>
-                <div className="mt-6">
-                  <div className="flex items-center justify-between text-[10px] uppercase tracking-[0.24em] text-stone-600">
-                    <span>Progress</span>
-                    <span>{user ? (previewContentEnabled ? `${profileProgress}%` : 'Beta') : 'Locked'}</span>
-                  </div>
-                  <div className="mt-3 h-2 border border-white/8 bg-black">
-                    <div className="h-full bg-[#b49664]" style={{ width: `${profileProgress}%` }} />
-                  </div>
-                  {!previewContentEnabled && (
-                    <div className="mt-3 text-xs leading-5 text-stone-500">Account-wide progression tiers are not finalized for MVP. Real progression today lives in your Vault assets and resource ledger.</div>
-                  )}
-                </div>
               </div>
 
               <div className="border border-white/8 bg-black/20 p-6">
@@ -525,9 +549,10 @@ function HomePage({
                   <ProfileLedgerCard label="Relics Owned" value={relics.toLocaleString()} hint="Shards enchant cards; relics equip to a card's battle slot" />
                   <ProfileLedgerCard label="Vault Size" value={heroCount.toLocaleString()} hint="Playable hero cards in this account" />
                 </div>
-                <div className="mt-6 grid gap-4 md:grid-cols-2">
-                  <ProfileAction title="Security" description={user ? 'Email session active. Token managed locally.' : 'Sign in to bind progress to an account.'} />
-                  <ProfileAction title="Beta Scope" description="MVP scope is Forge, Vault, Train, Arena, Daily rewards, and the internal relic market. Chronicle and recharge are intentionally deferred." />
+                <div className="mt-6 grid gap-3 sm:grid-cols-3">
+                  <ProfileAction title="Account" description="Session and account preferences." onClick={() => onNavigate('settings')} />
+                  <ProfileAction title="Vault" description="Review cards, relics, and loadout." onClick={() => onNavigate('vault')} />
+                  <ProfileAction title="Arena" description="Queue or inspect your battle lane." onClick={() => onNavigate('arena')} />
                 </div>
               </div>
             </section>
@@ -540,19 +565,31 @@ function HomePage({
                   <SmallProfileStat label="Win Rate" value={user ? combatWinRate : '--'} />
                   <SmallProfileStat label="Streak" value={user ? combatStreak : '--'} />
                 </div>
+                {ladderError && !previewContentEnabled && (
+                  <p role="status" className="mt-4 text-xs leading-5 text-stone-500">{ladderError}</p>
+                )}
                 <div className="mt-6 border-t border-white/8 pt-5">
                   <div className="flex items-center justify-between text-[10px] uppercase tracking-[0.24em] text-stone-600">
                     <span>Recent Battles</span>
                     <span>{battleHistory?.length ? `${battleHistory.length} / 25 saved` : ''}</span>
                   </div>
-                  {battleHistory === null ? (
+                  {battleHistoryError ? (
+                    <div className="mt-4 border border-amber-400/20 bg-amber-400/5 p-4">
+                      <p role="alert" className="text-xs leading-5 text-amber-100">{battleHistoryError}</p>
+                      <button type="button" onClick={retryProfile} className="mt-3 inline-flex h-8 items-center gap-2 border border-amber-300/25 px-3 text-[9px] uppercase tracking-[0.2em] text-amber-100 hover:bg-amber-300/10">
+                        <RefreshCw size={11} /> Retry
+                      </button>
+                    </div>
+                  ) : battleHistory === null ? (
                     <div className="mt-4 flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-stone-500">
                       <RefreshCw className="animate-spin" size={12} />
                       Loading combat record
                     </div>
                   ) : battleHistory.length === 0 ? (
                     <p className="mt-4 text-xs leading-5 text-stone-500">
-                      No battles recorded yet. Resolve an Arena queue match, training clash, or battle session and it will appear here with a full replay.
+                      {previewContentEnabled
+                        ? 'Test mode does not create live account history. Use Arena to preview combat without affecting production records.'
+                        : 'No battles recorded yet. Resolve an Arena match and it will appear here with a full replay.'}
                     </p>
                   ) : (
                     <div className="mt-4 max-h-[320px] space-y-2 overflow-y-auto pr-1">
@@ -584,7 +621,7 @@ function HomePage({
               <div className="border border-white/8 bg-black/20 p-6">
                 <HomeSectionTitle icon={<Sparkles size={16} />} eyebrow="Forge" title="Creation Status" />
                 <div className="mt-6 grid grid-cols-3 gap-3">
-                  <SmallProfileStat label="Today" value="0" />
+                  <SmallProfileStat label="Today" value={creationsToday} />
                   <SmallProfileStat label="Best BP" value={bestBp} />
                   <SmallProfileStat label="Relic Uses" value={relics ? relicUses : '--'} />
                 </div>
@@ -646,32 +683,39 @@ function HomePage({
       {header}
 
       <section className="mt-7 grid items-stretch gap-6 xl:grid-cols-[minmax(0,1fr)_390px]">
-        <section className="flex h-full flex-col border border-white/8 bg-black/20 p-6">
-          <div className="mb-5 flex items-end justify-between gap-4">
-            <HomeSectionTitle icon={<Newspaper size={16} />} eyebrow="News" title="Latest Dispatch" />
-            <span className="text-[10px] uppercase tracking-[0.24em] text-stone-600">3 updates</span>
+        <section className="flex min-h-[430px] flex-col justify-between overflow-hidden border border-[#b49664]/20 bg-[radial-gradient(circle_at_18%_10%,rgba(180,150,100,0.16),transparent_34%),linear-gradient(135deg,rgba(21,18,14,0.96),rgba(5,5,5,0.98))] p-7 lg:p-9">
+          <div>
+            <div className="text-[10px] uppercase tracking-[0.32em] text-[#b49664]">Next Move</div>
+            <h2 className="mt-4 max-w-3xl font-display text-4xl font-light uppercase tracking-[0.12em] text-stone-100 lg:text-5xl">
+              {heroCount > 0 ? 'Take your warband into the Arena' : 'Forge your first hero'}
+            </h2>
+            <p className="mt-5 max-w-2xl text-sm leading-7 text-stone-400">
+              {heroCount > 0
+                ? `${heroCount} card${heroCount === 1 ? '' : 's'} stand ready. Review your formation, challenge a friend, or enter ranked matchmaking.`
+                : 'Create a playable hero card before entering training or ranked matchmaking.'}
+            </p>
+            <button
+              type="button"
+              onClick={() => onNavigate(heroCount > 0 ? 'arena' : 'forge')}
+              className="mt-7 inline-flex h-12 items-center gap-3 bg-[#806838] px-7 text-[10px] font-semibold uppercase tracking-[0.24em] text-stone-100 transition hover:bg-[#9a7d4a]"
+            >
+              {heroCount > 0 ? <Swords size={16} /> : <Sparkles size={16} />}
+              {heroCount > 0 ? 'Enter Arena' : 'Open Forge'}
+            </button>
           </div>
-          <div className="grid flex-1 gap-4 lg:grid-cols-[1.2fr_0.8fr]">
-            <article className="group flex min-h-[430px] flex-col overflow-hidden border border-white/10 bg-black/30">
-              <HomeImage tone={news[0].tone} label={news[0].tag} large />
-              <div className="p-5">
-                <div className="text-[10px] uppercase tracking-[0.26em] text-[#b49664]">{news[0].tag}</div>
-                <h2 className="mt-2 font-display text-3xl font-light tracking-[0.12em] text-stone-100">{news[0].title}</h2>
-                <p className="mt-3 text-sm leading-6 text-stone-500">{news[0].description}</p>
-              </div>
-            </article>
-            <div className="grid gap-4">
-              {news.slice(1).map((item) => (
-                <article key={item.title} className="grid min-h-[206px] grid-cols-[130px_1fr] overflow-hidden border border-white/10 bg-black/30">
-                  <HomeImage tone={item.tone} label={item.tag} />
-                  <div className="p-4">
-                    <div className="text-[9px] uppercase tracking-[0.24em] text-[#b49664]">{item.tag}</div>
-                    <h3 className="mt-2 text-base text-stone-100">{item.title}</h3>
-                    <p className="mt-2 text-xs leading-5 text-stone-500">{item.description}</p>
-                  </div>
-                </article>
-              ))}
-            </div>
+          <div className="mt-10 grid gap-px border border-white/8 bg-white/8 sm:grid-cols-3">
+            <button type="button" onClick={() => onNavigate('forge')} className="bg-[#080808]/95 p-4 text-left transition hover:bg-[#b49664]/10">
+              <Sparkles size={15} className="text-[#d8b06c]" />
+              <span className="mt-3 block text-[10px] uppercase tracking-[0.22em] text-stone-200">Forge Hero</span>
+            </button>
+            <button type="button" onClick={() => onNavigate('vault')} className="bg-[#080808]/95 p-4 text-left transition hover:bg-[#b49664]/10">
+              <WalletCards size={15} className="text-[#d8b06c]" />
+              <span className="mt-3 block text-[10px] uppercase tracking-[0.22em] text-stone-200">Review Vault</span>
+            </button>
+            <button type="button" onClick={onOpenFriends} className="bg-[#080808]/95 p-4 text-left transition hover:bg-[#b49664]/10">
+              <Mail size={15} className="text-[#d8b06c]" />
+              <span className="mt-3 block text-[10px] uppercase tracking-[0.22em] text-stone-200">Open Friends</span>
+            </button>
           </div>
         </section>
 
@@ -689,50 +733,27 @@ function HomePage({
 
       <section className="mt-6 border border-white/8 bg-black/20 p-6">
         <div className="mb-5 flex items-end justify-between gap-4">
-          <HomeSectionTitle icon={<Gift size={16} />} eyebrow="Offers" title="Limited Store" />
-          <span className="text-[10px] uppercase tracking-[0.24em] text-stone-600">Premium</span>
+          <HomeSectionTitle icon={<Newspaper size={16} />} eyebrow="Updates" title="Dispatch" />
+          <span className="text-[10px] uppercase tracking-[0.24em] text-stone-600">Core Loop</span>
         </div>
-        <div className="grid gap-4 lg:grid-cols-3">
-          {offers.map(([title, price, description], index) => (
-            <div key={title} className="border border-white/10 bg-[#070707] p-5">
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex h-10 w-10 items-center justify-center border border-[#b49664]/30 bg-[#b49664]/10 text-[#d8b06c]">
-                  {index === 0 ? <Gift size={17} /> : index === 1 ? <Gem size={17} /> : <Sparkles size={17} />}
-                </div>
-                <div className="font-display text-2xl font-light text-stone-100">{price}</div>
+        <div className="divide-y divide-white/8 border-y border-white/8">
+          {news.map((item) => (
+            <div key={item.title} className="grid gap-4 py-5 md:grid-cols-[120px_minmax(0,1fr)_auto] md:items-center">
+              <div className="text-[9px] uppercase tracking-[0.26em] text-[#b49664]">{item.tag}</div>
+              <div>
+                <h3 className="text-sm uppercase tracking-[0.14em] text-stone-100">{item.title}</h3>
+                <p className="mt-2 text-xs leading-5 text-stone-500">{item.description}</p>
               </div>
-              <div className="mt-5 text-sm uppercase tracking-[0.18em] text-stone-200">{title}</div>
-              <p className="mt-3 min-h-12 text-sm leading-6 text-stone-500">{description}</p>
-              <button
-                type="button"
-                onClick={() => onNavigate('market')}
-                className="mt-5 w-full border border-[#b49664]/35 bg-[#806838]/35 px-4 py-3 text-[10px] font-semibold uppercase tracking-[0.22em] text-stone-100 transition hover:bg-[#806838]/55"
-              >
-                {previewContentEnabled ? 'View Deal' : 'Open Market'}
+              <button type="button" onClick={() => onNavigate(item.target)} className="inline-flex h-9 items-center gap-2 border border-white/10 px-4 text-[9px] uppercase tracking-[0.2em] text-stone-400 transition hover:border-[#b49664]/40 hover:text-stone-100">
+                {item.action} <ArrowRight size={12} />
               </button>
             </div>
           ))}
         </div>
-      </section>
-
-      <section className="mt-6 border border-white/8 bg-black/20 p-6">
-        <div className="mb-5 flex items-end justify-between gap-4">
-          <HomeSectionTitle icon={<ArrowRight size={16} />} eyebrow="Shortcuts" title="Quick Access" />
-          <span className="text-[10px] uppercase tracking-[0.24em] text-stone-600">Modules</span>
-        </div>
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-          {quickLinks.map(([target, title, description, icon]) => (
-            <button
-              key={target}
-              type="button"
-              onClick={() => onNavigate(target)}
-              className="min-h-32 border border-white/10 bg-[#0a0a0a]/70 p-4 text-left transition hover:border-[#b49664]/45 hover:bg-[#111]/80"
-            >
-              <div className="flex h-9 w-9 items-center justify-center border border-white/10 text-stone-300">{icon}</div>
-              <div className="mt-4 text-sm uppercase tracking-[0.2em] text-stone-100">{title}</div>
-              <div className="mt-2 text-xs leading-5 text-stone-500">{description}</div>
-            </button>
-          ))}
+        <div className="mt-5 flex justify-end">
+          <button type="button" onClick={() => onNavigate('market')} className="inline-flex items-center gap-2 text-[9px] uppercase tracking-[0.22em] text-stone-500 transition hover:text-[#d8b06c]">
+            Open Relic Market <ShoppingBag size={13} />
+          </button>
         </div>
       </section>
     </div>
@@ -821,12 +842,9 @@ function GuestLandingHome({
               >
                 Join the Forge
               </button>
-              <button
-                type="button"
-                className="border border-white/10 px-6 py-4 text-[11px] font-semibold uppercase tracking-[0.24em] text-stone-400 transition hover:border-stone-500 hover:text-stone-200"
-              >
-                Watch Trailer
-              </button>
+              <span className="border border-white/10 px-6 py-4 text-[11px] font-semibold uppercase tracking-[0.24em] text-stone-500">
+                Playable Prototype
+              </span>
             </div>
           </div>
 
@@ -908,13 +926,9 @@ function GuestLandingHome({
             <div className="mt-2 text-sm leading-6 text-stone-500">{value}</div>
           </div>
         ))}
-        <button
-          type="button"
-          onClick={() => onNavigate('home')}
-          className="px-8 py-5 text-left text-[10px] uppercase tracking-[0.24em] text-[#d8b06c] hover:bg-white/[0.03]"
-        >
-          View All News
-        </button>
+        <div className="px-8 py-5 text-left text-[10px] uppercase tracking-[0.24em] text-stone-600">
+          3 briefings
+        </div>
       </section>
 
       <section className="mt-6">
@@ -966,7 +980,7 @@ function GuestLandingHomeLive({ onJoin, onNavigate }: { onJoin: () => void; onNa
               </button>
               <button
                 type="button"
-                onClick={() => onNavigate('market')}
+                onClick={() => document.getElementById('launch-scope')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
                 className="border border-white/10 px-6 py-4 text-[11px] font-semibold uppercase tracking-[0.24em] text-stone-400 transition hover:border-stone-500 hover:text-stone-200"
               >
                 View Beta Scope
@@ -1052,16 +1066,12 @@ function GuestLandingHomeLive({ onJoin, onNavigate }: { onJoin: () => void; onNa
             <div className="mt-2 text-sm leading-6 text-stone-500">{value}</div>
           </div>
         ))}
-        <button
-          type="button"
-          onClick={() => onNavigate('home')}
-          className="px-8 py-5 text-left text-[10px] uppercase tracking-[0.24em] text-[#d8b06c] hover:bg-white/[0.03]"
-        >
-          View All News
-        </button>
+        <div className="px-8 py-5 text-left text-[10px] uppercase tracking-[0.24em] text-stone-600">
+          Release scope
+        </div>
       </section>
 
-      <section className="mt-6">
+      <section id="launch-scope" className="mt-6 scroll-mt-24">
         <div className="border border-white/8 bg-black/20 p-6">
           <HomeSectionTitle icon={<Gift size={16} />} eyebrow="Economy" title="Launch Scope" />
           <div className="mt-5 grid gap-4 md:grid-cols-3">
@@ -1101,24 +1111,12 @@ function ProfileLedgerCard({ label, value, hint }: { label: string; value: strin
   );
 }
 
-function ProfileAction({ title, description }: { title: string; description: string }) {
+function ProfileAction({ title, description, onClick }: { title: string; description: string; onClick: () => void }) {
   return (
-    <div className="border border-white/8 bg-black/25 p-4">
+    <button type="button" onClick={onClick} className="border border-white/8 bg-black/25 p-4 text-left transition hover:border-[#b49664]/35 hover:bg-[#b49664]/5">
       <div className="text-sm uppercase tracking-[0.18em] text-stone-200">{title}</div>
       <div className="mt-2 text-xs leading-5 text-stone-500">{description}</div>
-    </div>
-  );
-}
-
-function HomeImage({ tone, label, large = false }: { tone: string; label: string; large?: boolean }) {
-  return (
-    <div className={`relative overflow-hidden bg-gradient-to-br ${tone} ${large ? 'h-64' : 'h-full min-h-36'}`}>
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_34%_30%,rgba(220,190,130,0.32),transparent_18%),radial-gradient(circle_at_70%_58%,rgba(255,255,255,0.12),transparent_16%),linear-gradient(135deg,transparent_0%,rgba(0,0,0,0.48)_62%)]" />
-      <div className="absolute inset-x-5 bottom-5 flex items-center justify-between">
-        <span className="text-[10px] uppercase tracking-[0.28em] text-stone-300">{label}</span>
-        <span className="h-px w-16 bg-[#b49664]/50" />
-      </div>
-    </div>
+    </button>
   );
 }
 
@@ -1215,6 +1213,7 @@ const App: React.FC = () => {
   const [vaultSort, setVaultSort] = useState<VaultSort>('bp');
   const [vaultQuery, setVaultQuery] = useState('');
   const [vaultRarityFilter, setVaultRarityFilter] = useState<Rarity | 'all'>('all');
+  const [friendAlertCount, setFriendAlertCount] = useState(0);
 
   const reloadCollections = async (tokenArg?: string | null) => {
     const token = tokenArg ?? session?.token ?? getStoredToken();
@@ -1290,6 +1289,42 @@ const App: React.FC = () => {
     const timer = window.setInterval(() => setCooldown((value) => Math.max(0, value - 1)), 1000);
     return () => window.clearInterval(timer);
   }, [cooldown]);
+
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    const refreshFriendAlerts = async () => {
+      try {
+        if (IS_MOCK_MODE) {
+          const raw = window.localStorage.getItem(MOCK_STORAGE_KEYS.friends);
+          const snapshot = raw ? JSON.parse(raw) : null;
+          const incomingRequests = Array.isArray(snapshot?.incoming_requests) ? snapshot.incoming_requests.length : 1;
+          const incomingChallenges = Array.isArray(snapshot?.incoming_challenges)
+            ? snapshot.incoming_challenges.filter((item: { status?: string }) => item.status === 'pending' || item.status === 'accepted').length
+            : 1;
+          if (!cancelled) setFriendAlertCount(incomingRequests + incomingChallenges);
+          return;
+        }
+        const currentToken = session?.token ?? getStoredToken();
+        if (!currentToken || currentToken === 'mock-token') return;
+        const snapshot = await fetchFriends(currentToken);
+        if (!cancelled) {
+          setFriendAlertCount(
+            snapshot.incoming_requests.length
+            + snapshot.incoming_challenges.filter((item) => item.status === 'pending' || item.status === 'accepted').length,
+          );
+        }
+      } catch {
+        // Friend alerts are non-blocking; the Friends page exposes a retryable error state.
+      }
+    };
+    void refreshFriendAlerts();
+    const interval = window.setInterval(() => void refreshFriendAlerts(), 10_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [session?.token, user]);
 
   useEffect(() => {
     window.scrollTo({ top: 0, left: 0 });
@@ -1373,6 +1408,9 @@ const App: React.FC = () => {
 
   const isAuthenticated = Boolean(user);
   const demoMode = IS_MOCK_MODE;
+  const bestHeroBp = savedHeroes.length
+    ? Math.max(...savedHeroes.map((hero) => Number.parseInt(String(hero.character.BP), 10) || 0))
+    : null;
   const handleNavigate = (section: GameSectionKey) => {
     if (section === 'home') setHomeTab('welcome');
     if (section === 'forge') setForgeTab('create');
@@ -1637,6 +1675,7 @@ const App: React.FC = () => {
           user={user}
           activeTab={homeTab}
           heroCount={savedHeroes.length}
+          bestHeroBp={bestHeroBp}
           dust={dustBalance(economy)}
           relics={relicBalance(economy)}
           economy={economy}
@@ -1644,6 +1683,7 @@ const App: React.FC = () => {
           onNavigate={handleNavigate}
           onEconomyChange={setEconomy}
           onOpenAuth={() => setAuthOpen(true)}
+          onOpenFriends={() => setHomeTab('friends')}
           onOpenBattleReplay={handleOpenBattleReplay}
           previewContentEnabled={IS_MOCK_MODE}
         />
@@ -1766,6 +1806,7 @@ const App: React.FC = () => {
         arenaTab={arenaTab}
         vaultTab={vaultTab}
         arenaLocked={arenaLocked}
+        friendAlertCount={user ? friendAlertCount : 0}
         onHomeTabChange={setHomeTab}
         onForgeTabChange={setForgeTab}
         onVaultTabChange={setVaultTab}

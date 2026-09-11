@@ -1,20 +1,13 @@
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent as ReactDragEvent } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { gsap } from 'gsap';
-import { Application, Assets, BlurFilter, Container, Graphics, Particle, ParticleContainer, Rectangle, Sprite, Text, Texture } from 'pixi.js';
+import { Application, Assets, BlurFilter, Container, Graphics, Particle, ParticleContainer, PerspectiveMesh, RenderTexture, Rectangle, Sprite, Text, Texture } from 'pixi.js';
 import { Pause, Play, RotateCcw, Shield } from 'lucide-react';
 import arenaHallPerspective from '../assets/battle/arena-hall-perspective.png';
 import { CARD_FALLBACK_SRC } from '../lib/cards';
 import {
   blackBackedVfxAlphaForLuminance,
   battleVfxTextureAssets,
-  instantHitSequence,
-  instantHitSequenceAssetFiles,
-  instantHitSequenceAssetId,
-  instantHitSequenceFrameIndex,
-  instantHitSequenceFrameRect,
-  instantHitFrameAnchorFromRgba,
-  instantHitVfxAlphaForLuminance,
   projectileBeamSequence,
   projectileBeamSequenceFrameRect,
   projectileFrameCenterAnchorYFromRgba,
@@ -30,7 +23,6 @@ import {
   type BattleBuffKey,
 } from '../lib/battleBuffDisplay';
 import {
-  battleDebrisLingerRecipe,
   battleDebrisRecipeForEvent,
   type BattleDebrisRecipe,
 } from '../lib/battleVfxDebris';
@@ -38,9 +30,7 @@ import type { BattleBoardState, BattleBoardUnit, BattleEvent, BattleResult } fro
 import {
   createFastProjectilePlan,
   createImpactVfxPlan,
-  createBuffBorderVfxPlan,
   createProjectileVfxProfile,
-  instantHitSequenceKeyForEvent,
   projectileAimBasis,
   projectileBodyEnvelope,
   projectileBodyRenderScale,
@@ -59,12 +49,16 @@ import {
   type ProjectileVfxSequenceTextureKey,
   type ProjectileVfxTextureKey,
 } from '../lib/battleVfxParticlePlan';
-import type { InstantHitSequenceKey } from '../lib/battleVfxAssets';
 import { cn } from '../lib/utils';
 import './ArenaBattleScene.css';
 import { useBattleCamera } from './useBattleCamera';
 import { battleFlightSample } from '../lib/battleSceneDepth';
+import { INSTANT_PARTICLES } from '../lib/battleInstantParticles';
+import { renderInstantParticles } from './battleInstantRenderer';
 import { BATTLE_PRESENTATION, battleActorKeyframes, battleNextBeatDelay, battleStrikeVector, nextBattlePlaybackIndex } from '../lib/battlePresentation';
+
+// Legacy hit sheets remain available in the asset catalog, but combat no longer downloads them.
+const runtimeVfxAssets = battleVfxTextureAssets.filter(asset => asset.role !== 'instant-hit-sequence');
 
 const BattleImpactContext = createContext<string | null>(null);
 
@@ -398,6 +392,7 @@ function ArenaUnitCard({ unit, slot, side, currentEvent }: { unit: BattleBoardUn
         (isActor || isTarget) && 'z-10'
       )}
     >
+      {[{ left: -20, top: -20 }, { right: -20, top: -20 }, { right: -20, bottom: -20 }, { left: -20, bottom: -20 }].map((corner, index) => <span key={index} className="battle-unit__projection-corner" data-buff-corner={index} style={corner} aria-hidden="true" />)}
       {(isActor || isTarget) && (
         <motion.div
           key={`${unit.tag}-${eventKey(currentEvent)}`}
@@ -421,7 +416,15 @@ function ArenaUnitCard({ unit, slot, side, currentEvent }: { unit: BattleBoardUn
       )}
       <motion.div className="battle-unit__lighting" initial={{ opacity: .12 }} animate={{ opacity: canMove && isActor ? [.12, .22, .42, .12] : .12 }} transition={{ duration: BATTLE_PRESENTATION.actorDuration, times: [...BATTLE_PRESENTATION.actorTimes], ease: BATTLE_PRESENTATION.actorEase }} />
       {buffDisplay && (
-        <div className={cn('pointer-events-none absolute inset-0 z-10 border', buffDisplay.gradeClass)} />
+        <div
+          className="battle-unit__buff-frame pointer-events-none absolute inset-0 z-[23] border"
+          style={{
+            borderColor: paletteCss(buffDisplay.palette.core, 0.72),
+            backgroundColor: paletteCss(buffDisplay.palette.dark, buffDisplay.polarity === 'negative' ? 0.1 : 0.055),
+            boxShadow: `inset 0 0 0 1px ${paletteCss(buffDisplay.palette.hot, 0.12)}, inset 0 0 24px ${paletteCss(buffDisplay.palette.dark, 0.42)}`,
+          }}
+          aria-hidden="true"
+        />
       )}
       {isTarget && hasImpact && currentEvent && tone === 'frost' && mode !== 'buff' && (
         <motion.div
@@ -665,7 +668,6 @@ type PixiRect = { x: number; y: number; width: number; height: number };
 type PixiPalette = { core: number; hot: number; dark: number; text: number };
 type PixiAdd = <T extends Container | Graphics | Text | Sprite>(node: T, zIndex?: number) => T;
 type ProjectileSequenceFrame = { texture: Texture; tipAnchorX: number; centerAnchorY: number };
-type InstantHitSequenceFrame = { texture: Texture; anchorX: number; anchorY: number };
 type BattleVfxTextures = {
   projectileBeamFrames: ProjectileSequenceFrame[];
   projectileSequenceFrames: Record<ProjectileVfxSequenceTextureKey, ProjectileSequenceFrame[]>;
@@ -682,7 +684,6 @@ type BattleVfxTextures = {
   smokes: Texture[];
   impacts: Record<ProjectileVfxImpactTextureKey, Texture>;
   instants: Record<ProjectileVfxInstantTextureKey, Texture>;
-  instantHits: Record<InstantHitSequenceKey, InstantHitSequenceFrame[]>;
   slash: Texture;
   impact: Texture;
   ring: Texture;
@@ -842,33 +843,6 @@ function createProjectileBeamSequenceTextures(texture: Texture) {
  * near-black range. A gentle threshold keeps the photorealistic mid-dark
  * flame body at full opacity instead of gutting it.
  */
-function createInstantHitSequenceTextures(texture: Texture): InstantHitSequenceFrame[] {
-  const sourceTexture = createBlackBackedVfxRuntimeTexture(texture, instantHitVfxAlphaForLuminance);
-  const resource = sourceTexture.source.resource as { getContext?: (contextId: '2d', options?: { willReadFrequently?: boolean }) => CanvasRenderingContext2D | null } | undefined;
-  const context = resource?.getContext?.('2d', { willReadFrequently: true }) ?? null;
-
-  return Array.from({ length: instantHitSequence.frameCount }, (_, index) => {
-    const rect = instantHitSequenceFrameRect(sourceTexture.width, sourceTexture.height, index);
-    let anchor = { x: 0.5, y: 0.5 };
-    if (context) {
-      try {
-        const pixels = context.getImageData(rect.x, rect.y, rect.width, rect.height).data;
-        anchor = instantHitFrameAnchorFromRgba(pixels, rect.width, rect.height);
-      } catch {
-        anchor = { x: 0.5, y: 0.5 };
-      }
-    }
-    return {
-      texture: new Texture({
-        source: sourceTexture.source,
-        frame: new Rectangle(rect.x, rect.y, rect.width, rect.height),
-      }),
-      anchorX: anchor.x,
-      anchorY: anchor.y,
-    };
-  });
-}
-
 function createBlackBackedVfxRuntimeTexture(texture: Texture, alphaForLuminance: (luminance: number) => number = blackBackedVfxAlphaForLuminance) {
   if (typeof document === 'undefined') return texture;
   const resource = texture.source.resource as CanvasImageSource | undefined;
@@ -916,20 +890,6 @@ function createBattleVfxTextures(loadedTextures: Record<string, Texture>): Battl
     projectileFrameCache.set(texture, frames);
     return frames;
   };
-  const instantHitFrameCache = new Map<Texture, InstantHitSequenceFrame[]>();
-  const instantHitFrames = (key: InstantHitSequenceKey) => {
-    const texture = loadedTextures[instantHitSequenceAssetId(key)]
-      ?? loadedTextures[instantHitSequenceAssetId('strike')];
-    const cached = texture ? instantHitFrameCache.get(texture) : undefined;
-    if (cached) return cached;
-    const frames = texture ? createInstantHitSequenceTextures(texture) : [];
-    if (texture) instantHitFrameCache.set(texture, frames);
-    return frames;
-  };
-  const instantHits = {} as Record<InstantHitSequenceKey, InstantHitSequenceFrame[]>;
-  for (const key of Object.keys(instantHitSequenceAssetFiles) as InstantHitSequenceKey[]) {
-    instantHits[key] = instantHitFrames(key);
-  }
   return {
     projectileBeamFrames: projectileFrames('projectileBeam'),
     projectileSequenceFrames: {
@@ -986,7 +946,6 @@ function createBattleVfxTextures(loadedTextures: Record<string, Texture>): Battl
       instantStorm: loadedTextures.instantStorm,
       instantMagic: loadedTextures.instantMagic,
     },
-    instantHits,
     slash: loadedTextures.slashStreak,
     impact: loadedTextures.impactBurst,
     ring: loadedTextures.ring,
@@ -1028,75 +987,6 @@ function addTextureParticle(parent: Container, textures: BattleVfxTextures, x: n
   particle.y = y;
   parent.addChild(particle);
   return particle;
-}
-
-function renderPixiInstantHitSequence(
-  add: PixiAdd,
-  tweens: gsap.core.Tween[],
-  point: PixiPoint,
-  event: BattleEvent,
-  textures: BattleVfxTextures,
-  profile?: ProjectileVfxProfile,
-  delay = 0,
-) {
-  const sequenceKey = instantHitSequenceKeyForEvent(event);
-  const frames = textures.instantHits[sequenceKey];
-  if (!frames?.length) return false;
-
-  const firstTexture = frames[0]?.texture ?? frames[frames.length - 1].texture;
-  const hitLayer = add(new Container(), 11);
-  const hit = new Sprite(firstTexture);
-  const profileScale = profile?.instantScale ?? 0.8;
-  const clarityScale = profile?.instantClarityScale ?? 1;
-  const baseScale = Math.max(0.5, Math.min(1.0, profileScale * clarityScale * 0.85));
-  const frameState = { progress: 0 };
-  const isFineSteelCut = sequenceKey === 'strike';
-  const alpha = event.isCrit ? 1 : 0.95;
-  const scale = baseScale * (isFineSteelCut ? 1.18 : 1) * (event.isCrit ? 1.08 : 1);
-  const duration = (instantHitSequence.durationMs + (event.isCrit ? 15 : 0)) / 1000;
-  let currentFrameIndex = 0;
-
-  hit.anchor.set(frames[0]?.anchorX ?? 0.5, frames[0]?.anchorY ?? 0.5);
-  hit.blendMode = instantHitSequence.blendMode;
-  hit.tint = 0xffffff;
-  hit.x = point.x;
-  hit.y = point.y;
-  hit.alpha = alpha;
-  hit.scale.set(scale);
-  hit.rotation = 0;
-  hitLayer.addChild(hit);
-
-  const applyFrame = () => {
-    if (hitLayer.destroyed || hit.destroyed) return;
-    const frameIndex = instantHitSequenceFrameIndex(frameState.progress);
-    if (frameIndex !== currentFrameIndex) {
-      currentFrameIndex = frameIndex;
-      const frame = frames[frameIndex] ?? frames[frames.length - 1];
-      hit.texture = frame.texture;
-      hit.anchor.set(frame.anchorX, frame.anchorY);
-    }
-  };
-
-  tweens.push(gsap.to(frameState, {
-    progress: 1,
-    duration,
-    delay,
-    ease: 'none',
-    onUpdate: applyFrame,
-    onComplete: () => {
-      // Hold the final frame briefly and fade instead of cutting to black.
-      tweens.push(gsap.to(hit, {
-        alpha: 0,
-        duration: 0.16,
-        ease: 'power1.out',
-        onComplete: () => {
-          if (!hitLayer.destroyed) hitLayer.destroy({ children: true });
-        },
-      }));
-    },
-  }));
-
-  return true;
 }
 
 function renderPixiProjectileHitGlyph(
@@ -1384,128 +1274,13 @@ function renderPixiInstant(
   point: PixiPoint,
   palette: PixiPalette,
   event: BattleEvent,
-  textures: BattleVfxTextures | undefined,
-  profile: ProjectileVfxProfile | undefined,
   registerCleanup: (cleanup: TickerCleanup) => void,
 ) {
   const layer = add(new Container(), 8);
-  layer.blendMode = 'add';
-  const addToLayer: PixiAdd = (node, zIndex = 1) => {
-    node.zIndex = zIndex;
-    layer.addChild(node);
-    return node;
-  };
-
-  // Contact flash + element debris give the authored sheet its physical read.
-  renderPixiContactFlash(addToLayer, tweens, point, palette);
-  const debrisRecipe = battleDebrisRecipeForEvent(event);
-  renderPixiDebrisBurst(addToLayer, app, point, palette, textures, debrisRecipe, registerCleanup);
-
-  const renderedHitSequence = textures
-    ? renderPixiInstantHitSequence(
-      addToLayer,
-      tweens,
-      point,
-      event,
-      textures,
-      profile,
-    )
-    : false;
-
-  // A loaded sequence owns the entire instant hit. Do not dilute its authored
-  // silhouette with the old generic ring, random sparks, or impact burst —
-  // only a soft lingering tail of debris as the energy settles.
-  if (renderedHitSequence) {
-    tweens.push(gsap.delayedCall(instantHitSequence.durationMs / 1000, () => {
-      renderPixiDebrisBurst(addToLayer, app, point, palette, textures, battleDebrisLingerRecipe(debrisRecipe), registerCleanup);
-    }));
-    tweens.push(gsap.delayedCall((instantHitSequence.durationMs + (event.isCrit ? 15 : 0) + 200) / 1000, () => {
-      if (!layer.destroyed) layer.destroy({ children: true });
-    }));
-    return;
-  }
-
-  // Keep the old glyph only as a resilience fallback if a sequence asset fails to load.
-  if (textures && profile) {
-    const glyph = new Sprite(instantGlyphTexture(textures, profile.instantTextureKey));
-    glyph.anchor.set(profile.instantAnchor.x, profile.instantAnchor.y);
-    glyph.blendMode = 'add';
-    glyph.x = point.x;
-    glyph.y = point.y;
-    glyph.alpha = 0;
-    glyph.scale.set(profile.instantScale * profile.instantClarityScale * 0.72);
-    layer.addChild(glyph);
-    tweens.push(gsap.to(glyph, {
-      alpha: 0,
-      scale: profile.instantScale * profile.instantClarityScale,
-      duration: 0.28,
-      ease: 'power4.out',
-      onStart: () => { glyph.alpha = 0.9; },
-      onComplete: () => glyph.destroy(),
-    }));
-  }
-
-  if (!textures) {
-    for (let i = 0; i < 3; i += 1) {
-      const slash = new Graphics();
-      slash.blendMode = 'add';
-      slash.moveTo(-58, 0);
-      slash.lineTo(58, 0);
-      slash.stroke({ color: i % 2 ? palette.core : palette.hot, width: i % 2 ? 4 : 2, alpha: 0.82, cap: 'round' });
-      slash.x = point.x;
-      slash.y = point.y + (i - 1) * 15;
-      slash.rotation = (-32 + i * 28) * Math.PI / 180;
-      slash.scale.x = 0.1;
-      slash.alpha = 0;
-      layer.addChild(slash);
-      tweens.push(gsap.to(slash, {
-        alpha: 0,
-        scaleX: 1.0,
-        duration: 0.18,
-        delay: i * 0.025,
-        ease: 'power3.out',
-        onStart: () => { slash.alpha = 0.86; },
-        onComplete: () => slash.destroy(),
-      }));
-    }
-  }
-
-  if (textures) {
-    const particleCount = Math.max(12, Math.round((profile?.instantParticleCount ?? 24) * 0.72));
-    for (let i = 0; i < particleCount; i += 1) {
-      const angle = Math.random() * Math.PI * 2;
-      const particle = addTextureParticle(layer, textures, point.x, point.y, palette, 0.92 + Math.random() * 0.95);
-      const state = {
-        x: point.x,
-        y: point.y,
-        alpha: 0.5 + Math.random() * 0.18,
-        scale: particle.scale.x,
-      };
-      tweens.push(gsap.to(state, {
-        x: point.x + Math.cos(angle) * (34 + Math.random() * 58),
-        y: point.y + Math.sin(angle) * (30 + Math.random() * 50),
-        alpha: 0,
-        scale: state.scale * 0.24,
-        duration: 0.18 + Math.random() * 0.1,
-        delay: Math.random() * 0.025,
-        ease: 'power4.out',
-        onStart: () => { particle.alpha = state.alpha; },
-        onUpdate: () => {
-          particle.x = state.x;
-          particle.y = state.y;
-          particle.alpha = state.alpha;
-          particle.scale.set(state.scale);
-        },
-        onComplete: () => particle.destroy(),
-      }));
-    }
-  }
-
-  renderPixiImpact(add, tweens, point, palette, event, 0.02, textures, {
-    ...createImpactVfxPlan(event),
-    showFlashTexture: false,
-  }, false);
-  tweens.push(gsap.delayedCall((instantHitSequence.durationMs + (event.isCrit ? 15 : 0) + 120) / 1000, () => layer.destroy({ children: true })));
+  const effect = (event.typeEffect && event.typeEffect in INSTANT_PARTICLES ? event.typeEffect : 'strike') as keyof typeof INSTANT_PARTICLES;
+  renderPixiContactFlash(add, tweens, point, palette);
+  renderInstantParticles(app, layer, point, effect, palette, Boolean(event.isCrit), registerCleanup);
+  registerCleanup(() => { if (!layer.destroyed) layer.destroy({ children: true }); });
 }
 
 function pointOnRectEdge(rect: PixiRect, t: number): PixiPoint {
@@ -1609,11 +1384,15 @@ function renderPixiBuffAuraLoop(
   const display = BATTLE_BUFF_DISPLAY[dominantKey];
   const palette = display.palette;
   const behavior = display.behavior;
+  // Keep the persistent status stroke inside the card's projected quad.
+  // The surrounding render texture still provides room for motes and glow,
+  // but the frame itself must read as part of the tilted card surface.
+  const frameInset = 0.75;
   const rect = {
-    x: snapToDevicePixel(targetBox.x - 2),
-    y: snapToDevicePixel(targetBox.y - 2),
-    width: snapToDevicePixel(targetBox.width + 4),
-    height: snapToDevicePixel(targetBox.height + 4),
+    x: snapToDevicePixel(targetBox.x + frameInset),
+    y: snapToDevicePixel(targetBox.y + frameInset),
+    width: snapToDevicePixel(Math.max(1, targetBox.width - frameInset * 2)),
+    height: snapToDevicePixel(Math.max(1, targetBox.height - frameInset * 2)),
   };
   const centerX = rect.x + rect.width / 2;
   const phase = ((targetBox.x * 0.009 + targetBox.y * 0.007) % 1) * Math.PI * 2;
@@ -1623,7 +1402,7 @@ function renderPixiBuffAuraLoop(
 
   const frame = new Graphics();
   frame.blendMode = 'add';
-  frame.roundRect(rect.x, rect.y, rect.width, rect.height, 3);
+  frame.rect(rect.x, rect.y, rect.width, rect.height);
   frame.stroke({ color: palette.core, width: 1.5, alpha: 0.62 });
   if (display.control) {
     const arm = 7;
@@ -1637,6 +1416,10 @@ function renderPixiBuffAuraLoop(
     }
   }
   layer.addChild(frame);
+  // The persistent edge is rendered inside the card DOM so it inherits the
+  // exact same CSS 3D transform. Keep Pixi for particles and glyph accents;
+  // projecting a rasterized rectangular stroke introduces visible edge drift.
+  frame.renderable = false;
 
   const accent = new Graphics();
   accent.blendMode = 'add';
@@ -1662,6 +1445,7 @@ function renderPixiBuffAuraLoop(
   const stream = new Graphics();
   stream.blendMode = 'add';
   layer.addChild(stream);
+  stream.renderable = false;
   const streamHeads = 2;
   const streamColors = display.polarity === 'negative'
     ? { head: palette.core, trail: palette.dark, glow: palette.core, headAlpha: 0.5 }
@@ -1763,7 +1547,7 @@ function renderPixiBuffAuraLoop(
     const deltaMs = Math.min(64, app.ticker.deltaMS);
     elapsedMs += deltaMs;
 
-    frame.alpha = 0.44 + Math.sin((elapsedMs / 2600) * Math.PI * 2 + phase) * 0.08;
+    frame.alpha = 0.44 + Math.sin((elapsedMs / 2600) * Math.PI * 2 + phase) * 0.08 + .35 * Math.exp(-elapsedMs / 180);
     if (dominantKey === 'curse') accent.alpha = 0.22 + 0.16 * Math.sin((elapsedMs / 1500) * Math.PI * 2 + phase);
     if (dominantKey === 'pray') accent.alpha = 0.32 + 0.14 * Math.sin((elapsedMs / 2100) * Math.PI * 2 + phase);
     if (dominantKey === 'stun') layer.x = Math.sin(elapsedMs * 0.11) * 0.6;
@@ -1864,88 +1648,6 @@ function snapToDevicePixel(value: number) {
     ? 1
     : Math.min(window.devicePixelRatio || 1, 2);
   return Math.round(value * resolution) / resolution;
-}
-
-function renderPixiBuff(add: PixiAdd, tweens: gsap.core.Tween[], point: PixiPoint, targetBox: PixiRect, palette: PixiPalette, event: BattleEvent, textures?: BattleVfxTextures) {
-  const buffKey = battleBuffKeyForName(event.buffName ?? event.buffTypeEffect ?? event.typeEffect);
-  const effectPalette = buffKey ? BATTLE_BUFF_DISPLAY[buffKey].palette : palette;
-  const plan = createBuffBorderVfxPlan(event);
-  const border = add(new Graphics(), 8);
-  const fill = add(new Graphics(), 7);
-  const motes = add(new Container(), 9);
-  const rect = {
-    x: targetBox.x - 7,
-    y: targetBox.y - 7,
-    width: targetBox.width + 14,
-    height: targetBox.height + 14,
-  };
-  border.blendMode = fill.blendMode = motes.blendMode = 'add';
-  border.filters = [new BlurFilter({ strength: 1.4 })];
-
-  const pulse = { alpha: 0.9, inset: 5, glow: plan.borderGlowWidth };
-  tweens.push(gsap.to(pulse, {
-    alpha: 0,
-    inset: -5,
-    glow: plan.borderGlowWidth + 4,
-    duration: plan.pulseDurationMs / 1000,
-    ease: 'power3.out',
-    onUpdate: () => {
-      border.clear();
-      fill.clear();
-      const x = rect.x + pulse.inset;
-      const y = rect.y + pulse.inset;
-      const w = rect.width - pulse.inset * 2;
-      const h = rect.height - pulse.inset * 2;
-      border.roundRect(x, y, w, h, 4);
-      border.stroke({ color: effectPalette.hot, width: pulse.glow, alpha: pulse.alpha * 0.72 });
-      border.roundRect(x + 4, y + 4, w - 8, h - 8, 3);
-      border.stroke({ color: effectPalette.core, width: Math.max(1.5, pulse.glow * 0.42), alpha: pulse.alpha * 0.86 });
-      fill.roundRect(x + 2, y + 2, w - 4, h - 4, 4);
-      fill.fill({ color: effectPalette.core, alpha: pulse.alpha * 0.045 });
-    },
-    onComplete: () => {
-      border.destroy();
-      fill.destroy();
-    },
-  }));
-
-  for (let i = 0; i < plan.edgeParticleCount; i += 1) {
-    const edgeStart = pointOnRectEdge(rect, i / plan.edgeParticleCount + Math.random() * 0.025);
-    const outward = {
-      x: edgeStart.x < point.x ? -1 : edgeStart.x > point.x ? 1 : 0,
-      y: edgeStart.y < point.y ? -1 : edgeStart.y > point.y ? 1 : 0,
-    };
-    const p = textures
-      ? addTextureParticle(motes, textures, edgeStart.x, edgeStart.y, effectPalette, 0.7 + Math.random() * 0.7)
-      : addParticle(motes, edgeStart.x, edgeStart.y, effectPalette, 0.9 + Math.random() * 0.8);
-    const particleState = {
-      x: edgeStart.x,
-      y: edgeStart.y,
-      alpha: 0.76 + Math.random() * 0.2,
-      scale: p.scale.x,
-    };
-    tweens.push(gsap.to(particleState, {
-      x: edgeStart.x + outward.x * (8 + Math.random() * 18) + (Math.random() - 0.5) * 16,
-      y: edgeStart.y + outward.y * (8 + Math.random() * 18) + (Math.random() - 0.5) * 16,
-      alpha: 0,
-      scale: textures ? 0.014 : 0.18,
-      duration: 0.55 + Math.random() * 0.36,
-      delay: Math.random() * 0.16,
-      ease: 'power3.out',
-      onStart: () => { p.alpha = particleState.alpha; },
-      onUpdate: () => {
-        p.x = particleState.x;
-        p.y = particleState.y;
-        p.alpha = particleState.alpha;
-        p.scale.set(particleState.scale);
-      },
-      onComplete: () => p.destroy(),
-    }));
-  }
-
-  tweens.push(gsap.delayedCall(1.05, () => {
-    motes.destroy();
-  }));
 }
 
 type TickerCleanup = () => void;
@@ -2706,7 +2408,7 @@ function BattleEffectLayer({ board, event, disabled, onImpact, onReady }: { boar
   const persistentTickerCleanupRef = useRef<TickerCleanup[]>([]);
   const [renderToken, setRenderToken] = useState(0);
   const [renderUnavailable, setRenderUnavailable] = useState(false);
-  const textureSignature = battleVfxTextureAssets.map((asset) => `${asset.id}:${asset.src}`).join('|');
+  const textureSignature = runtimeVfxAssets.map((asset) => `${asset.id}:${asset.src}`).join('|');
 
   useEffect(() => {
     const host = hostRef.current;
@@ -2727,7 +2429,7 @@ function BattleEffectLayer({ board, event, disabled, onImpact, onReady }: { boar
         preference: 'webgl',
       });
       rendererInitialized = true;
-      const loadedEntries = await Promise.all(battleVfxTextureAssets.map(
+      const loadedEntries = await Promise.all(runtimeVfxAssets.map(
         async (asset) => [asset.id, await Assets.load<Texture>(asset.src)] as const,
       ));
       initialized = true;
@@ -2793,9 +2495,6 @@ function BattleEffectLayer({ board, event, disabled, onImpact, onReady }: { boar
     clearPersistentEffects();
     if (!app || !layer || !host || !textures || disabled) return clearPersistentEffects;
 
-    const hostRect = host.getBoundingClientRect();
-    const width = hostRect.width;
-    const height = hostRect.height;
     const root = host.parentElement ?? host;
 
     for (const unit of [...board.bottom, ...board.top]) {
@@ -2804,29 +2503,44 @@ function BattleEffectLayer({ board, event, disabled, onImpact, onReady }: { boar
       if (!activeKeys.length) continue;
       let unitElement = findBattleUnitElement(root, unit.tag);
       if (!unitElement) continue;
-      const box = rectInHost(unitElement.getBoundingClientRect(), hostRect, { width, height });
+      // Render the aura once in card-local coordinates, then project its texture
+      // through the card's four actual CSS-transformed corners (not its bounding box).
+      const localWidth = Math.max(1, unitElement.clientWidth);
+      const localHeight = Math.max(1, unitElement.clientHeight);
+      const texture = RenderTexture.create({ width: localWidth + 40, height: localHeight + 40, resolution: Math.min(window.devicePixelRatio || 1, 2) });
       const aura = new Container();
       aura.sortableChildren = true;
-      layer.addChild(aura);
+      const mesh = new PerspectiveMesh({ texture, verticesX: 8, verticesY: 8 });
+      mesh.blendMode = 'add';
+      layer.addChild(mesh);
       const addAura: PixiAdd = <T extends Container | Graphics | Text | Sprite>(node: T, zIndex = 1) => {
         node.zIndex = zIndex;
         aura.addChild(node);
         return node;
       };
-      // Persistent auras stay attached while the inspection camera or card moves.
+      renderPixiBuffAuraLoop(addAura, app, activeKeys, { x: 20, y: 20, width: localWidth, height: localHeight }, textures, (cleanup) => {
+        persistentTickerCleanupRef.current.push(cleanup);
+      });
       const followCard = () => {
         if (!unitElement?.isConnected) unitElement = findBattleUnitElement(root, unit.tag);
-        if (!unitElement) { aura.visible = false; return; }
-        aura.visible = true;
-        const bounds = rectInHost(unitElement.getBoundingClientRect(), host.getBoundingClientRect(), { width: app.screen.width, height: app.screen.height });
-        aura.position.set(bounds.x, bounds.y);
-        aura.scale.set(bounds.width / Math.max(1, box.width), bounds.height / Math.max(1, box.height));
+        const corners = unitElement?.querySelectorAll<HTMLElement>('[data-buff-corner]');
+        if (!unitElement || !corners || corners.length !== 4) { mesh.visible = false; return; }
+        mesh.visible = true;
+        const hostBounds = host.getBoundingClientRect();
+        const points = [...corners].map(corner => {
+          const bounds = corner.getBoundingClientRect();
+          return { x: (bounds.left - hostBounds.left) * app.screen.width / hostBounds.width, y: (bounds.top - hostBounds.top) * app.screen.height / hostBounds.height };
+        });
+        mesh.setCorners(points[0].x, points[0].y, points[1].x, points[1].y, points[2].x, points[2].y, points[3].x, points[3].y);
+        app.renderer.render({ container: aura, target: texture, clear: true });
       };
       followCard();
       app.ticker.add(followCard);
-      persistentTickerCleanupRef.current.push(() => app.ticker.remove(followCard));
-      renderPixiBuffAuraLoop(addAura, app, activeKeys, { x: 0, y: 0, width: Math.max(1, box.width), height: Math.max(1, box.height) }, textures, (cleanup) => {
-        persistentTickerCleanupRef.current.push(cleanup);
+      persistentTickerCleanupRef.current.push(() => {
+        app.ticker.remove(followCard);
+        mesh.destroy();
+        aura.destroy({ children: true });
+        texture.destroy(true);
       });
     }
 
@@ -2898,7 +2612,7 @@ function BattleEffectLayer({ board, event, disabled, onImpact, onReady }: { boar
 
     if (mode === 'buff') {
       onImpact(eventKey(event));
-      renderPixiBuff(add, tweensRef.current, end, targetBox, palette, event, textures);
+      // The projected persistent aura owns the card edge, including its entry pulse.
       return;
     }
 
@@ -2924,7 +2638,7 @@ function BattleEffectLayer({ board, event, disabled, onImpact, onReady }: { boar
       renderPixiImpact(add, tweensRef.current, end, palette, event, 0, undefined, createImpactVfxPlan(event));
     } else {
       onImpact(eventKey(event));
-      renderPixiInstant(add, app, tweensRef.current, end, palette, event, textures, profile, (cleanup) => {
+      renderPixiInstant(add, app, tweensRef.current, end, palette, event, (cleanup) => {
         tickerCleanupRef.current.push(cleanup);
       });
     }

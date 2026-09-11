@@ -25,7 +25,7 @@
 .battle-stage__scroll-hint { display: none; }
 .battle-stage__status { text-align: right; }
 .battle-table-perspective { perspective: 1500px; padding: 42px 44px 64px; }
-.battle-table { --battle-card-width: clamp(112px, 15vh, 144px); position: relative; display: grid; grid-template-columns: minmax(0,1fr) minmax(36px,.36fr) minmax(0,1fr); align-items: center; gap: 12px; max-width: calc(var(--battle-card-width) * 4 + 150px); margin-inline: auto; transform: rotateX(calc(14deg + var(--view-y) * 1deg)) rotateY(calc(var(--view-x) * 1deg)); transform-style: preserve-3d; }
+.battle-table { --battle-card-width: clamp(112px, 15vh, 144px); position: relative; display: grid; grid-template-columns: minmax(0,1fr) minmax(76px,.55fr) minmax(0,1fr); align-items: center; gap: 12px; max-width: calc(var(--battle-card-width) * 4 + 230px); margin-inline: auto; transform: rotateX(calc(14deg + var(--view-y) * 1deg)) rotateY(calc(var(--view-x) * 1deg)); transform-style: preserve-3d; }
 .battle-table__surface { position: absolute; inset: -24px -22px -26px; transform: translateZ(-6px); border: 1px solid #c4b89b9c; background: radial-gradient(ellipse at 32% 15%,#eee0bd12,transparent 60%),radial-gradient(ellipse at 88% 50%,#a7b7c00b,transparent 65%),linear-gradient(#141410c7,#0c0d0bcf),url('../assets/battle/stone-floor-tile.png') center / 150%; box-shadow: 0 1px 0 #e7dcc287,0 3px 0 #242820,0 10px 12px #020302c4,0 30px 42px #020302a6; }
 .battle-formation { min-width: 0; transform-style: preserve-3d; }
 .battle-formation__slots { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 24px 22px; transform-style: preserve-3d; }
@@ -80,7 +80,7 @@
 .battle-scene :focus-visible { outline: 2px solid #d5b77c; outline-offset: 3px; }
 @container (max-width: 760px) {
   .battle-table-perspective { padding: 28px 24px 44px; }
-  .battle-table { gap: 8px; grid-template-columns: minmax(0,1fr) 28px minmax(0,1fr); transform: rotateX(calc(10deg + var(--view-y) * .5deg)) rotateY(calc(var(--view-x) * .5deg)); }
+  .battle-table { gap: 8px; grid-template-columns: minmax(0,1fr) 48px minmax(0,1fr); transform: rotateX(calc(10deg + var(--view-y) * .5deg)) rotateY(calc(var(--view-x) * .5deg)); }
   .battle-table__surface { inset: -14px -12px -18px; }
   .battle-formation__slots { gap: 18px 12px; }
   .battle-stage__heading { padding: 20px 18px 0; grid-template-columns: 1fr 3fr; }
@@ -98,7 +98,7 @@
 @container (max-width: 500px) {
   .battle-stage__scroll-hint { display: block; padding-top: 16px; color: #b8a685; text-align: center; font-size: 10px; }
   .battle-table-perspective { overflow-x: auto; padding: 25px 20px 40px; }
-  .battle-table { min-width: 480px; transform: none; }
+  .battle-table { min-width: 540px; transform: none; }
   .battle-stage__heading { grid-template-columns: 1fr; text-align: center; gap: 10px; }
   .battle-stage__heading > span { padding: 0; }
   .battle-stage__heading p { font-size: 10px; }
@@ -148,6 +148,7 @@
 }
 
 .battle-unit__lighting { position: absolute; inset: 0; z-index: 22; pointer-events: none; background: linear-gradient(140deg,#fff9e657,transparent 38%,#02060526 90%); mix-blend-mode: screen; }
+.battle-unit__buff-frame { box-sizing: border-box; transform: translateZ(1px); }
 
 @media (hover: none), (max-width: 760px) { .battle-camera-toggle { display: none; } .battle-stage__dust--near { display: none; } }
 
@@ -171,3 +172,5 @@
 .battle-result__stats > span > span { font-size: 9px; letter-spacing: .2em; }
 .battle-result__stats strong { font-size: 14px; font-weight: 400; letter-spacing: .08em; font-variant-numeric: tabular-nums; }
 @container (max-width: 500px) { .battle-result__stats { gap: 8px; } .battle-result__stats > span > span { font-size: 8px; letter-spacing: .1em; } .battle-result__stats strong { font-size: 12px; } }
+
+.battle-unit__projection-corner { position: absolute; width: 0; height: 0; pointer-events: none; }

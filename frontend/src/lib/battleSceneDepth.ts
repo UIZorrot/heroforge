@@ -6,9 +6,12 @@ type Point = { x: number; y: number };
 // the actual card anchors; sprite, trail and floor light share one trajectory.
 export function battleFlightSample(start: Point, end: Point, progress: number, arcBend = 0, wobble = 0, waves = 1, liftScale = 1) {
   const t = Math.max(0, Math.min(1, progress));
-  const altitude = Math.min(68, Math.hypot(end.x - start.x, end.y - start.y) * .16) * liftScale;
+  const distance = Math.hypot(end.x - start.x, end.y - start.y);
+  const altitude = Math.min(18, distance * .045) * liftScale;
+  const bend = Math.max(-.012, Math.min(.012, arcBend));
+  const ripple = wobble * Math.min(1, distance / 280) * .45;
   const sample = (value: number) => {
-    const path = projectilePathSample(start, end, value, arcBend, wobble, waves);
+    const path = projectilePathSample(start, end, value, bend, ripple, waves);
     const height = Math.sin(Math.PI * value) * altitude;
     return { ...path, ground: path.point, height, point: { x: path.point.x, y: path.point.y - height } };
   };

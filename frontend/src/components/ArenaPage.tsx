@@ -22,7 +22,7 @@ import { resolveRarity, normalizeCardType, toNumber, type Rarity } from '../lib/
 import { CARD_FALLBACK_SRC } from '../lib/cards';
 import { mockHeroes } from '../lib/mockContent';
 import { cn } from '../lib/utils';
-import { STORAGE_NAMESPACE } from '../lib/runtimeMode';
+import { MOCK_STORAGE_KEYS, STORAGE_NAMESPACE } from '../lib/runtimeMode';
 import type { BattleBoardState, BattleBoardUnit } from '../lib/battleTypes';
 import type { ArenaFormation, ArenaSlotKey, BattleHistoryRecord, BattleResult, BattleSessionSnapshot, EconomySnapshot, FriendsSnapshot, PvpMatchRecord, PvpQueueEntry, SavedHero } from '../types';
 
@@ -49,6 +49,7 @@ type ArenaPageProps = {
 };
 
 const STORAGE_KEY = `${STORAGE_NAMESPACE}.pvp.arena.v1`;
+const MOCK_FRIENDS_STORAGE_KEY = MOCK_STORAGE_KEYS.friends;
 const DEFAULT_QUEUE_KEY = 'ranked';
 const MAX_TEAM_SIZE = 4;
 const ARENA_CARD_PAGE_SIZE = 10;
@@ -141,6 +142,29 @@ function readStoredArenaState(): StoredArenaState | null {
 function writeStoredArenaState(state: StoredArenaState) {
   if (typeof window === 'undefined') return;
   window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+}
+
+function readStoredMockFriends(): FriendsSnapshot | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(MOCK_FRIENDS_STORAGE_KEY) || 'null') as Partial<FriendsSnapshot> | null;
+    if (
+      !parsed
+      || !Array.isArray(parsed.friends)
+      || !Array.isArray(parsed.incoming_requests)
+      || !Array.isArray(parsed.outgoing_requests)
+      || !Array.isArray(parsed.incoming_challenges)
+      || !Array.isArray(parsed.outgoing_challenges)
+    ) return null;
+    return parsed as FriendsSnapshot;
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredMockFriends(snapshot: FriendsSnapshot) {
+  if (typeof window === 'undefined') return;
+  window.localStorage.setItem(MOCK_FRIENDS_STORAGE_KEY, JSON.stringify(snapshot));
 }
 
 function formatNumber(value: unknown) {
@@ -677,10 +701,10 @@ export function ArenaPage({ heroes, economy, token, demoMode = false, activeTab,
   const [search, setSearch] = useState('');
   const [queuePage, setQueuePage] = useState(1);
   const [trainPage, setTrainPage] = useState(1);
-  const [selectedHeroIds, setSelectedHeroIds] = useState<string[]>([]);
+  const [selectedHeroIds, setSelectedHeroIds] = useState<string[]>(() => readStoredArenaState()?.selectedHeroIds ?? []);
   const [trainTeamAIds, setTrainTeamAIds] = useState<string[]>([]);
   const [trainTeamBIds, setTrainTeamBIds] = useState<string[]>([]);
-  const [queueKey, setQueueKey] = useState(() => readStoredArenaState()?.queueKey ?? DEFAULT_QUEUE_KEY);
+  const queueKey = DEFAULT_QUEUE_KEY;
   const [resumeEntryId, setResumeEntryId] = useState<string | null>(() => readStoredArenaState()?.resumeEntryId ?? null);
   const [battleOrder, setBattleOrder] = useState<string[]>([]);
   const [queueEntry, setQueueEntry] = useState<PvpQueueEntry | null>(null);
@@ -689,8 +713,9 @@ export function ArenaPage({ heroes, economy, token, demoMode = false, activeTab,
   const [battleSession, setBattleSession] = useState<BattleSessionSnapshot | null>(null);
   const [localPreparation, setLocalPreparation] = useState<BattleBoardState | null>(null);
   const [formationDraft, setFormationDraft] = useState<{ id: string; positions: Record<string, number> } | null>(null);
-  const [friends, setFriends] = useState<FriendsSnapshot | null>(demoMode ? demoFriends : null);
+  const [friends, setFriends] = useState<FriendsSnapshot | null>(() => demoMode ? readStoredMockFriends() ?? demoFriends : null);
   const [friendEmail, setFriendEmail] = useState('');
+  const [pendingFriendRemovalId, setPendingFriendRemovalId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
@@ -706,20 +731,23 @@ export function ArenaPage({ heroes, economy, token, demoMode = false, activeTab,
     if (initializedRef.current || !displayHeroes.length) return;
     initializedRef.current = true;
     const stored = readStoredArenaState();
-    if (stored && !demoMode) {
-      setQueueKey(DEFAULT_QUEUE_KEY);
-      setResumeEntryId(stored.resumeEntryId);
-    }
+    const availableIds = new Set(displayHeroes.map((hero) => hero.id));
+    setSelectedHeroIds((current) => current.filter((id) => availableIds.has(id)).slice(0, MAX_TEAM_SIZE));
+    if (stored) setResumeEntryId(stored.resumeEntryId);
   }, [demoMode, displayHeroes]);
 
   useEffect(() => {
-    if (!initializedRef.current || demoMode) return;
+    if (!initializedRef.current) return;
     writeStoredArenaState({
       selectedHeroIds,
       queueKey,
       resumeEntryId,
     });
   }, [demoMode, selectedHeroIds, queueKey, resumeEntryId]);
+
+  useEffect(() => {
+    if (demoMode && friends) writeStoredMockFriends(friends);
+  }, [demoMode, friends]);
 
   useEffect(() => {
     setBattleOrder((current) => {
@@ -900,8 +928,12 @@ export function ArenaPage({ heroes, economy, token, demoMode = false, activeTab,
   }, [activeTab, demoMode, refreshFriends]);
 
   const handleSendFriendRequest = async () => {
-    const email = friendEmail.trim();
+    const email = friendEmail.trim().toLowerCase();
     if (!email) return;
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setError('Enter a valid account email address.');
+      return;
+    }
     setBusy(true);
     setError('');
     try {
@@ -961,6 +993,7 @@ export function ArenaPage({ heroes, economy, token, demoMode = false, activeTab,
         setFriends(await removeFriend(friendId, currentToken));
       }
       setMessage('Friend removed.');
+      setPendingFriendRemovalId(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to remove friend.');
     } finally {
@@ -970,7 +1003,7 @@ export function ArenaPage({ heroes, economy, token, demoMode = false, activeTab,
 
   const handleChallengeFriend = async (friendId: string) => {
     if (!selectedHeroes.length) {
-      setError('Select your friendly battle squad in Queue first.');
+      setError('Choose at least one hero in the squad panel first.');
       return;
     }
     setBusy(true);
@@ -998,7 +1031,7 @@ export function ArenaPage({ heroes, economy, token, demoMode = false, activeTab,
 
   const handleFriendChallenge = async (challengeId: string, action: 'accept' | 'decline' | 'cancel') => {
     if (action === 'accept' && !selectedHeroes.length) {
-      setError('Select your friendly battle squad in Queue first.');
+      setError('Choose at least one hero in the squad panel first.');
       return;
     }
     setBusy(true);
@@ -1523,18 +1556,24 @@ export function ArenaPage({ heroes, economy, token, demoMode = false, activeTab,
         </section>
       ) : activeTab === 'friends' ? (
         <section className="mt-5 grid gap-6 xl:grid-cols-[minmax(0,1fr)_420px]">
-          <main className="border border-white/8 bg-black/20">
+          <main className="self-start border border-white/8 bg-black/20">
             <div className="flex flex-col gap-5 border-b border-white/8 p-6 lg:flex-row lg:items-end lg:justify-between">
               <PanelTitle eyebrow="Warband" title="Friends" />
-              <div className="flex w-full max-w-xl gap-2">
-                <input
-                  type="email"
-                  value={friendEmail}
-                  onChange={(event) => setFriendEmail(event.target.value)}
-                  onKeyDown={(event) => { if (event.key === 'Enter') void handleSendFriendRequest(); }}
-                  placeholder="player@example.com"
-                  className="h-11 min-w-0 flex-1 border border-white/10 bg-black/45 px-4 text-sm text-stone-200 outline-none placeholder:text-stone-600 focus:border-[#b49664]/50"
-                />
+              <div className="flex w-full max-w-xl items-end gap-2">
+                <label className="min-w-0 flex-1">
+                  <span className="mb-2 block text-[9px] uppercase tracking-[0.2em] text-stone-600">Exact account email</span>
+                  <input
+                    type="email"
+                    aria-label="Friend account email"
+                    autoComplete="email"
+                    maxLength={254}
+                    value={friendEmail}
+                    onChange={(event) => setFriendEmail(event.target.value)}
+                    onKeyDown={(event) => { if (event.key === 'Enter') void handleSendFriendRequest(); }}
+                    placeholder="player@example.com"
+                    className="h-11 w-full border border-white/10 bg-black/45 px-4 text-sm text-stone-200 outline-none placeholder:text-stone-600 focus:border-[#b49664]/50"
+                  />
+                </label>
                 <button
                   type="button"
                   onClick={handleSendFriendRequest}
@@ -1551,8 +1590,24 @@ export function ArenaPage({ heroes, economy, token, demoMode = false, activeTab,
                 <div className="text-[10px] uppercase tracking-[0.24em] text-stone-500">Your allies</div>
                 <div className="text-[10px] uppercase tracking-[0.2em] text-stone-600">{friends?.friends.length ?? 0} total</div>
               </div>
-              <div className="grid gap-3 md:grid-cols-2">
-                {(friends?.friends ?? []).map((friend) => (
+              {friends === null ? (
+                <div className="border border-dashed border-white/10 p-8 text-center">
+                  {error ? (
+                    <>
+                      <p role="alert" className="text-sm text-amber-100">Friends could not be loaded.</p>
+                      <button type="button" onClick={() => void refreshFriends()} className="mt-4 inline-flex h-9 items-center gap-2 border border-amber-300/25 px-4 text-[9px] uppercase tracking-[0.2em] text-amber-100 hover:bg-amber-300/10">
+                        <RefreshCw size={12} /> Retry
+                      </button>
+                    </>
+                  ) : (
+                    <div className="flex items-center justify-center gap-2 text-[10px] uppercase tracking-[0.2em] text-stone-500">
+                      <RefreshCw size={12} className="animate-spin" /> Loading friends
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="grid gap-3 md:grid-cols-2">
+                {friends.friends.map((friend) => (
                   <div key={friend.id} className="border border-white/8 bg-black/30 p-4">
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex min-w-0 items-center gap-3">
@@ -1564,10 +1619,19 @@ export function ArenaPage({ heroes, economy, token, demoMode = false, activeTab,
                           <div className="mt-1 truncate text-[10px] text-stone-600">{friend.email}</div>
                         </div>
                       </div>
-                      <button type="button" onClick={() => handleRemoveFriend(friend.id)} disabled={busy} className="p-2 text-stone-600 hover:text-rose-300" aria-label={`Remove ${friend.email}`}>
+                      <button type="button" onClick={() => setPendingFriendRemovalId(friend.id)} disabled={busy} className="p-2 text-stone-600 hover:text-rose-300" aria-label={`Remove ${friend.email}`}>
                         <Trash2 size={14} />
                       </button>
                     </div>
+                    {pendingFriendRemovalId === friend.id && (
+                      <div className="mt-4 border border-rose-400/15 bg-rose-400/5 p-3">
+                        <p className="text-xs leading-5 text-stone-400">Remove {friend.email.split('@')[0]} from your friends?</p>
+                        <div className="mt-3 grid grid-cols-2 gap-2">
+                          <button type="button" onClick={() => void handleRemoveFriend(friend.id)} disabled={busy} className="h-8 bg-rose-900/50 text-[9px] uppercase tracking-[0.18em] text-rose-100">Remove</button>
+                          <button type="button" onClick={() => setPendingFriendRemovalId(null)} disabled={busy} className="h-8 border border-white/10 text-[9px] uppercase tracking-[0.18em] text-stone-400">Cancel</button>
+                        </div>
+                      </div>
+                    )}
                     <button
                       type="button"
                       onClick={() => handleChallengeFriend(friend.id)}
@@ -1578,12 +1642,13 @@ export function ArenaPage({ heroes, economy, token, demoMode = false, activeTab,
                     </button>
                   </div>
                 ))}
-                {!friends?.friends.length && (
+                {!friends.friends.length && (
                   <div className="col-span-full border border-dashed border-white/10 p-8 text-center text-sm text-stone-600">
                     Add a player by their exact account email to begin your warband.
                   </div>
                 )}
-              </div>
+                </div>
+              )}
             </div>
           </main>
 
@@ -1595,13 +1660,43 @@ export function ArenaPage({ heroes, economy, token, demoMode = false, activeTab,
                 <SmallStat label="Power" value={formatNumber(totalBp)} />
               </div>
               <p className="mt-4 text-xs leading-6 text-stone-500">
-                Friendly invitations use the squad selected in Queue. They never charge Dust, change ladder rating, or kill cards.
+                Choose up to four heroes here. Friendly battles never charge Dust, change ladder rating, or kill cards.
               </p>
-              {!selectedHeroes.length && (
-                <button type="button" onClick={() => onTabChange('queue')} className="mt-4 h-10 w-full border border-white/10 text-[10px] uppercase tracking-[0.22em] text-stone-400 hover:text-stone-100">
-                  Select squad in Queue
-                </button>
-              )}
+              <div className="mt-4 max-h-[330px] space-y-2 overflow-y-auto pr-1">
+                {rankedHeroes.map((hero) => {
+                  const selected = selectedHeroIds.includes(hero.id);
+                  const eligible = isArenaEligible(hero);
+                  const selectionFull = selectedHeroIds.length >= MAX_TEAM_SIZE && !selected;
+                  return (
+                    <button
+                      key={`friend-squad-${hero.id}`}
+                      type="button"
+                      onClick={() => handleToggleHero(hero.id)}
+                      disabled={busy || waiting || !eligible || selectionFull}
+                      aria-pressed={selected}
+                      className={cn(
+                        'flex w-full items-center justify-between gap-3 border px-3 py-3 text-left transition',
+                        selected
+                          ? 'border-[#b49664]/55 bg-[#b49664]/10 text-stone-100'
+                          : 'border-white/8 bg-black/30 text-stone-400 hover:border-white/20 hover:text-stone-200',
+                        (!eligible || selectionFull) && 'cursor-not-allowed opacity-35'
+                      )}
+                    >
+                      <span className="min-w-0">
+                        <span className="block truncate text-xs uppercase tracking-[0.14em]">{hero.character.name}</span>
+                        <span className="mt-1 block text-[9px] uppercase tracking-[0.16em] text-stone-600">{heroTypeLabel(hero)}</span>
+                      </span>
+                      <span className="flex shrink-0 items-center gap-2 text-[10px] text-[#d8b06c]">
+                        {formatNumber(heroTotalBp(hero))}
+                        {selected && <CheckCircle2 size={13} />}
+                      </span>
+                    </button>
+                  );
+                })}
+                {!rankedHeroes.length && (
+                  <div className="border border-dashed border-white/10 p-5 text-center text-xs leading-5 text-stone-600">Forge a hero before sending a battle invitation.</div>
+                )}
+              </div>
             </div>
 
             {!!friends?.incoming_requests.length && (
@@ -1682,7 +1777,7 @@ export function ArenaPage({ heroes, economy, token, demoMode = false, activeTab,
 
             <AnimatePresence mode="wait">
               {(error || message) && (
-                <motion.div key={error || message} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} className={cn('border px-4 py-3 text-sm leading-6', error ? 'border-amber-400/20 bg-amber-400/10 text-amber-100' : 'border-emerald-400/20 bg-emerald-400/10 text-emerald-100')}>
+                <motion.div role={error ? 'alert' : 'status'} aria-live="polite" key={error || message} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} className={cn('border px-4 py-3 text-sm leading-6', error ? 'border-amber-400/20 bg-amber-400/10 text-amber-100' : 'border-emerald-400/20 bg-emerald-400/10 text-emerald-100')}>
                   {error || message}
                 </motion.div>
               )}

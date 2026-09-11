@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { ChevronDown, Gem, Home, Landmark, Settings, Shield, Sparkles, Swords, User, Users, WalletCards, Zap } from 'lucide-react';
+import { Gem, Home, Landmark, Settings, Shield, Sparkles, Swords, User, Users, WalletCards, Zap } from 'lucide-react';
 import { AppLogo } from './AppLogo';
 import { DustIcon } from './CurrencyIcons';
 import type { AuthUser } from '../types';
@@ -20,6 +20,7 @@ type NavItem = {
 type SideItem = {
   label: string;
   icon: ReactNode;
+  badge?: number;
   active?: boolean;
   disabled?: boolean;
   key?: ArenaSideKey | HomeSideKey | ForgeSideKey | VaultSideKey;
@@ -36,6 +37,7 @@ type GameShellProps = {
   arenaTab?: ArenaSideKey;
   vaultTab?: VaultSideKey;
   arenaLocked?: boolean;
+  friendAlertCount?: number;
   onHomeTabChange?: (tab: HomeSideKey) => void;
   onForgeTabChange?: (tab: ForgeSideKey) => void;
   onArenaTabChange?: (tab: ArenaSideKey) => void;
@@ -104,6 +106,7 @@ export function GameShell({
   arenaTab = 'queue',
   vaultTab = 'card',
   arenaLocked = false,
+  friendAlertCount = 0,
   onHomeTabChange,
   onForgeTabChange,
   onArenaTabChange,
@@ -117,7 +120,7 @@ export function GameShell({
       ? [
         { key: 'welcome' as const, label: 'Welcome', icon: <Home size={20} />, active: homeTab === 'welcome' },
         { key: 'profile' as const, label: 'Profile', icon: <User size={20} />, active: Boolean(user && homeTab === 'profile'), disabled: !user },
-        { key: 'friends' as const, label: 'Friends', icon: <Users size={20} />, active: Boolean(user && homeTab === 'friends'), disabled: !user || arenaLocked },
+        { key: 'friends' as const, label: 'Friends', icon: <Users size={20} />, badge: friendAlertCount, active: Boolean(user && homeTab === 'friends'), disabled: !user || arenaLocked },
       ]
       : activeSection === 'forge'
       ? sideItemsBySection.forge.map((item) => ({ ...item, active: item.key === forgeTab }))
@@ -169,16 +172,10 @@ export function GameShell({
               <div className="flex items-center gap-2 text-sm text-stone-200">
                 <Gem size={16} className="text-sky-300" />
                 <span>{formatNumber(gemBalance)}</span>
-                <button type="button" className="text-stone-500 hover:text-stone-200" aria-label="Add gems">
-                  +
-                </button>
               </div>
               <div className="flex items-center gap-2 text-sm text-stone-200">
                 <DustIcon size={16} className="text-[#c4a574]" />
                 <span>{formatNumber(dustBalance)}</span>
-                <button type="button" className="text-stone-500 hover:text-stone-200" aria-label="Add dust">
-                  +
-                </button>
               </div>
             </div>
 
@@ -204,10 +201,9 @@ export function GameShell({
                   {user ? userLabel(user) : 'Sign In'}
                 </div>
                 <div className="mt-1 text-[11px] uppercase tracking-[0.16em] text-stone-500">
-                  {user ? 'Lv. 12' : 'Join now'}
+                  {user ? (IS_MOCK_MODE ? 'Simulation' : 'Beta') : 'Join now'}
                 </div>
               </div>
-              <ChevronDown size={14} className="text-stone-500" />
             </button>
           </div>
         </div>
@@ -234,7 +230,7 @@ export function GameShell({
                   onArenaTabChange(item.key as ArenaSideKey);
                 }
               }}
-              className={`flex w-full flex-col items-center gap-2 border-l-2 py-4 text-[9px] font-semibold uppercase tracking-[0.14em] transition-colors disabled:cursor-not-allowed disabled:opacity-35 ${
+              className={`relative flex w-full flex-col items-center gap-2 border-l-2 py-4 text-[9px] font-semibold uppercase tracking-[0.14em] transition-colors disabled:cursor-not-allowed disabled:opacity-35 ${
                 item.active
                   ? 'border-[#b49664] bg-[#b49664]/8 text-stone-100'
                   : 'border-transparent text-stone-500 hover:bg-white/[0.03] hover:text-stone-300'
@@ -242,6 +238,11 @@ export function GameShell({
             >
               {item.icon}
               <span>{item.label}</span>
+              {!!item.badge && (
+                <span className="absolute right-4 top-3 flex min-h-4 min-w-4 items-center justify-center border border-[#d8b06c]/45 bg-[#3b2c18] px-1 text-[8px] leading-none text-[#f0d9a9]" aria-label={`${item.badge} pending friend alerts`}>
+                  {item.badge > 9 ? '9+' : item.badge}
+                </span>
+              )}
             </button>
           ))}
         </div>

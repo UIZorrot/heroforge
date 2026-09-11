@@ -1,7 +1,32 @@
 import React, { useEffect, useState } from 'react';
 import { Check, Gift, Loader2 } from 'lucide-react';
 import { claimDailySignIn, claimDailyTask, fetchDaily } from '../lib/api';
+import { MOCK_STORAGE_KEYS } from '../lib/runtimeMode';
 import type { DailySnapshot, EconomySnapshot } from '../types';
+
+const MOCK_DAILY_STORAGE_KEY = MOCK_STORAGE_KEYS.daily;
+
+type MockDailyProgress = {
+  date: string;
+  checkinClaimed: boolean;
+  claimedTaskKeys: string[];
+};
+
+function readMockDailyProgress(date: string): MockDailyProgress | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(MOCK_DAILY_STORAGE_KEY) || 'null') as Partial<MockDailyProgress> | null;
+    if (!parsed || parsed.date !== date || !Array.isArray(parsed.claimedTaskKeys)) return null;
+    return { date, checkinClaimed: Boolean(parsed.checkinClaimed), claimedTaskKeys: parsed.claimedTaskKeys.map(String) };
+  } catch {
+    return null;
+  }
+}
+
+function writeMockDailyProgress(progress: MockDailyProgress) {
+  if (typeof window === 'undefined') return;
+  window.localStorage.setItem(MOCK_DAILY_STORAGE_KEY, JSON.stringify(progress));
+}
 
 interface DailyActivityProps {
   token?: string | null;
@@ -12,12 +37,14 @@ interface DailyActivityProps {
 
 function createSandboxDaily(economy: EconomySnapshot): DailySnapshot {
   const date = new Date().toISOString().slice(0, 10);
+  const persisted = readMockDailyProgress(date);
+  const claimedTaskKeys = new Set(persisted?.claimedTaskKeys ?? []);
   return {
     date,
-    checkin: { claimed: false, claim_date: date, reward_dust: 30 },
+    checkin: { claimed: Boolean(persisted?.checkinClaimed), claim_date: date, reward_dust: 30 },
     tasks: [
-      { id: 'sandbox-forge', key: 'forge_one_card', title: 'Forge a card', description: 'Create one hero in the local Forge.', task_date: date, progress: 1, target: 1, reward_dust: 100, claimed: false, claimable: true },
-      { id: 'sandbox-relic', key: 'use_one_relic', title: 'Bind a shard', description: 'Bind a shard to enchant a card in the sandbox.', task_date: date, progress: 1, target: 1, reward_dust: 300, claimed: false, claimable: true },
+      { id: 'sandbox-forge', key: 'forge_one_card', title: 'Forge a card', description: 'Create one hero in the local Forge.', task_date: date, progress: 1, target: 1, reward_dust: 100, claimed: claimedTaskKeys.has('forge_one_card'), claimable: !claimedTaskKeys.has('forge_one_card') },
+      { id: 'sandbox-relic', key: 'use_one_relic', title: 'Bind a shard', description: 'Bind a shard to enchant a card in the sandbox.', task_date: date, progress: 1, target: 1, reward_dust: 300, claimed: claimedTaskKeys.has('use_one_relic'), claimable: !claimedTaskKeys.has('use_one_relic') },
     ],
     tasks_per_day: 2,
     tasks_capacity: 5,
@@ -81,6 +108,11 @@ export const DailyActivity: React.FC<DailyActivityProps> = ({ token, demoMode = 
     try {
       if (demoMode) {
         const nextEconomy = rewardSandboxEconomy(daily.economy, daily.checkin.reward_dust, 'sign_in');
+        writeMockDailyProgress({
+          date: daily.date,
+          checkinClaimed: true,
+          claimedTaskKeys: daily.tasks.filter((task) => task.claimed).map((task) => task.key),
+        });
         setDaily({ ...daily, checkin: { ...daily.checkin, claimed: true, claimed_at: new Date().toISOString() }, economy: nextEconomy });
         onEconomyChange?.(nextEconomy);
         return;
@@ -105,6 +137,11 @@ export const DailyActivity: React.FC<DailyActivityProps> = ({ token, demoMode = 
         const task = daily.tasks.find((item) => item.key === taskKey);
         if (!task || !task.claimable) return;
         const nextEconomy = rewardSandboxEconomy(daily.economy, task.reward_dust, taskKey);
+        writeMockDailyProgress({
+          date: daily.date,
+          checkinClaimed: daily.checkin.claimed,
+          claimedTaskKeys: Array.from(new Set([...daily.tasks.filter((item) => item.claimed).map((item) => item.key), taskKey])),
+        });
         setDaily({
           ...daily,
           tasks: daily.tasks.map((item) => item.key === taskKey ? { ...item, claimed: true, claimable: false, claimed_at: new Date().toISOString() } : item),
@@ -147,6 +184,7 @@ export const DailyActivity: React.FC<DailyActivityProps> = ({ token, demoMode = 
       </div>
 
       <button
+        type="button"
         onClick={claimSignIn}
         disabled={!daily || daily.checkin.claimed || loading || claimingKey !== null}
         className={`mb-3 flex w-full items-center justify-between border px-3 py-3 text-left transition-colors ${
@@ -189,6 +227,7 @@ export const DailyActivity: React.FC<DailyActivityProps> = ({ token, demoMode = 
                   <p className="mt-1 text-[10px] leading-4 text-stone-500">{task.description}</p>
                 </div>
                 <button
+                  type="button"
                   onClick={() => claimTask(task.key)}
                   disabled={!task.claimable || claimingKey !== null}
                   className="min-w-14 border border-stone-700 px-2 py-1 text-[10px] uppercase tracking-[0.14em] text-stone-400 transition-colors enabled:hover:border-gold-matte/50 enabled:hover:text-gold-matte disabled:cursor-not-allowed disabled:opacity-50"
@@ -212,7 +251,7 @@ export const DailyActivity: React.FC<DailyActivityProps> = ({ token, demoMode = 
       )}
 
       {loading && <p className="mt-3 text-[10px] uppercase tracking-[0.18em] text-stone-600">Loading daily activity...</p>}
-      {error && <p className="mt-3 text-[10px] leading-4 text-red-300">{error}</p>}
+      {error && <p role="alert" className="mt-3 text-[10px] leading-4 text-red-300">{error}</p>}
     </div>
   );
 };
