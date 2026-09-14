@@ -114,7 +114,7 @@ export function ForgeCreationScene({ loading, error, resultImage, resultHero, co
               {image && <img src={image} alt="" draggable={false} />}
               <div className="forge-creation__source-shade" />
               <div className="forge-creation__seal" aria-hidden="true"><span className="forge-creation__logo" /></div>
-              <span className="forge-creation__inscription">{working ? 'IN THE MAKING' : phase === 'sealed' ? 'A LEGEND WITHIN' : image ? 'THE ORIGIN' : 'HERO FORGE'}</span>
+              <span className="forge-creation__inscription">{working ? 'IN THE MAKING' : phase === 'sealed' ? 'A LEGEND WITHIN' : image ? 'THE ORIGIN' : 'HEROFORGE'}</span>
               <div className="forge-creation__scan" />
             </div>
             <div className="forge-creation__face forge-creation__hero" aria-hidden={!complete}>
@@ -129,7 +129,7 @@ export function ForgeCreationScene({ loading, error, resultImage, resultHero, co
               <div className="forge-creation__sheen" />
             </div>
           </div>
-          {phase === 'empty' && <button type="button" className="forge-creation__card-action" onClick={() => input.current?.click()}><ImagePlus size={26} strokeWidth={1} /><span>Place an image</span><small>Click or drop here</small></button>}
+          {phase === 'empty' && <button type="button" className="forge-creation__card-action" onClick={() => input.current?.click()}><span>Place an image</span><small>Click or drop here</small></button>}
           {phase === 'sealed' && <button type="button" className="forge-creation__card-action forge-creation__card-action--reveal" onClick={() => setRevealed(true)} aria-label="Reveal your new hero"><span>Touch to reveal</span></button>}
           </div>
         </div>

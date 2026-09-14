@@ -18,3 +18,4 @@ frontend/.playwright-cli/
 artifacts/
 frontend/*-check.png
 frontend/*tile*.png
+videos/
