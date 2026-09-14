@@ -1,6 +1,6 @@
-import { useMemo, useRef, useState } from 'react';
-import { AlertCircle, Check, ImagePlus, RefreshCw, Shield, UploadCloud, WandSparkles, X } from 'lucide-react';
-import { HeroCard } from './HeroCard';
+import { useMemo, useState } from 'react';
+import { WandSparkles } from 'lucide-react';
+import { ForgeCreationScene } from './ForgeCreationScene';
 import { CardCarousel } from './CardCarousel';
 import { ForgeRitualDialog } from './ForgeRitualDialog';
 import { PageHeader, PageHeaderStat } from './PageHeader';
@@ -9,7 +9,6 @@ import { mockRelicCatalog, mockRelicInventory } from '../lib/mockContent';
 import { getRelicIconSrc, getRelicKind } from '../lib/relics';
 import type { EconomySnapshot, RelicDefinition, RelicKind, SavedHero } from '../types';
 
-type ForgeStep = 'upload' | 'generate' | 'result';
 export type ForgeSideKey = 'create' | 'enchant';
 
 type ForgePageProps = {
@@ -66,53 +65,6 @@ function formatNumber(value: unknown) {
 function heroBp(hero: SavedHero) {
   return toNumber(hero.character.BP);
 }
-
-function inferStep(hasFile: boolean, loading: boolean, resultHero: CharacterData | null): ForgeStep {
-  if (loading) return 'generate';
-  if (resultHero) return 'result';
-  if (hasFile) return 'generate';
-  return 'upload';
-}
-
-function StepIndicator({ currentStep }: { currentStep: ForgeStep }) {
-  const steps: Array<{ key: ForgeStep; title: string; description: string }> = [
-    { key: 'upload', title: 'Upload', description: 'Add an image' },
-    { key: 'generate', title: 'Generate', description: 'Forge your hero' },
-    { key: 'result', title: 'Result', description: 'View and break' },
-  ];
-  const currentIndex = steps.findIndex((step) => step.key === currentStep);
-
-  return (
-    <div className="grid grid-cols-3 gap-6 border-b border-white/8 px-8 py-6">
-      {steps.map((step, index) => {
-        const active = step.key === currentStep;
-        const complete = index < currentIndex;
-        return (
-          <div key={step.key} className="flex items-center gap-4">
-            <div
-              className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full border text-sm ${
-                active
-                  ? 'border-[#b49664] text-[#f0d8ad] shadow-[0_0_20px_rgba(180,150,100,0.18)]'
-                  : complete
-                    ? 'border-[#b49664]/40 bg-[#b49664]/10 text-[#d7a852]'
-                    : 'border-white/12 text-stone-500'
-              }`}
-            >
-              {complete ? <Check size={16} /> : index + 1}
-            </div>
-            <div>
-              <div className={`text-[11px] font-semibold uppercase tracking-[0.24em] ${active ? 'text-stone-100' : 'text-stone-500'}`}>
-                {step.title}
-              </div>
-              <div className="mt-1 text-xs text-stone-500">{step.description}</div>
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
 
 const shardTierTone: Record<string, { text: string; border: string; glow: string }> = {
   common: { text: 'text-stone-400', border: 'border-white/12', glow: '' },
@@ -173,200 +125,6 @@ function ShardTile({
       </div>
       {active && !disabled && !depleted && <div className="pointer-events-none absolute inset-0 border border-[#d7a852]" />}
     </button>
-  );
-}
-
-function UploadStage({
-  imagePreview,
-  onPickFile,
-  onClear,
-}: {
-  imagePreview: string | null;
-  onPickFile: (file: File) => void;
-  onClear: () => void;
-}) {
-  const inputRef = useRef<HTMLInputElement>(null);
-  const [dragActive, setDragActive] = useState(false);
-
-  const handleFile = (file?: File | null) => {
-    if (!file) return;
-    onPickFile(file);
-  };
-
-  return (
-    <button
-      type="button"
-      onClick={() => inputRef.current?.click()}
-      onDragEnter={(event) => {
-        event.preventDefault();
-        setDragActive(true);
-      }}
-      onDragOver={(event) => event.preventDefault()}
-      onDragLeave={(event) => {
-        event.preventDefault();
-        setDragActive(false);
-      }}
-      onDrop={(event) => {
-        event.preventDefault();
-        setDragActive(false);
-        handleFile(event.dataTransfer.files?.[0]);
-      }}
-      className={`relative flex min-h-[560px] w-full flex-col items-center justify-center overflow-hidden border bg-black/25 text-center transition ${
-        dragActive ? 'border-[#b49664]' : 'border-white/10 hover:border-stone-600'
-      }`}
-    >
-      {imagePreview ? (
-        <>
-          <img src={imagePreview} alt="Upload preview" className="absolute inset-0 h-full w-full object-cover object-top opacity-55" />
-          <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-black/10" />
-          <button
-            type="button"
-            onClick={(event) => {
-              event.stopPropagation();
-              onClear();
-            }}
-            className="absolute right-5 top-5 border border-white/10 bg-black/60 p-2 text-stone-300 hover:border-[#b49664]/50"
-            aria-label="Clear upload"
-          >
-            <X size={16} />
-          </button>
-          <div className="relative">
-            <div className="text-[10px] uppercase tracking-[0.3em] text-[#d7a852]">Image uploaded</div>
-            <div className="mt-3 text-2xl font-light tracking-[0.08em] text-stone-100">Ready for enchantment</div>
-            <div className="mt-3 text-sm text-stone-400">Click to replace the image.</div>
-          </div>
-        </>
-      ) : (
-        <div>
-          <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full border border-white/10 bg-white/[0.03]">
-            <ImagePlus size={28} className="text-stone-400" />
-          </div>
-          <div className="mt-6 text-[10px] uppercase tracking-[0.3em] text-[#d7a852]">Upload</div>
-          <div className="mt-3 text-3xl font-light tracking-[0.12em] text-stone-100">Add an image</div>
-          <div className="mt-4 text-sm leading-7 text-stone-500">Drop a character image here or click to browse.</div>
-          <div className="mt-7 inline-flex items-center gap-2 border border-white/10 px-5 py-3 text-[10px] uppercase tracking-[0.22em] text-stone-300">
-            <UploadCloud size={15} />
-            Browse image
-          </div>
-        </div>
-      )}
-      <input
-        ref={inputRef}
-        type="file"
-        accept="image/*"
-        className="hidden"
-        onChange={(event) => {
-          handleFile(event.target.files?.[0]);
-          event.target.value = '';
-        }}
-      />
-    </button>
-  );
-}
-
-function GenerateStage() {
-  return (
-    <div className="flex min-h-[520px] flex-col items-center justify-center border border-white/10 bg-black/25 text-center">
-      <div className="relative flex h-24 w-24 items-center justify-center">
-        <div className="absolute inset-0 rounded-full border border-[#b49664]/25" />
-        <div className="absolute inset-3 animate-spin rounded-full border border-[#b49664]/70 border-t-transparent" />
-        <WandSparkles size={28} className="relative text-[#f0d8ad]" />
-      </div>
-      <div className="mt-7 text-[10px] uppercase tracking-[0.3em] text-[#d7a852]">Generate</div>
-      <div className="mt-3 text-3xl font-light tracking-[0.12em] text-stone-100">Forging your hero</div>
-      <div className="mt-4 max-w-md text-sm leading-7 text-stone-500">Analyzing image identity, resolving template intent, and applying rule-based stat generation.</div>
-    </div>
-  );
-}
-
-function ResultStage({
-  hero,
-  image,
-  onBreak,
-}: {
-  hero: CharacterData | null;
-  image: string | null;
-  onBreak: () => void;
-}) {
-  return (
-    <div className="flex min-h-[560px] flex-col items-center justify-center border border-white/10 bg-[radial-gradient(circle_at_50%_42%,rgba(180,150,100,0.10),rgba(0,0,0,0.18)_40%,rgba(0,0,0,0.48)_100%)] p-8">
-      {hero ? (
-        <>
-          <HeroCard character={hero} image={image ?? undefined} className="w-[340px] max-w-full" />
-          <button
-            type="button"
-            onClick={onBreak}
-            className="mt-6 border border-white/12 px-8 py-3 text-[11px] font-semibold uppercase tracking-[0.24em] text-stone-200 transition hover:border-[#b49664]/50 hover:text-[#f0d8ad]"
-          >
-            <RefreshCw size={15} className="mr-2 inline-block" />
-            Break
-          </button>
-        </>
-      ) : (
-        <div className="text-center">
-          <div className="text-[10px] uppercase tracking-[0.3em] text-stone-600">Result</div>
-          <div className="mt-3 text-2xl text-stone-300">No hero generated yet</div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function SummaryPanel({
-  uploadedFile,
-  uploadedPreview,
-  resultHero,
-  loading,
-  error,
-  onGenerateClick,
-  onBreak,
-}: {
-  uploadedFile: File | null;
-  uploadedPreview: string | null;
-  resultHero: CharacterData | null;
-  loading: boolean;
-  error: string | null;
-  onGenerateClick: () => void;
-  onBreak: () => void;
-}) {
-  return (
-    <aside className="border border-white/10 bg-[#0a0a0a]/88 p-6">
-      <div className="text-[10px] font-semibold uppercase tracking-[0.26em] text-stone-400">Forging summary</div>
-      <div className="mt-5 space-y-6">
-        <div className="border-t border-white/8 pt-5">
-          <div className="text-[10px] uppercase tracking-[0.24em] text-stone-600">Image</div>
-          <div className="mt-4 flex items-center gap-4">
-            <div className="h-12 w-12 overflow-hidden border border-white/10 bg-white/[0.03]">
-              {uploadedPreview ? <img src={uploadedPreview} alt="Upload" className="h-full w-full object-cover" /> : <ImagePlus size={18} className="m-4 text-stone-600" />}
-            </div>
-            <div className="truncate text-sm text-stone-400">{uploadedFile?.name ?? 'No image uploaded'}</div>
-          </div>
-        </div>
-
-        <div className="border-t border-white/8 pt-5">
-          <div className="text-[10px] uppercase tracking-[0.24em] text-stone-600">Estimated output</div>
-          <div className="mt-4 text-sm leading-7 text-stone-400">
-            {resultHero ? `${resultHero.name} / ${formatNumber(resultHero.BP)} BP` : 'Image-based hero'}
-          </div>
-        </div>
-
-        {error && (
-          <div className="flex items-center gap-2 border border-amber-400/20 bg-amber-400/10 px-4 py-3 text-sm text-amber-100">
-            <AlertCircle size={16} />
-            <span>{error}</span>
-          </div>
-        )}
-
-        <button
-          type="button"
-          onClick={resultHero ? onBreak : onGenerateClick}
-          disabled={!uploadedFile || loading}
-          className="w-full bg-[#806838] px-5 py-4 text-[11px] font-semibold uppercase tracking-[0.24em] text-stone-100 transition hover:bg-[#9a7d4a] disabled:cursor-not-allowed disabled:opacity-45"
-        >
-          {loading ? 'Generating' : resultHero ? 'Break' : 'Generate'}
-        </button>
-      </div>
-    </aside>
   );
 }
 
@@ -589,45 +347,7 @@ export function ForgePage({
   onGenerate,
   onBreak,
 }: ForgePageProps) {
-  const [uploadedFile, setUploadedFile] = useState<File | null>(null);
-  const [uploadedPreview, setUploadedPreview] = useState<string | null>(null);
   const relics = useMemo(() => relicOptions(economy, demoMode), [demoMode, economy]);
-  const currentStep = inferStep(Boolean(uploadedFile || uploadedPreview), loading, resultHero);
-  const displayImage = resultImage || uploadedPreview;
-
-  const setFile = (file: File) => {
-    setUploadedFile(file);
-    setUploadedPreview(URL.createObjectURL(file));
-  };
-
-  const clearUpload = () => {
-    setUploadedFile(null);
-    setUploadedPreview(null);
-  };
-
-  const generate = () => {
-    if (!uploadedFile) return;
-    void onGenerate(uploadedFile);
-  };
-
-  const mainStage = (() => {
-    if (activeTab === 'enchant') {
-      return (
-        <ManageEnchantStage
-          error={error}
-          heroes={heroes}
-          relics={relics}
-          onEnchantHero={onEnchantHero}
-          onWashEnchant={onWashEnchant}
-          onBreakHero={onBreakHero}
-          decomposePercent={economy?.costs.decompose_bp_percent ?? 5}
-        />
-      );
-    }
-    if (loading) return <GenerateStage />;
-    if (resultHero) return <ResultStage hero={resultHero} image={displayImage} onBreak={onBreak} />;
-    return <UploadStage imagePreview={uploadedPreview} onPickFile={setFile} onClear={clearUpload} />;
-  })();
 
   return (
     <div className="mx-auto max-w-[1540px] px-3 py-8 sm:px-6 2xl:px-8">
@@ -636,47 +356,27 @@ export function ForgePage({
         eyebrow="Hero Forge"
         subtitle={activeTab === 'enchant' ? 'Enchant' : 'Workshop'}
         description={activeTab === 'enchant' ? 'Select a hero to bind shards or recover Dust.' : 'Images become heroes. Shards and relics are applied afterward.'}
-        stats={
+        stats={activeTab === 'enchant' &&
           <>
             <PageHeaderStat label="Cards Forged" value={formatNumber(heroes.length)} />
             <PageHeaderStat label="Relics Ready" value={formatNumber(relics.length)} />
             <PageHeaderStat label="Forge Cost" value={formatNumber(economy?.costs.forge ?? 100)} />
-            <PageHeaderStat label="Forge State" value={loading ? 'Active' : resultHero ? 'Result' : uploadedFile ? 'Ready' : 'Idle'} />
+            <PageHeaderStat label="Forge State" value={loading ? 'Active' : resultHero ? 'Result' : 'Idle'} />
           </>
         }
       />
       <div className="mt-7">
-        <section className="border border-white/8 bg-black/20">
-          {activeTab === 'create' ? (
-            <>
-              <StepIndicator currentStep={currentStep} />
-              <div className="grid grid-cols-1 gap-7 p-7 2xl:grid-cols-[minmax(0,1fr)_330px]">
-                <div>{mainStage}</div>
-                <SummaryPanel
-                  uploadedFile={uploadedFile}
-                  uploadedPreview={displayImage}
-                  resultHero={resultHero}
-                  loading={loading}
-                  error={error}
-                  onGenerateClick={generate}
-                  onBreak={onBreak}
-                />
-              </div>
-            </>
-          ) : (
-            <div className="p-3 sm:p-7">{mainStage}</div>
-          )}
-          <div className="grid grid-cols-1 border-t border-white/8 lg:grid-cols-[minmax(0,1fr)_280px]">
-            <div className="flex items-center gap-5 px-8 py-6 text-sm leading-6 text-stone-500">
-              <Shield size={28} className="text-[#b49664]" />
-              <span>Each forge is unique. Stats and traits are generated by the rule-based system, while relic inventory and enchantment actions are resolved by the backend.</span>
-            </div>
-            <button type="button" className="border-l border-white/8 px-8 py-6 text-left text-[10px] uppercase tracking-[0.24em] text-stone-500 hover:text-stone-300">
-              Learn more about<br />
-              <span className="text-stone-300">the forge system</span>
-            </button>
-          </div>
-        </section>
+        {activeTab === 'create' ? (
+          <ForgeCreationScene loading={loading} error={error} resultImage={resultImage} resultHero={resultHero}
+            cost={economy?.costs.forge ?? 100} balance={economy?.wallet?.dust_balance ?? null}
+            onGenerate={onGenerate} onReset={onBreak} />
+        ) : (
+          <section className="border border-white/8 bg-black/20 p-3 sm:p-7">
+            <ManageEnchantStage error={error} heroes={heroes} relics={relics}
+              onEnchantHero={onEnchantHero} onWashEnchant={onWashEnchant} onBreakHero={onBreakHero}
+              decomposePercent={economy?.costs.decompose_bp_percent ?? 5} />
+          </section>
+        )}
       </div>
     </div>
   );

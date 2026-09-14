@@ -1428,18 +1428,19 @@ const App: React.FC = () => {
     setHomeTab('profile');
   };
   const handleImageSelect = async (file: File) => {
-    const base64Image = await new Promise<string>((resolve) => {
-      const reader = new FileReader();
-      reader.onloadend = () => resolve(reader.result as string);
-      reader.readAsDataURL(file);
-    });
-
-    setImage(base64Image);
     setLoading(true);
     setCharacter(null);
     setError(null);
 
     try {
+      const base64Image = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = () => reject(new Error('This image could not be read. Choose another image.'));
+        reader.onabort = () => reject(new Error('Image loading was interrupted. Please try again.'));
+        reader.readAsDataURL(file);
+      });
+      setImage(base64Image);
       const token = session?.token ?? getStoredToken();
       if (IS_MOCK_MODE) {
         const forgeCost = economy?.costs.forge ?? mockEconomy.costs.forge;

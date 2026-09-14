@@ -7,9 +7,9 @@ type Point = { x: number; y: number };
 export function battleFlightSample(start: Point, end: Point, progress: number, arcBend = 0, wobble = 0, waves = 1, liftScale = 1) {
   const t = Math.max(0, Math.min(1, progress));
   const distance = Math.hypot(end.x - start.x, end.y - start.y);
-  const altitude = Math.min(18, distance * .045) * liftScale;
-  const bend = Math.max(-.012, Math.min(.012, arcBend));
-  const ripple = wobble * Math.min(1, distance / 280) * .45;
+  const altitude = Math.min(4, distance * .012) * liftScale;
+  const bend = Math.max(-.006, Math.min(.006, arcBend));
+  const ripple = wobble * Math.min(1, distance / 280) * .25;
   const sample = (value: number) => {
     const path = projectilePathSample(start, end, value, bend, ripple, waves);
     const height = Math.sin(Math.PI * value) * altitude;

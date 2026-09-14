@@ -10,7 +10,7 @@ describe('battle scene depth', () => {
       expect(hit.point.y).toBeCloseTo(end.y);
       const middle = battleFlightSample(start, end, .5);
       expect(middle.height).toBeGreaterThan(0);
-      expect(middle.height).toBeLessThanOrEqual(18);
+      expect(middle.height).toBeLessThanOrEqual(4);
       expect(middle.point.y).toBeLessThan(middle.ground.y);
     }
   });
@@ -25,7 +25,7 @@ describe('battle scene depth', () => {
     for (const distance of [20, 60, 120, 400, 1200]) {
       for (const t of [.1, .25, .5, .75, .9]) {
         const point = battleFlightSample({ x: 0, y: 0 }, { x: distance, y: 0 }, t, -.08, 8, 2);
-        expect(point.height).toBeLessThanOrEqual(Math.min(18, distance * .045));
+        expect(point.height).toBeLessThanOrEqual(Math.min(4, distance * .012));
         expect(Math.abs(point.point.y)).toBeLessThan(distance * .1);
       }
     }
