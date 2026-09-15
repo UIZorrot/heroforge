@@ -19,3 +19,4 @@ artifacts/
 frontend/*-check.png
 frontend/*tile*.png
 videos/
+/_local/
