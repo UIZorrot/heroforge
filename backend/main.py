@@ -1798,9 +1798,9 @@ def _join_pvp_queue(user, data, require_team_payload: bool = False):
     team_b = entry_b["team_snapshot"].get("team", []) if isinstance(entry_b.get("team_snapshot"), dict) else []
     label_a = "Player A"
     label_b = "Player B"
-    # Browser matches wait for both formations, then resolve server-side.
+    # Browser matches wait for both formations, then accept manual turns.
     # Explicit REST controller queues retain their turn-based contract.
-    session_control_mode = "program" if battle_mode == "arena_2x3" else "rest"
+    session_control_mode = "manual" if battle_mode == "arena_2x3" else "rest"
 
     try:
         session = battle_sessions.create_battle_session(
@@ -1810,7 +1810,7 @@ def _join_pvp_queue(user, data, require_team_payload: bool = False):
             label_b=label_b,
             team_a=[item["hero_payload"] for item in team_a],
             team_b=[item["hero_payload"] for item in team_b],
-            wait_seconds=max(1, min(60, int(settings.pvp_battle_session_wait_seconds))),
+            wait_seconds=max(1, min(30, int(settings.pvp_battle_session_wait_seconds))),
             require_confirmation=battle_mode == "arena_2x3",
             participant_ids={"A": str(entry_a["user_id"]), "B": str(entry_b["user_id"])},
         )
@@ -1851,7 +1851,7 @@ def _join_pvp_queue(user, data, require_team_payload: bool = False):
             "opponent": normalize_json_value(opponent_entry),
             "match": normalize_json_value(updated_match_row or match_row),
             "battle": (session_snapshot or {}).get("result"),
-            "battle_session": session_snapshot or session.public_snapshot(),
+            "battle_session": _battle_session_view(session, user),
             "battle_payload": battle_payload,
             "reward": (updated_match_row or {}).get("reward_payload") or None,
             "card_state_changes": (updated_match_row or {}).get("card_state_changes") or [],
@@ -2351,7 +2351,7 @@ def create_battle_session_route():
         wait_seconds = max(1, min(60, wait_seconds))
 
         preparing = data.get("preparation") is True
-        if control_mode != "rest" and not (preparing and control_mode == "program"):
+        if control_mode != "rest" and not (preparing and control_mode in {"program", "manual"}):
             return jsonify({"error": "Battle sessions currently support rest control only"}), 400
         if not isinstance(team_a, list) or not isinstance(team_b, list) or not team_a or not team_b:
             return jsonify({"error": "Two teams are required"}), 400
@@ -2409,11 +2409,15 @@ def advance_battle_session_route(session_id):
             return jsonify({"error": "action is required"}), 400
 
         pvp_match = _assert_pvp_session_access(session_id, current_user(), action)
-        _battle_session_view(session, current_user())
+        view = _battle_session_view(session, current_user())
+        if session.control_mode == "manual" and str(action.get("actorTag") or "")[:1] != view.get("viewerSide"):
+            raise PermissionError("You can only command units on your own side")
         snapshot = session.submit_action(action)
         if snapshot.get("status") == "resolved":
             if pvp_match:
                 _sync_pvp_match_session(pvp_match["id"])
+            elif session.session_id in FRIEND_BATTLE_SESSION_IDS:
+                _sync_friendly_battle_session(session)
             else:
                 try:
                     save_battle_history(
@@ -2433,7 +2437,7 @@ def advance_battle_session_route(session_id):
                 except Exception:
                     logging.exception("Failed to persist battle session history")
 
-        return jsonify({"data": snapshot})
+        return jsonify({"data": _battle_session_view(session, current_user())})
     except PermissionError as e:
         return jsonify({"error": str(e)}), 403
     except battle_sessions.BattleSessionError as e:
@@ -2942,12 +2946,12 @@ def friend_challenge_respond(challenge_id, action):
         challenger = fetch_one("SELECT id, email FROM users WHERE id = %s", (challenge["challenger_user_id"],))
         challenged = fetch_one("SELECT id, email FROM users WHERE id = %s", (challenge["challenged_user_id"],))
         session = battle_sessions.create_battle_session(
-            battle_mode="arena_2x3", control_mode="program",
+            battle_mode="arena_2x3", control_mode="manual",
             label_a=str(challenger["email"]).split("@", 1)[0],
             label_b=str(challenged["email"]).split("@", 1)[0],
             team_a=[item["hero_payload"] for item in challenger_team],
             team_b=[item["hero_payload"] for item in challenged_team],
-            wait_seconds=1, require_confirmation=True,
+            wait_seconds=30, require_confirmation=True,
             participant_ids={"A": str(challenger["id"]), "B": str(challenged["id"])},
         )
         FRIEND_BATTLE_SESSION_IDS[session.session_id] = str(challenge_id)

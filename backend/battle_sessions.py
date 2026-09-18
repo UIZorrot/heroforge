@@ -101,8 +101,10 @@ class BattleSession:
             self.team_b_units.append(None)
 
         self.control_mode = str(self.control_mode or "rest").strip().lower() or "rest"
-        if self.control_mode not in {"rest", "program"}:
-            raise BattleSessionError("battle session controlMode must be rest or program")
+        if self.control_mode not in {"rest", "program", "manual"}:
+            raise BattleSessionError("battle session controlMode must be rest, program or manual")
+        if self.control_mode == "manual" and self.participant_ids.get("A") and self.participant_ids.get("B"):
+            self.wait_seconds = 30
 
         if self.require_confirmation:
             self.status = "preparing"
@@ -320,6 +322,11 @@ class BattleSession:
             return
         own_team = self.team_a_units if actor.tag.startswith("A") else self.team_b_units
         enemy_team = self.team_b_units if actor.tag.startswith("A") else self.team_a_units
+        if self.control_mode == "manual":
+            automated = not self._human_actor(actor) or actor.is_stunned
+            self.expected_action_source = "program" if automated else "manual"
+            self.waiting_until_ms = (_now_ms() + 2200 if automated else
+                                     _now_ms() + 30_000 if self.participant_ids.get("A") and self.participant_ids.get("B") else None)
         self.active_actor_tag = actor.tag
         self.observation = battle_logic.build_public_battle_observation(self.round, actor, own_team, enemy_team, self.label_a, self.label_b)
 
@@ -367,7 +374,8 @@ class BattleSession:
 
         own_team = self.team_a_units if actor.tag.startswith("A") else self.team_b_units
         enemy_team = self.team_b_units if actor.tag.startswith("A") else self.team_a_units
-        targets = battle_logic._ordered_board_targets(actor, own_team, enemy_team, chosen_skill)
+        targets = (self._manual_targets(actor, chosen_skill) if self.control_mode == "manual"
+                   else battle_logic._ordered_board_targets(actor, own_team, enemy_team, chosen_skill))
 
         target = None
         target_tag = normalized.get("targetTag")
@@ -530,9 +538,9 @@ class BattleSession:
             return self._auto_advance_due(now_ms)
 
     def _auto_advance_due(self, now_ms: int | None = None) -> bool:
-        if self.status != "awaiting_action" or self.control_mode not in {"rest", "program"}:
+        if self.status != "awaiting_action" or self.control_mode not in {"rest", "program", "manual"}:
             return False
-        if self.control_mode == "rest" and (self.waiting_until_ms is None or (now_ms or _now_ms()) < self.waiting_until_ms):
+        if self.control_mode in {"rest", "manual"} and (self.waiting_until_ms is None or (now_ms or _now_ms()) < self.waiting_until_ms):
             return False
 
         actor = self.current_actor
@@ -578,15 +586,49 @@ class BattleSession:
         if self.status != "resolved":
             raise BattleSessionError("program battle did not resolve within the step limit")
 
+    def _manual_targets(self, actor, skill):
+        own = self.team_a_units if actor.tag.startswith("A") else self.team_b_units
+        enemies = self.team_b_units if actor.tag.startswith("A") else self.team_a_units
+        # TARGET_NUM limits affected units, not the player's choice of primary target.
+        candidate_skill = dict(skill or {}) | {"TARGET_NUM": len(own) + len(enemies)}
+        return battle_logic._ordered_board_targets(actor, own, enemies, candidate_skill)
+
+    def _human_actor(self, actor):
+        return actor.tag[0] in self.participant_ids if self.participant_ids else actor.tag.startswith("A")
+
+    def _action_options(self):
+        actor = self.current_actor
+        if self.control_mode != "manual" or not actor or not self._human_actor(actor) or actor.is_stunned:
+            return []
+        options = []
+        skills = actor.character.get("skill", {})
+        for slot, skill in [(None, None)] + [(k, v) for k, v in skills.items() if k in {"s1", "s2"} and isinstance(v, dict)]:
+            cost = battle_logic._infer_skill_cost(skill) if skill else 0
+            targets = [unit.tag for unit in self._manual_targets(actor, skill)]
+            options.append({"kind": "skill" if slot else "attack", "skillSlot": slot,
+                            "name": skill.get("name", slot) if skill else "Attack", "cost": cost,
+                            "targets": targets, "disabled": "Not enough MP" if cost > actor.mp else "No legal targets" if not targets else None})
+        return options
+
     def submit_action(self, action: Dict[str, Any]) -> Dict[str, Any]:
-        if self.status == "preparing":
-            raise BattleSessionError("Both sides must confirm before combat actions")
-        if self.control_mode != "rest":
-            raise BattleSessionError("program-controlled battle sessions do not accept manual actions")
-        if self.status == "resolved":
-            raise BattleSessionError("battle session already resolved")
-        self._resolve_turn(action, "rest")
-        return self.public_snapshot()
+        with self._preparation_lock:
+            if self.status == "preparing":
+                raise BattleSessionError("Both sides must confirm before combat actions")
+            if self.control_mode not in {"rest", "manual"}:
+                raise BattleSessionError("program-controlled battle sessions do not accept manual actions")
+            if self.status == "resolved":
+                raise BattleSessionError("battle session already resolved")
+            if self.control_mode == "manual":
+                if self.waiting_until_ms is not None and _now_ms() >= self.waiting_until_ms:
+                    self._auto_advance_due()
+                    raise BattleSessionError("Time expired. The server has acted for this turn")
+                actor = self.current_actor
+                if not actor or not self._human_actor(actor) or actor.is_stunned:
+                    raise BattleSessionError("Wait for your own unit to act")
+                if not isinstance(action, dict) or action.get("actorTag") != actor.tag or action.get("expectedEventCount") != len(self.events):
+                    raise BattleSessionError("The turn has changed. Refresh before acting again")
+            self._resolve_turn(action, "rest")
+            return self.public_snapshot()
 
     def public_snapshot(self) -> Dict[str, Any]:
         with self._preparation_lock:
@@ -609,8 +651,10 @@ class BattleSession:
             "opponentAutoReady": self.auto_ready_b,
             "round": self.round,
             "waitingUntil": self.waiting_until_ms,
+            "serverNow": _now_ms(),
             "waitSeconds": self.wait_seconds,
             "activeActorTag": self.active_actor_tag,
+            "actionOptions": self._action_options(),
             "expectedActionSource": self.expected_action_source,
             "lastActionSource": self.last_action_source,
             "lastAction": self.last_action,

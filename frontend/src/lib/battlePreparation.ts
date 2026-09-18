@@ -23,6 +23,7 @@ export function applyPreparationPositions(board: BattleBoardState, side: 'A' | '
 // An in-flight poll must not undo a confirmation or completed battle.
 export function acceptBattleSessionSnapshot(current: BattleSessionSnapshot | null, incoming: BattleSessionSnapshot) {
   if (!current || current.sessionId !== incoming.sessionId) return incoming;
+  if ((incoming.events?.length ?? 0) < (current.events?.length ?? 0)) return current;
   if (current.status === 'resolved' && incoming.status !== 'resolved') return current;
   if (current.readiness && (['A', 'B'] as const).some(side => current.readiness?.[side] && !incoming.readiness?.[side])) return current;
   return incoming;

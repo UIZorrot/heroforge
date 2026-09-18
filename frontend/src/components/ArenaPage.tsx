@@ -16,15 +16,16 @@ import {
   Zap,
 } from 'lucide-react';
 import { BattleVisualizer } from './BattleVisualizer';
+import { advanceLocalManualBattle, startLocalManualBattle } from '../lib/manualBattle';
 import { acceptBattleSessionSnapshot, applyPreparationPositions, formationPositions, movePreparationCard } from '../lib/battlePreparation';
-import { cancelPvpEntry, prepareBattleSession, confirmBattleFormation, createFriendChallenge, fetchBattleSession, fetchFriends, fetchPvpEntryStatus, getStoredToken, joinArenaQueue, removeFriend, respondFriendChallenge, respondFriendRequest, sendFriendRequest } from '../lib/api';
+import { cancelPvpEntry, submitBattleSessionAction, prepareBattleSession, confirmBattleFormation, createFriendChallenge, fetchBattleSession, fetchFriends, fetchPvpEntryStatus, getStoredToken, joinArenaQueue, removeFriend, respondFriendChallenge, respondFriendRequest, sendFriendRequest } from '../lib/api';
 import { resolveRarity, normalizeCardType, toNumber, type Rarity } from '../lib/gameLogic';
 import { CARD_FALLBACK_SRC } from '../lib/cards';
 import { mockHeroes } from '../lib/mockContent';
 import { cn } from '../lib/utils';
 import { MOCK_STORAGE_KEYS, STORAGE_NAMESPACE } from '../lib/runtimeMode';
 import type { BattleBoardState, BattleBoardUnit } from '../lib/battleTypes';
-import type { ArenaFormation, ArenaSlotKey, BattleHistoryRecord, BattleResult, BattleSessionSnapshot, EconomySnapshot, FriendsSnapshot, PvpMatchRecord, PvpQueueEntry, SavedHero } from '../types';
+import type { ArenaFormation, ArenaSlotKey, BattleHistoryRecord, BattleResult, BattleSessionAction, BattleSessionSnapshot, EconomySnapshot, FriendsSnapshot, PvpMatchRecord, PvpQueueEntry, SavedHero } from '../types';
 
 type ArenaTab = 'queue' | 'train' | 'friends' | 'battle';
 
@@ -711,6 +712,8 @@ export function ArenaPage({ heroes, economy, token, demoMode = false, activeTab,
   const [, setMatchRecord] = useState<PvpMatchRecord | null>(null);
   const [battleResult, setBattleResult] = useState<BattleResult | null>(null);
   const [battleSession, setBattleSession] = useState<BattleSessionSnapshot | null>(null);
+  const [combatControl, setCombatControl] = useState<'program' | 'manual'>('program');
+  const actionPending = useRef(false);
   const [localPreparation, setLocalPreparation] = useState<BattleBoardState | null>(null);
   const [formationDraft, setFormationDraft] = useState<{ id: string; positions: Record<string, number> } | null>(null);
   const [friends, setFriends] = useState<FriendsSnapshot | null>(() => demoMode ? readStoredMockFriends() ?? demoFriends : null);
@@ -838,12 +841,12 @@ export function ArenaPage({ heroes, economy, token, demoMode = false, activeTab,
         const top = Array.from({ length: 6 }, (_, index) => teamB[index] ? unitFromHero(teamB[index], 'B', index) : null);
         setLocalPreparation(createTrainingBoardSnapshot(1, bottom, top));
       } else {
-        setBattleSession(await prepareBattleSession(teamA.map(heroSessionPayload), teamB.map(heroSessionPayload), currentToken));
+        setBattleSession(await prepareBattleSession(teamA.map(heroSessionPayload), teamB.map(heroSessionPayload), currentToken, combatControl));
       }
       onTabChange('battle');
     } catch (err) { setError(err instanceof Error ? err.message : 'Failed to prepare battle.'); }
     finally { setBusy(false); }
-  }, [currentToken, demoMode, onTabChange]);
+  }, [currentToken, demoMode, onTabChange, combatControl]);
 
   const movePreparedCard = (tag: string, slot: number) => {
     if (!preparationBoard || ownReady || busy) return;
@@ -854,7 +857,10 @@ export function ArenaPage({ heroes, economy, token, demoMode = false, activeTab,
     if (!preparationBoard || ownReady || busy) return;
     setBusy(true); setError('');
     try {
-      if (localPreparation) {
+      if (localPreparation && combatControl === 'manual') {
+        setBattleSession(startLocalManualBattle(preparationBoard));
+        setLocalPreparation(null);
+      } else if (localPreparation) {
         const bottom = preparationBoard.bottom.map(cloneBattleUnit);
         const top = preparationBoard.top.map(cloneBattleUnit);
         const { events, logs, boardHistory } = simulateTrainingBattle(bottom, top);
@@ -871,6 +877,25 @@ export function ArenaPage({ heroes, economy, token, demoMode = false, activeTab,
     finally { setBusy(false); }
   };
 
+  const submitManualAction = async (action: BattleSessionAction) => {
+    if (!battleSession || busy || actionPending.current) return;
+    const session = battleSession;
+    actionPending.current = true; setBusy(true); setError('');
+    try {
+      const snapshot = demoMode ? advanceLocalManualBattle(session, action) : await submitBattleSessionAction(session.sessionId, action, currentToken);
+      setBattleSession(current => current?.sessionId === session.sessionId ? acceptBattleSessionSnapshot(current, snapshot) : current);
+    } catch (err) { setError(err instanceof Error ? err.message : 'Action failed. Please try again.'); }
+    finally { actionPending.current = false; setBusy(false); }
+  };
+
+  useEffect(() => {
+    if (!demoMode || battleSession?.controlMode !== 'manual' || battleSession.status !== 'awaiting_action' || battleSession.expectedActionSource !== 'program') return;
+    const timer = window.setTimeout(() => {
+      setBattleSession(current => current === battleSession ? advanceLocalManualBattle(current) : current);
+    }, 2200);
+    return () => window.clearTimeout(timer);
+  }, [battleSession, demoMode]);
+
   const openPreparedSession = async (sessionId: string) => {
     setBusy(true); setError('');
     try {
@@ -884,7 +909,7 @@ export function ArenaPage({ heroes, economy, token, demoMode = false, activeTab,
   // Preparation rooms (including friendly matches) stay synchronized while
   // preserving local drag edits until this participant explicitly confirms.
   useEffect(() => {
-    if (!battleSession || battleSession.status !== 'preparing' || demoMode) return;
+    if (!battleSession || battleSession.status === 'resolved' || (battleSession.status !== 'preparing' && battleSession.controlMode !== 'manual') || demoMode) return;
     const sessionId = battleSession.sessionId;
     let cancelled = false;
     let pending = false;
@@ -1359,18 +1384,19 @@ export function ArenaPage({ heroes, economy, token, demoMode = false, activeTab,
         </section>
       )}
 
+      {(activeTab === 'train' || (activeTab === 'battle' && !shownBattleResult)) && <div className="flex items-center justify-center gap-3 py-4" role="group" aria-label="Battle control mode"><span className="mr-3 text-xs text-stone-400">Battle control</span>{(['program', 'manual'] as const).map(mode => <button key={mode} type="button" aria-pressed={combatControl === mode} disabled={busy} onClick={() => setCombatControl(mode)} className={cn('border px-5 py-2 text-xs', combatControl === mode ? 'border-[#d5b57c] bg-[#806838]/20 text-[#eddbb6]' : 'border-white/10 text-stone-400')}>{mode === 'manual' ? 'Manual' : 'Auto'}</button>)}</div>}
       {activeTab === 'battle' && shownBattleResult ? (
         <section className="space-y-4">
           {!preparationBoard && (!battleResult || replayResult) && (
             <div className="flex items-center justify-between gap-4 border border-[#2b241b] bg-black/30 px-5 py-3">
               <div>
                 <div className="text-[10px] uppercase tracking-[0.28em] text-[#b49664]">
-                  {replayResult ? 'Battle Replay' : 'Arena Battle Live'}
+                  {replayResult ? 'Battle Replay' : battleSession?.controlMode === 'manual' ? 'Manual Battle' : 'Arena Battle Live'}
                 </div>
                 <div className="mt-1 text-xs text-stone-500">
                   {replayResult
                     ? 'Read-only replay loaded from your combat record.'
-                    : battleSession?.lastActionSource === 'program'
+                    : battleSession?.controlMode === 'manual' ? 'Choose an action and target on the battlefield.' : battleSession?.lastActionSource === 'program'
                       ? 'Program controller advanced the latest turn.'
                       : 'Observing the shared Agent battle session.'}
                 </div>
@@ -1391,27 +1417,17 @@ export function ArenaPage({ heroes, economy, token, demoMode = false, activeTab,
               )}
             </div>
           )}
-          {preparationBoard && <div className="battle-preparation" aria-label="Battle preparation">
-            <div className="battle-preparation__copy" aria-live="polite">
-              <div className="battle-preparation__eyebrow">Prepare for battle</div>
-              <h3>{ownReady ? 'Formation confirmed' : 'Take your positions'}</h3>
-              <p>{ownReady ? 'Your formation is locked. Waiting for your opponent to confirm.' : (localPreparation || battleSession?.opponentAutoReady) ? 'Drag your cards to arrange the formation, then confirm to begin. Your simulated opponent is already ready.' : 'Drag your cards to arrange the formation. Battle begins only after both players confirm.'}</p>
-            </div>
-            <div className="battle-preparation__actions">
-              <div className="battle-preparation__readiness" aria-live="polite"><span data-ready={ownReady}>You · {ownReady ? 'Ready' : 'Preparing'}</span><span data-ready={rivalReady}>Opponent · {rivalReady ? 'Ready' : 'Preparing'}</span></div>
-              <button type="button" onClick={confirmFormation} disabled={busy || ownReady}>{busy ? 'Confirming…' : ownReady ? 'Waiting for opponent' : 'Confirm formation'}</button>
-            </div>
-          </div>}
           {error && <p role="alert" className="border border-amber-400/25 px-5 py-3 text-sm text-amber-100">{error}</p>}
           <BattleVisualizer
             key={preparationBoard ? `prepare-${preparationId}` : battleSession?.sessionId ?? 'resolved'}
+            sceneControls={preparationBoard ? { preparation: { ownReady, rivalReady, busy, simulated: Boolean(localPreparation || battleSession?.opponentAutoReady), onConfirm: confirmFormation } } : battleSession?.controlMode === 'manual' && battleSession.status !== 'resolved' ? { manual: { actorTag: battleSession.activeActorTag ?? null, ownSide, options: battleSession.actionOptions ?? [], busy, revision: battleSession.events?.length ?? 0, waitingUntil: battleSession.waitingUntil, serverNow: battleSession.serverNow, onAction: submitManualAction } } : undefined}
             heroA={null}
             heroB={null}
             result={shownBattleResult}
             editUnitSlots={Boolean(preparationBoard && !ownReady && !busy)}
             editableSide={ownSide}
             onUnitSlotChange={movePreparedCard}
-            liveSession={Boolean(preparationBoard) || (!battleResult && !replayResult)}
+            liveSession={Boolean(preparationBoard) || battleSession?.controlMode === 'manual' || (!battleResult && !replayResult)}
             showPlaybackControls={Boolean(replayResult)}
           />
         </section>

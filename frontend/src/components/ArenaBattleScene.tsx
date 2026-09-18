@@ -60,6 +60,7 @@ import {
 import type { InstantHitSequenceKey } from '../lib/battleVfxAssets';
 import { cn } from '../lib/utils';
 import './ArenaBattleScene.css';
+import { BattleSceneHud, BattleUnitInspector, type BattleSceneControls } from './BattleSceneHud';
 import { useBattleCamera } from './useBattleCamera';
 import { battleFlightSample } from '../lib/battleSceneDepth';
 import { INSTANT_PARTICLES, instantPresentationSize, PHYSICAL_INSTANT_SEQUENCES, isPhysicalInstantSequence } from '../lib/battleInstantParticles';
@@ -72,7 +73,10 @@ const runtimeVfxAssets = battleVfxTextureAssets.filter(asset => asset.role !== '
 
 const BattleImpactContext = createContext<string | null>(null);
 
+const BattleSelectionContext = createContext<{ selected: string | null; active?: string | null; select: (tag: string) => void }>({ selected: null, select: () => {} });
+
 type ArenaBattleSceneProps = {
+  sceneControls?: BattleSceneControls;
   board: BattleBoardState;
   events: BattleEvent[];
   logs: string[];
@@ -322,6 +326,7 @@ function battleSlotRect(element: HTMLElement) {
 }
 
 function ArenaUnitCard({ unit, slot, side, currentEvent }: { unit: BattleBoardUnit | null; slot: SlotSpec; side: 'forger' | 'rival'; currentEvent?: BattleEvent | null }) {
+  const selection = useContext(BattleSelectionContext);
   const ratio = hpRatio(unit);
   const alive = Boolean(unit && unit.alive && unit.hp > 0);
   const rowLabel = slot.row === 'front' ? 'Front' : 'Back';
@@ -390,7 +395,11 @@ function ArenaUnitCard({ unit, slot, side, currentEvent }: { unit: BattleBoardUn
       data-active={isActor ? 'actor' : isTarget ? 'target' : undefined}
       data-alive={alive}
       data-impact={isTarget && hasImpact ? currentEvent?.isCrit ? 'critical' : 'hit' : undefined}
-      role="group" tabIndex={0}
+      role="button" tabIndex={0}
+      aria-pressed={selection.selected === unit.tag}
+      data-command-actor={selection.active === unit.tag || undefined}
+      onClick={() => selection.select(unit.tag)}
+      onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); selection.select(unit.tag); } }}
       aria-label={`${unit.name}, ${unit.state?.TYPE ?? 'Hero'}, HP ${unit.hp} of ${unit.maxHp}, MP ${unit.mp}, ${alive ? 'standing' : 'fallen'}`}
       title={`${unit.name} · ${unit.state?.TYPE ?? 'Hero'} · HP ${unit.hp}/${unit.maxHp} · MP ${unit.mp}/${unit.maxMp}${unit.buffs.length ? ' · ' + unit.buffs.map(buff => `${buff.name} (${buff.duration})`).join(', ') : ''}`}
       initial={{ opacity: 1, x: 0, y: 0, scale: 1, rotate: 0, z: 0 }}
@@ -3032,6 +3041,8 @@ function BattleResultReveal({
 }
 
 function ArenaStage({
+  sceneControls,
+  presentationBusy,
   board,
   beforeBoard,
   onPresentImpact,
@@ -3044,6 +3055,8 @@ function ArenaStage({
   editableSide,
   onUnitSlotChange,
 }: {
+  sceneControls?: BattleSceneControls;
+  presentationBusy: boolean;
   board: BattleBoardState;
   beforeBoard?: BattleBoardState;
   onPresentImpact: (key: string) => void;
@@ -3056,6 +3069,7 @@ function ArenaStage({
   editableSide?: 'A' | 'B';
   onUnitSlotChange?: (unitTag: string, slot: number) => void;
 }) {
+  const [selectedTag, setSelectedTag] = useState<string | null>(null);
   const stageRef = useRef<HTMLElement | null>(null);
   const [impactedKey, setImpactedKey] = useState<string | null>(null);
   const [impactPoint, setImpactPoint] = useState({ x: 0, y: 0, floorY: 0 });
@@ -3075,7 +3089,7 @@ function ArenaStage({
   const actor = currentEvent ? findEventUnit(board, currentEvent.attacker) : null;
   const target = currentEvent ? findEventUnit(board, currentEvent.defender) : null;
   return (
-    <section ref={stageRef} className={cn('battle-stage', resultReveal && 'battle-stage--resolved')} aria-label="Battlefield" onPointerMove={camera.onPointerMove} onPointerLeave={camera.onPointerLeave}>
+    <section ref={stageRef} className={cn('battle-stage', sceneControls && 'battle-stage--interactive', resultReveal && 'battle-stage--resolved')} aria-label="Battlefield" onPointerMove={camera.onPointerMove} onPointerLeave={camera.onPointerLeave}>
       <div className="battle-stage__hall" style={{ backgroundImage: `url(${arenaHallPerspective})` }} />
       <div className="battle-stage__light-shafts" />
       <div className="battle-stage__haze" aria-hidden="true" />
@@ -3096,6 +3110,7 @@ function ArenaStage({
       <BattleEffectLayer board={board} event={currentEvent} disabled={reducedMotion} onImpact={onImpact} onReady={onReady} />
       <BattleFloatingTextLayer event={currentEvent && impactedKey === eventKey(currentEvent) ? currentEvent : null} disabled={reducedMotion} />
       <p className="battle-stage__scroll-hint">Swipe the table to see both formations</p>
+      <BattleSelectionContext.Provider value={{ selected: selectedTag, active: !presentationBusy ? sceneControls?.manual?.actorTag : null, select: setSelectedTag }}>
       <BattleImpactContext.Provider value={impactedKey}>
         <div className="battle-table-perspective">
           <div className="battle-table">
@@ -3106,6 +3121,12 @@ function ArenaStage({
           </div>
         </div>
       </BattleImpactContext.Provider>
+      </BattleSelectionContext.Provider>
+      {!resultReveal && (() => {
+        const units = [...visibleBoard.bottom, ...visibleBoard.top].filter((unit): unit is BattleBoardUnit => Boolean(unit));
+        const selected = units.find(unit => unit.tag === selectedTag) ?? null;
+        return <>{selected && <BattleUnitInspector unit={selected} onClose={() => setSelectedTag(null)} />}{sceneControls && <BattleSceneHud controls={sceneControls} selected={selected} units={units} presentationBusy={presentationBusy} />}</>;
+      })()}
       <AnimatePresence>
         {resultReveal ? (
           <BattleResultReveal
@@ -3135,6 +3156,7 @@ export function ArenaBattleScene({
   editUnitSlots = false,
   editableSide,
   onUnitSlotChange,
+  sceneControls,
 }: ArenaBattleSceneProps) {
   const [eventIndex, setEventIndex] = useState(-1);
   const [playbackRun, setPlaybackRun] = useState(0);
@@ -3321,6 +3343,8 @@ export function ArenaBattleScene({
       </div>}
       <ArenaStage
         key={playbackRun}
+        sceneControls={sceneControls}
+        presentationBusy={events.length > 0 && (!reachedFinalEvent || !finalBeatSettled)}
         board={playbackBoard}
         beforeBoard={beforeBoard}
         onPresentImpact={onPresentImpact}
@@ -3330,7 +3354,7 @@ export function ArenaBattleScene({
         reducedMotion={reducedMotion}
         resultReveal={resultPreviewOutcome
           ? { outcome: resultPreviewOutcome, result }
-          : showResultReveal && playbackFinished && finalBeatSettled
+          : showResultReveal && (playbackFinished || (liveSession && reachedFinalEvent)) && finalBeatSettled
             ? { outcome, result }
             : null}
         editUnitSlots={editUnitSlots}

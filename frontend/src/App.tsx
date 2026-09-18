@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ArrowRight, CalendarDays, Gift, Mail, Newspaper, RefreshCw, Send, ShoppingBag, Sparkles, Swords, WalletCards, X } from 'lucide-react';
+import { ArrowRight, Gift, Mail, Newspaper, RefreshCw, Send, Sparkles, Swords, WalletCards, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { GameShell, type ArenaSideKey, type ForgeSideKey, type GameSectionKey, type HomeSideKey, type VaultSideKey } from './components/GameShell';
 import { VaultPage } from './components/VaultPage';
@@ -8,6 +8,7 @@ import { ArenaPage } from './components/ArenaPage';
 import { VfxTestPage } from './components/VfxTestPage';
 import { MarketPage } from './components/MarketPage';
 import { SettingsPage } from './components/SettingsPage';
+import { HomeExperience } from './components/HomeExperience';
 import { DailyActivity } from './components/DailyActivity';
 import { SectionHeader } from './components/Effects';
 import { PageHeader, PageHeaderStat } from './components/PageHeader';
@@ -229,7 +230,6 @@ function AuthPanel({
                 onChange={(event) => onCodeChange(event.target.value)}
                 inputMode="numeric"
                 maxLength={6}
-                placeholder="123456"
                 className="w-full bg-transparent text-sm tracking-[0.35em] text-stone-100 outline-none placeholder:text-stone-600"
               />
             </div>
@@ -365,6 +365,8 @@ function HomePage({
   user,
   activeTab,
   heroCount,
+  heroes,
+  onInspectHero,
   bestHeroBp,
   dust,
   relics,
@@ -380,6 +382,8 @@ function HomePage({
   user: AuthUser | null;
   activeTab: HomeSideKey;
   heroCount: number;
+  heroes: SavedHero[];
+  onInspectHero: (id: string) => void;
   bestHeroBp: number | null;
   dust: number;
   relics: number;
@@ -442,29 +446,6 @@ function HomePage({
     setProfileLoadNonce((value) => value + 1);
   };
   const playerName = user?.email?.split('@')[0] || 'Visitor';
-  const news = [
-    {
-      title: 'Arena 2x3 Opens',
-      tag: 'Season',
-      description: 'Deploy front and back lanes, resolve ranked battles, and inspect every combat event.',
-      target: 'arena' as const,
-      action: 'Enter Arena',
-    },
-    {
-      title: 'Shard Enchanting',
-      tag: 'Forge',
-      description: 'New relic rituals are applied to cards after generation.',
-      target: 'forge' as const,
-      action: 'Open Forge',
-    },
-    {
-      title: 'Vault Audit',
-      tag: 'Archive',
-      description: 'Power sorting and relic panels have been rebuilt for faster roster review.',
-      target: 'vault' as const,
-      action: 'Review Vault',
-    },
-  ];
   const profileLevel = previewContentEnabled ? 'Demo' : 'Beta';
   const profileTitle = previewContentEnabled ? 'Simulation' : 'Player';
   const combatRating = previewContentEnabled ? 'Not tracked' : ladder ? `${ladder.tier} · ${ladder.rating}` : ladderError ? 'Unavailable' : 'Loading';
@@ -511,9 +492,7 @@ function HomePage({
   );
 
   if (!user) {
-    return previewContentEnabled
-      ? <GuestLandingHome onJoin={onOpenAuth} onNavigate={onNavigate} previewContentEnabled={previewContentEnabled} />
-      : <GuestLandingHomeLive onJoin={onOpenAuth} onNavigate={onNavigate} />;
+    return <HomeExperience onJoin={onOpenAuth} onNavigate={onNavigate} onInspect={onInspectHero} onFriends={onOpenFriends} />;
   }
 
   if (activeTab === 'profile') {
@@ -678,86 +657,9 @@ function HomePage({
     );
   }
 
-  return (
-    <div className="mx-auto max-w-[1540px] px-6 py-8 2xl:px-8">
-      {header}
-
-      <section className="mt-7 grid items-stretch gap-6 xl:grid-cols-[minmax(0,1fr)_390px]">
-        <section className="flex min-h-[430px] flex-col justify-between overflow-hidden border border-[#b49664]/20 bg-[radial-gradient(circle_at_18%_10%,rgba(180,150,100,0.16),transparent_34%),linear-gradient(135deg,rgba(21,18,14,0.96),rgba(5,5,5,0.98))] p-7 lg:p-9">
-          <div>
-            <div className="text-[10px] uppercase tracking-[0.32em] text-[#b49664]">Next Move</div>
-            <h2 className="mt-4 max-w-3xl font-display text-4xl font-light uppercase tracking-[0.12em] text-stone-100 lg:text-5xl">
-              {heroCount > 0 ? 'Take your warband into the Arena' : 'Forge your first hero'}
-            </h2>
-            <p className="mt-5 max-w-2xl text-sm leading-7 text-stone-400">
-              {heroCount > 0
-                ? `${heroCount} card${heroCount === 1 ? '' : 's'} stand ready. Review your formation, challenge a friend, or enter ranked matchmaking.`
-                : 'Create a playable hero card before entering training or ranked matchmaking.'}
-            </p>
-            <button
-              type="button"
-              onClick={() => onNavigate(heroCount > 0 ? 'arena' : 'forge')}
-              className="mt-7 inline-flex h-12 items-center gap-3 bg-[#806838] px-7 text-[10px] font-semibold uppercase tracking-[0.24em] text-stone-100 transition hover:bg-[#9a7d4a]"
-            >
-              {heroCount > 0 ? <Swords size={16} /> : <Sparkles size={16} />}
-              {heroCount > 0 ? 'Enter Arena' : 'Open Forge'}
-            </button>
-          </div>
-          <div className="mt-10 grid gap-px border border-white/8 bg-white/8 sm:grid-cols-3">
-            <button type="button" onClick={() => onNavigate('forge')} className="bg-[#080808]/95 p-4 text-left transition hover:bg-[#b49664]/10">
-              <Sparkles size={15} className="text-[#d8b06c]" />
-              <span className="mt-3 block text-[10px] uppercase tracking-[0.22em] text-stone-200">Forge Hero</span>
-            </button>
-            <button type="button" onClick={() => onNavigate('vault')} className="bg-[#080808]/95 p-4 text-left transition hover:bg-[#b49664]/10">
-              <WalletCards size={15} className="text-[#d8b06c]" />
-              <span className="mt-3 block text-[10px] uppercase tracking-[0.22em] text-stone-200">Review Vault</span>
-            </button>
-            <button type="button" onClick={onOpenFriends} className="bg-[#080808]/95 p-4 text-left transition hover:bg-[#b49664]/10">
-              <Mail size={15} className="text-[#d8b06c]" />
-              <span className="mt-3 block text-[10px] uppercase tracking-[0.22em] text-stone-200">Open Friends</span>
-            </button>
-          </div>
-        </section>
-
-        <aside className="flex h-full flex-col gap-6">
-          <section className="flex flex-1 flex-col border border-white/8 bg-black/20 p-6">
-            <HomeSectionTitle icon={<CalendarDays size={16} />} eyebrow="Daily" title="Ritual Board" />
-            {dailyToken || previewContentEnabled ? (
-              <DailyActivity token={dailyToken} demoMode={previewContentEnabled} economy={economy} onEconomyChange={onEconomyChange} />
-            ) : (
-              <DailyPreview />
-            )}
-          </section>
-        </aside>
-      </section>
-
-      <section className="mt-6 border border-white/8 bg-black/20 p-6">
-        <div className="mb-5 flex items-end justify-between gap-4">
-          <HomeSectionTitle icon={<Newspaper size={16} />} eyebrow="Updates" title="Dispatch" />
-          <span className="text-[10px] uppercase tracking-[0.24em] text-stone-600">Core Loop</span>
-        </div>
-        <div className="divide-y divide-white/8 border-y border-white/8">
-          {news.map((item) => (
-            <div key={item.title} className="grid gap-4 py-5 md:grid-cols-[120px_minmax(0,1fr)_auto] md:items-center">
-              <div className="text-[9px] uppercase tracking-[0.26em] text-[#b49664]">{item.tag}</div>
-              <div>
-                <h3 className="text-sm uppercase tracking-[0.14em] text-stone-100">{item.title}</h3>
-                <p className="mt-2 text-xs leading-5 text-stone-500">{item.description}</p>
-              </div>
-              <button type="button" onClick={() => onNavigate(item.target)} className="inline-flex h-9 items-center gap-2 border border-white/10 px-4 text-[9px] uppercase tracking-[0.2em] text-stone-400 transition hover:border-[#b49664]/40 hover:text-stone-100">
-                {item.action} <ArrowRight size={12} />
-              </button>
-            </div>
-          ))}
-        </div>
-        <div className="mt-5 flex justify-end">
-          <button type="button" onClick={() => onNavigate('market')} className="inline-flex items-center gap-2 text-[9px] uppercase tracking-[0.22em] text-stone-500 transition hover:text-[#d8b06c]">
-            Open Relic Market <ShoppingBag size={13} />
-          </button>
-        </div>
-      </section>
-    </div>
-  );
+  return <HomeExperience playerName={playerName} heroes={heroes} dust={dust} relics={relics}
+    onJoin={onOpenAuth} onNavigate={onNavigate} onInspect={onInspectHero} onFriends={onOpenFriends}
+    daily={<DailyActivity token={dailyToken} demoMode={previewContentEnabled} economy={economy} onEconomyChange={onEconomyChange} />} />;
 }
 
 function HomeSectionTitle({ icon, eyebrow, title }: { icon: React.ReactNode; eyebrow: string; title: string }) {
@@ -768,326 +670,6 @@ function HomeSectionTitle({ icon, eyebrow, title }: { icon: React.ReactNode; eye
         <div className="text-[10px] uppercase tracking-[0.28em] text-[#b49664]">{eyebrow}</div>
         <h2 className="mt-1 font-display text-2xl font-light uppercase tracking-[0.16em] text-stone-100">{title}</h2>
       </div>
-    </div>
-  );
-}
-
-function GuestLandingHome({
-  onJoin,
-  onNavigate,
-  previewContentEnabled,
-}: {
-  onJoin: () => void;
-  onNavigate: (section: GameSectionKey) => void;
-  previewContentEnabled: boolean;
-}) {
-  const guestPanels = previewContentEnabled
-    ? [
-        ['12M+', 'Heroes Forged'],
-        ['2.4M+', 'Battles Fought'],
-        ['850K+', 'Players'],
-        ['∞', 'Legends Remembered'],
-      ]
-    : [
-        ['Forge', 'Turn an image into a persistent hero card'],
-        ['Train', 'Test builds privately before ranked queueing'],
-        ['Arena', 'Enter tactical PvP under BP constraints'],
-        ['Market', 'Recycle Dust and relic inventory inside the loop'],
-      ];
-  const guestTicker = previewContentEnabled
-    ? [
-        ['Latest Battle', 'Angron defeated Lucius in 8 rounds'],
-        ['New Relic', 'Voidwalker Cloak joined the relic vault'],
-        ['System Update', 'Balance patch v1.2.4 adjusts Arena rewards'],
-      ]
-    : [
-        ['MVP Scope', 'Forge, Vault, Train, Arena, Daily rewards, and relic market are in scope.'],
-        ['Chronicle', 'PvE campaign is planned after MVP and does not gate first release.'],
-        ['Payments', 'Recharge and Stripe settlement stay out of the first public build.'],
-      ];
-  const guestStore = previewContentEnabled
-    ? [
-        ['新手大礼', '$6.99'],
-        ['粉尘包', '$9.99'],
-        ['遗物包', '$9.99'],
-      ]
-    : [
-        ['Internal Economy', 'Dust only'],
-        ['Relic Trading', 'Live'],
-        ['Recharge Later', 'Stripe deferred'],
-      ];
-  void guestPanels;
-  void guestTicker;
-  void guestStore;
-  return (
-    <div className="mx-auto max-w-[1540px] px-6 py-8 2xl:px-8">
-      <section className="relative overflow-hidden border border-white/8 bg-[#050505] px-8 py-10 xl:min-h-[650px]">
-        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_47%_45%,rgba(190,120,54,0.24),transparent_22%),radial-gradient(circle_at_42%_42%,rgba(255,230,170,0.11),transparent_16%),linear-gradient(90deg,rgba(0,0,0,0.36),transparent_42%,rgba(0,0,0,0.58))]" />
-        <div className="pointer-events-none absolute inset-x-0 bottom-0 h-48 bg-gradient-to-t from-black via-black/60 to-transparent" />
-
-        <div className="relative grid gap-8 xl:grid-cols-[minmax(310px,0.85fr)_minmax(360px,520px)_340px] xl:items-center">
-          <div>
-            <div className="text-[10px] uppercase tracking-[0.36em] text-[#b49664]">A generative hero battler</div>
-            <h1 className="mt-5 font-display text-6xl font-light uppercase leading-[1.05] tracking-[0.18em] text-stone-100 md:text-7xl">
-              Forge
-              <br />
-              Legends
-            </h1>
-            <p className="mt-6 text-sm italic tracking-[0.08em] text-stone-500">"Illuminate the enemy."</p>
-            <div className="mt-10 flex flex-wrap items-center gap-4">
-              <button
-                type="button"
-                onClick={onJoin}
-                className="bg-[#806838] px-8 py-4 text-[11px] font-semibold uppercase tracking-[0.24em] text-stone-100 transition hover:bg-[#9a7d4a]"
-              >
-                Join the Forge
-              </button>
-              <span className="border border-white/10 px-6 py-4 text-[11px] font-semibold uppercase tracking-[0.24em] text-stone-500">
-                Playable Prototype
-              </span>
-            </div>
-          </div>
-
-          <div className="relative mx-auto w-full max-w-[420px]">
-            <div className="pointer-events-none absolute inset-x-8 -bottom-7 h-16 rounded-[50%] border border-[#b49664]/25 bg-[#b49664]/15 blur-sm" />
-            <div className="relative border border-[#b49664]/45 bg-black/70 p-4 shadow-[0_0_80px_rgba(180,120,54,0.2)]">
-              <div className="relative min-h-[520px] overflow-hidden border border-white/10 bg-[radial-gradient(circle_at_50%_26%,rgba(210,150,80,0.28),transparent_25%),linear-gradient(180deg,#17100c_0%,#050505_58%,#090909_100%)]">
-                <div className="absolute inset-x-6 top-6 flex items-start justify-between">
-                  <div className="space-y-2">
-                    <div className="text-[10px] uppercase tracking-[0.28em] text-[#d8b06c]">Mythic</div>
-                    <div className="inline-flex border border-white/10 bg-black/50 px-3 py-1 text-[10px] uppercase tracking-[0.22em] text-stone-300">Warrior</div>
-                  </div>
-                  <div className="font-display text-3xl font-light text-stone-100">11,500</div>
-                </div>
-                <div className="absolute inset-x-10 top-28 h-56 bg-[radial-gradient(circle_at_50%_30%,rgba(255,226,160,0.35),transparent_18%),radial-gradient(circle_at_50%_62%,rgba(150,58,22,0.38),transparent_30%)]" />
-                <div className="absolute inset-x-8 bottom-8">
-                  <h2 className="font-display text-3xl font-light tracking-[0.12em] text-stone-100">Angron</h2>
-                  <p className="mt-3 text-sm leading-6 text-stone-400">A daemon-ascended engine of war and rage, forged from image and rule-bound stats.</p>
-                  <div className="mt-5 grid grid-cols-4 gap-2 text-[10px] uppercase tracking-[0.18em]">
-                    <span className="border border-emerald-400/25 bg-emerald-400/10 px-2 py-2 text-emerald-200">HP 3234</span>
-                    <span className="border border-amber-400/25 bg-amber-400/10 px-2 py-2 text-amber-200">ATK 369</span>
-                    <span className="border border-violet-400/25 bg-violet-400/10 px-2 py-2 text-violet-200">DEF 59</span>
-                    <span className="border border-teal-400/25 bg-teal-400/10 px-2 py-2 text-teal-200">SPD 84</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <aside className="space-y-5">
-            <div className="grid gap-4">
-              {[
-                ['12M+', 'Heroes Forged'],
-                ['2.4M+', 'Battles Fought'],
-                ['850K+', 'Players'],
-                ['∞', 'Legends Remembered'],
-              ].map(([value, label]) => (
-                <div key={label} className="grid grid-cols-[70px_1fr] items-center gap-4">
-                  <div className="font-display text-2xl font-light text-stone-100">{value}</div>
-                  <div className="text-[10px] uppercase tracking-[0.24em] text-stone-600">{label}</div>
-                </div>
-              ))}
-            </div>
-            <div className="border border-white/8 bg-black/30 p-5">
-              <HomeSectionTitle icon={<CalendarDays size={16} />} eyebrow="Daily" title="Ritual Preview" />
-              <DailyPreview />
-            </div>
-          </aside>
-        </div>
-      </section>
-
-      <section className="grid border-x border-b border-white/8 bg-black/20 xl:grid-cols-3">
-        {[
-          ['Vault', 'Your heroes. Eternal record.', 'vault'],
-          ['Arena', 'Tactical battles. Real consequences.', 'arena'],
-          ['Relics', 'Ancient relics. Alter fate.', 'market'],
-        ].map(([title, description, target]) => (
-          <button
-            key={title}
-            type="button"
-            onClick={() => onNavigate(target as GameSectionKey)}
-            className="min-h-56 border-t border-white/8 p-8 text-left transition hover:bg-white/[0.03] xl:border-t-0 xl:border-r xl:last:border-r-0"
-          >
-            <div className="text-[10px] uppercase tracking-[0.28em] text-[#b49664]">{title}</div>
-            <div className="mt-4 font-display text-2xl font-light uppercase leading-8 tracking-[0.12em] text-stone-100">{description}</div>
-            <div className="mt-10 text-[10px] uppercase tracking-[0.24em] text-[#d8b06c]">Enter {title}</div>
-          </button>
-        ))}
-      </section>
-
-      <section className="grid border-x border-b border-white/8 bg-black/30 xl:grid-cols-[1fr_1fr_1fr_220px]">
-        {[
-          ['Latest Battle', 'Angron defeated Lucius in 8 rounds'],
-          ['New Relic', 'Voidwalker Cloak joined the relic vault'],
-          ['System Update', 'Balance patch v1.2.4 adjusts Arena rewards'],
-        ].map(([label, value]) => (
-          <div key={label} className="border-b border-white/8 px-8 py-5 xl:border-b-0 xl:border-r">
-            <div className="text-[9px] uppercase tracking-[0.24em] text-[#b49664]">{label}</div>
-            <div className="mt-2 text-sm leading-6 text-stone-500">{value}</div>
-          </div>
-        ))}
-        <div className="px-8 py-5 text-left text-[10px] uppercase tracking-[0.24em] text-stone-600">
-          3 briefings
-        </div>
-      </section>
-
-      <section className="mt-6">
-        <div className="border border-white/8 bg-black/20 p-6">
-          <HomeSectionTitle icon={<Gift size={16} />} eyebrow="Offers" title="Starter Store" />
-          <div className="mt-5 grid gap-4 md:grid-cols-3">
-            {[
-              ['新手大礼', '$6.99'],
-              ['粉尘包', '$9.99'],
-              ['遗物包', '$9.99'],
-            ].map(([title, price]) => (
-              <div key={title} className="border border-white/8 bg-black/30 p-4">
-                <div className="text-sm uppercase tracking-[0.18em] text-stone-200">{title}</div>
-                <div className="mt-3 font-display text-2xl font-light text-stone-100">{price}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-    </div>
-  );
-}
-
-function GuestLandingHomeLive({ onJoin, onNavigate }: { onJoin: () => void; onNavigate: (section: GameSectionKey) => void }) {
-  return (
-    <div className="mx-auto max-w-[1540px] px-6 py-8 2xl:px-8">
-      <section className="relative overflow-hidden border border-white/8 bg-[#050505] px-8 py-10 xl:min-h-[650px]">
-        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_47%_45%,rgba(190,120,54,0.24),transparent_22%),radial-gradient(circle_at_42%_42%,rgba(255,230,170,0.11),transparent_16%),linear-gradient(90deg,rgba(0,0,0,0.36),transparent_42%,rgba(0,0,0,0.58))]" />
-        <div className="pointer-events-none absolute inset-x-0 bottom-0 h-48 bg-gradient-to-t from-black via-black/60 to-transparent" />
-
-        <div className="relative grid gap-8 xl:grid-cols-[minmax(310px,0.85fr)_minmax(360px,520px)_340px] xl:items-center">
-          <div>
-            <div className="text-[10px] uppercase tracking-[0.36em] text-[#b49664]">MVP Beta</div>
-            <h1 className="mt-5 font-display text-6xl font-light uppercase leading-[1.05] tracking-[0.18em] text-stone-100 md:text-7xl">
-              Forge
-              <br />
-              Legends
-            </h1>
-            <p className="mt-6 max-w-xl text-sm leading-7 text-stone-500">
-              Turn an image into a persistent hero card, test it in training, queue for ranked Arena, and recycle Dust and relics inside a server-authoritative game loop.
-            </p>
-            <div className="mt-10 flex flex-wrap items-center gap-4">
-              <button
-                type="button"
-                onClick={onJoin}
-                className="bg-[#806838] px-8 py-4 text-[11px] font-semibold uppercase tracking-[0.24em] text-stone-100 transition hover:bg-[#9a7d4a]"
-              >
-                Join the Forge
-              </button>
-              <button
-                type="button"
-                onClick={() => document.getElementById('launch-scope')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
-                className="border border-white/10 px-6 py-4 text-[11px] font-semibold uppercase tracking-[0.24em] text-stone-400 transition hover:border-stone-500 hover:text-stone-200"
-              >
-                View Beta Scope
-              </button>
-            </div>
-          </div>
-
-          <div className="relative mx-auto w-full max-w-[420px]">
-            <div className="pointer-events-none absolute inset-x-8 -bottom-7 h-16 rounded-[50%] border border-[#b49664]/25 bg-[#b49664]/15 blur-sm" />
-            <div className="relative border border-[#b49664]/45 bg-black/70 p-4 shadow-[0_0_80px_rgba(180,120,54,0.2)]">
-              <div className="relative min-h-[520px] overflow-hidden border border-white/10 bg-[radial-gradient(circle_at_50%_26%,rgba(210,150,80,0.28),transparent_25%),linear-gradient(180deg,#17100c_0%,#050505_58%,#090909_100%)]">
-                <div className="absolute inset-x-6 top-6 flex items-start justify-between">
-                  <div className="space-y-2">
-                    <div className="text-[10px] uppercase tracking-[0.28em] text-[#d8b06c]">MVP</div>
-                    <div className="inline-flex border border-white/10 bg-black/50 px-3 py-1 text-[10px] uppercase tracking-[0.22em] text-stone-300">Server Authoritative</div>
-                  </div>
-                  <div className="font-display text-3xl font-light text-stone-100">Forge</div>
-                </div>
-                <div className="absolute inset-x-10 top-28 h-56 bg-[radial-gradient(circle_at_50%_30%,rgba(255,226,160,0.35),transparent_18%),radial-gradient(circle_at_50%_62%,rgba(150,58,22,0.38),transparent_30%)]" />
-                <div className="absolute inset-x-8 bottom-8">
-                  <h2 className="font-display text-3xl font-light tracking-[0.12em] text-stone-100">Current Loop</h2>
-                  <p className="mt-3 text-sm leading-6 text-stone-400">Forge, Vault, Train, Arena, Daily rewards, and the relic market are live. Chronicle and recharge are intentionally deferred.</p>
-                  <div className="mt-5 grid grid-cols-2 gap-2 text-[10px] uppercase tracking-[0.18em]">
-                    <span className="border border-emerald-400/25 bg-emerald-400/10 px-2 py-2 text-emerald-200">Forge</span>
-                    <span className="border border-amber-400/25 bg-amber-400/10 px-2 py-2 text-amber-200">Arena</span>
-                    <span className="border border-violet-400/25 bg-violet-400/10 px-2 py-2 text-violet-200">Market</span>
-                    <span className="border border-teal-400/25 bg-teal-400/10 px-2 py-2 text-teal-200">Daily</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <aside className="space-y-5">
-            <div className="grid gap-4">
-              {[
-                ['Forge', 'Turn an image into a persistent hero card'],
-                ['Train', 'Test builds privately before ranked queueing'],
-                ['Arena', 'Enter tactical PvP under BP constraints'],
-                ['Market', 'Recycle Dust and relic inventory inside the loop'],
-              ].map(([value, label]) => (
-                <div key={label} className="grid grid-cols-[70px_1fr] items-center gap-4">
-                  <div className="font-display text-2xl font-light text-stone-100">{value}</div>
-                  <div className="text-[10px] uppercase tracking-[0.24em] text-stone-600">{label}</div>
-                </div>
-              ))}
-            </div>
-            <div className="border border-white/8 bg-black/30 p-5">
-              <HomeSectionTitle icon={<CalendarDays size={16} />} eyebrow="Daily" title="Ritual Preview" />
-              <DailyPreview />
-            </div>
-          </aside>
-        </div>
-      </section>
-
-      <section className="grid border-x border-b border-white/8 bg-black/20 xl:grid-cols-3">
-        {[
-          ['Vault', 'Your heroes. Eternal record.', 'vault'],
-          ['Arena', 'Tactical battles. Real consequences.', 'arena'],
-          ['Relics', 'Ancient relics. Alter fate.', 'market'],
-        ].map(([title, description, target]) => (
-          <button
-            key={title}
-            type="button"
-            onClick={() => onNavigate(target as GameSectionKey)}
-            className="min-h-56 border-t border-white/8 p-8 text-left transition hover:bg-white/[0.03] xl:border-t-0 xl:border-r xl:last:border-r-0"
-          >
-            <div className="text-[10px] uppercase tracking-[0.28em] text-[#b49664]">{title}</div>
-            <div className="mt-4 font-display text-2xl font-light uppercase leading-8 tracking-[0.12em] text-stone-100">{description}</div>
-            <div className="mt-10 text-[10px] uppercase tracking-[0.24em] text-[#d8b06c]">Enter {title}</div>
-          </button>
-        ))}
-      </section>
-
-      <section className="grid border-x border-b border-white/8 bg-black/30 xl:grid-cols-[1fr_1fr_1fr_220px]">
-        {[
-          ['MVP Scope', 'Forge, Vault, Train, Arena, Daily rewards, and relic market are in scope.'],
-          ['Chronicle', 'PvE campaign is planned after MVP and does not gate first release.'],
-          ['Payments', 'Recharge and Stripe settlement stay out of the first public build.'],
-        ].map(([label, value]) => (
-          <div key={label} className="border-b border-white/8 px-8 py-5 xl:border-b-0 xl:border-r">
-            <div className="text-[9px] uppercase tracking-[0.24em] text-[#b49664]">{label}</div>
-            <div className="mt-2 text-sm leading-6 text-stone-500">{value}</div>
-          </div>
-        ))}
-        <div className="px-8 py-5 text-left text-[10px] uppercase tracking-[0.24em] text-stone-600">
-          Release scope
-        </div>
-      </section>
-
-      <section id="launch-scope" className="mt-6 scroll-mt-24">
-        <div className="border border-white/8 bg-black/20 p-6">
-          <HomeSectionTitle icon={<Gift size={16} />} eyebrow="Economy" title="Launch Scope" />
-          <div className="mt-5 grid gap-4 md:grid-cols-3">
-            {[
-              ['Internal Economy', 'Dust only'],
-              ['Relic Trading', 'Live'],
-              ['Recharge Later', 'Stripe deferred'],
-            ].map(([title, price]) => (
-              <div key={title} className="border border-white/8 bg-black/30 p-4">
-                <div className="text-sm uppercase tracking-[0.18em] text-stone-200">{title}</div>
-                <div className="mt-3 font-display text-2xl font-light text-stone-100">{price}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
     </div>
   );
 }
@@ -1117,28 +699,6 @@ function ProfileAction({ title, description, onClick }: { title: string; descrip
       <div className="text-sm uppercase tracking-[0.18em] text-stone-200">{title}</div>
       <div className="mt-2 text-xs leading-5 text-stone-500">{description}</div>
     </button>
-  );
-}
-
-function DailyPreview() {
-  return (
-    <div className="mt-6 space-y-3 border-t border-white/8 pt-6">
-      {[
-        ['Daily Sign In', '+30 Dust', 'Login to claim today.'],
-        ['Forge One Card', '+100 Dust', 'Create a hero in Forge.'],
-        ['Use One Relic', '+300 Dust', 'Enchant an existing card with relic power.'],
-      ].map(([title, reward, description]) => (
-        <div key={title} className="border border-white/8 bg-black/30 p-4">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <div className="text-sm text-stone-100">{title}</div>
-              <div className="mt-1 text-xs text-stone-500">{description}</div>
-            </div>
-            <div className="text-[10px] uppercase tracking-[0.18em] text-[#d8b06c]">{reward}</div>
-          </div>
-        </div>
-      ))}
-    </div>
   );
 }
 
@@ -1676,6 +1236,8 @@ const App: React.FC = () => {
           user={user}
           activeTab={homeTab}
           heroCount={savedHeroes.length}
+          heroes={savedHeroes}
+          onInspectHero={(id) => { setSelectedVaultId(id); setVaultTab('card'); handleNavigate('vault'); }}
           bestHeroBp={bestHeroBp}
           dust={dustBalance(economy)}
           relics={relicBalance(economy)}

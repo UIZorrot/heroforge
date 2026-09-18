@@ -21,8 +21,10 @@ import { cn } from '../lib/utils';
 import { EmptyState, SectionHeader, StatPill } from './Effects';
 import { HeroCard } from './HeroCard';
 import { ArenaBattleScene } from './ArenaBattleScene';
+import type { BattleSceneControls } from './BattleSceneHud';
 
 interface BattleVisualizerProps {
+  sceneControls?: BattleSceneControls;
   heroA: CharacterData | null;
   heroB: CharacterData | null;
   result: BattleResult | null;
@@ -279,7 +281,7 @@ function BattleEventCard({ event }: { event: BattleResult['events'][number] }) {
   );
 }
 
-export function BattleVisualizer({ heroA, heroB, result, liveSession = false, showPlaybackControls = false, editUnitSlots = false, editableSide, onUnitSlotChange, onClose }: BattleVisualizerProps) {
+export function BattleVisualizer({ heroA, heroB, result, liveSession = false, showPlaybackControls = false, editUnitSlots = false, editableSide, onUnitSlotChange, sceneControls, onClose }: BattleVisualizerProps) {
   const board = result?.board ?? result?.details?.board ?? null;
   const lastLog = result?.logs?.[result.logs.length - 1];
   const winner = result?.winnerLabel || result?.winner || 'Pending';
@@ -300,6 +302,7 @@ export function BattleVisualizer({ heroA, heroB, result, liveSession = false, sh
   if (board && result) {
     return (
       <ArenaBattleScene
+        sceneControls={sceneControls}
         board={board}
         events={result?.events ?? []}
         logs={result?.logs ?? []}
@@ -308,7 +311,7 @@ export function BattleVisualizer({ heroA, heroB, result, liveSession = false, sh
         editUnitSlots={editUnitSlots}
         editableSide={editableSide}
         onUnitSlotChange={onUnitSlotChange}
-        showResultReveal={!liveSession}
+        showResultReveal={!liveSession || result.winner !== 'Pending'}
         showPlaybackControls={showPlaybackControls}
         autoStartKey={showPlaybackControls ? undefined : `${result.winner}-${eventCount}-${result.events?.at(-1)?.timestamp ?? 'ready'}`}
       />

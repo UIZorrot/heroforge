@@ -372,7 +372,8 @@ export interface BattleSessionObservation {
 export interface BattleSessionSnapshot {
   sessionId: string;
   battleMode: PvpBattleMode;
-  controlMode: 'rest' | 'program';
+  controlMode: 'rest' | 'program' | 'manual';
+  actionOptions?: import('./lib/battleTypes').BattleActionOption[];
   labelA: string;
   labelB: string;
   status: 'preparing' | 'awaiting_action' | 'resolved';
@@ -381,6 +382,7 @@ export interface BattleSessionSnapshot {
   opponentAutoReady?: boolean;
   round: number;
   waitingUntil?: number | null;
+  serverNow?: number;
   waitSeconds: number;
   activeActorTag?: string | null;
   expectedActionSource?: string | null;
@@ -395,6 +397,7 @@ export interface BattleSessionSnapshot {
 }
 
 export interface BattleSessionAction {
+  expectedEventCount?: number;
   actorTag: string;
   kind: 'attack' | 'skill';
   targetTag?: string | null;

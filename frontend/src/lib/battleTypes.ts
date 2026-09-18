@@ -4,13 +4,9 @@ export interface BuffState {
   value: number;
 }
 
-export interface BattleBoardSkill {
-  name?: string;
-  description?: string;
-  TYPE?: string;
-  ROLE?: string;
-  MP_COST?: string | number;
-}
+export type BattleBoardSkill = Partial<import('./gameLogic').Skill>;
+
+export type BattleActionOption = { kind: 'attack' | 'skill'; skillSlot?: 's1' | 's2'; name: string; cost: number; targets: string[]; disabled?: string | null };
 
 export interface BattleEvent {
   round: number;

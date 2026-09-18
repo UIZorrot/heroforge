@@ -190,6 +190,29 @@ def _resolve_pvp_session_with_program(harness, headers: Dict[str, str], entry_id
     return harness.pvp_entry_status(headers, entry_id)
 
 
+def _resolve_manual_session(harness, session_id, headers_a, headers_b):
+    snapshot = harness.client.get(f"/api/battle/sessions/{session_id}", headers=headers_a).get_json()["data"]
+    assert snapshot["controlMode"] == "manual"
+    for _ in range(200):
+        if snapshot["status"] == "resolved":
+            return snapshot
+        assert 0 < snapshot["waitingUntil"] - snapshot["serverNow"] <= 30_000
+        actor = snapshot["activeActorTag"]
+        own, other = (headers_a, headers_b) if actor.startswith("A") else (headers_b, headers_a)
+        option = next(item for item in snapshot["actionOptions"] if not item["disabled"])
+        action = {"actorTag": actor, "kind": option["kind"], "skillSlot": option["skillSlot"],
+                  "targetTag": option["targets"][0], "expectedEventCount": len(snapshot["events"])}
+        denied = harness.client.post(f"/api/battle/sessions/{session_id}/actions", headers=other, json={"action": action})
+        assert denied.status_code == 403
+        response = harness.client.post(f"/api/battle/sessions/{session_id}/actions", headers=own, json={"action": action})
+        assert response.status_code == 200, response.get_data(as_text=True)
+        snapshot = response.get_json()["data"]
+        assert snapshot["viewerSide"] == actor[0]
+        duplicate = harness.client.post(f"/api/battle/sessions/{session_id}/actions", headers=own, json={"action": action})
+        assert duplicate.status_code in {403, 409}
+    raise AssertionError("Manual match did not finish")
+
+
 @pytest.mark.integration
 def test_auth_login_and_initial_economy(harness):
     email = "integration-auth@example.com"
@@ -1441,8 +1464,9 @@ def test_friend_request_and_stake_free_friend_challenge_resolve_end_to_end(harne
     assert ready_b.status_code == 200 and ready_b.get_json()["data"]["status"] == "preparing"
     ready_a = harness.client.post(f"/api/battle/sessions/{session_id}/confirm", headers=headers_a, json={"positions": {"A1": 2}})
     assert ready_a.status_code == 200, ready_a.get_data(as_text=True)
-    assert ready_a.get_json()["data"]["status"] == "resolved"
-    assert ready_a.get_json()["data"]["result"]["controlMode"] == "program"
+    assert ready_a.get_json()["data"]["status"] == "awaiting_action"
+    finished = _resolve_manual_session(harness, session_id, headers_a, headers_b)
+    assert finished["result"]["controlMode"] == "manual"
     assert ready_a.get_json()["data"]["boardHistory"][0]["top"][4]["name"] == "Friendly Beta"
     outgoing = harness.client.get("/api/friends", headers=headers_a).get_json()["data"]["outgoing_challenges"]
     assert outgoing[0]["status"] == "resolved"
@@ -1451,7 +1475,7 @@ def test_friend_request_and_stake_free_friend_challenge_resolve_end_to_end(harne
 
 
 @pytest.mark.integration
-def test_browser_arena_ranked_match_resolves_server_side_without_turn_timeouts(harness):
+def test_browser_arena_ranked_match_accepts_manual_turns_with_thirty_second_deadlines(harness):
     headers_a = harness.login("integration-auto-arena-a@example.com")
     user_a_id = harness.last_user["id"]
     headers_b = harness.login("integration-auto-arena-b@example.com")
@@ -1501,8 +1525,9 @@ def test_browser_arena_ranked_match_resolves_server_side_without_turn_timeouts(h
     assert locked.status_code == 409
     second_ready = harness.client.post(f"/api/battle/sessions/{session_id}/confirm", headers=headers_b, json={"positions": {"B1": 0}})
     assert second_ready.status_code == 200, second_ready.get_data(as_text=True)
-    finished = second_ready.get_json()["data"]
-    assert finished["status"] == "resolved" and finished["result"]["controlMode"] == "program"
+    assert second_ready.get_json()["data"]["status"] == "awaiting_action"
+    finished = _resolve_manual_session(harness, session_id, headers_a, headers_b)
+    assert finished["status"] == "resolved" and finished["result"]["controlMode"] == "manual"
     assert finished["boardHistory"][0]["bottom"][5]["name"] == "Auto Alpha"
     retry = harness.client.post(f"/api/battle/sessions/{session_id}/confirm", headers=headers_b, json={"positions": {"B1": 0}})
     assert retry.status_code == 200 and len(retry.get_json()["data"]["events"]) == len(finished["events"])

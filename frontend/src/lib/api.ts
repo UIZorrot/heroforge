@@ -309,9 +309,9 @@ export async function createBattleSession(
   return payload.data;
 }
 
-export async function prepareBattleSession(teamA: unknown[], teamB: unknown[], token?: string | null): Promise<BattleSessionSnapshot> {
+export async function prepareBattleSession(teamA: unknown[], teamB: unknown[], token?: string | null, controlMode: 'program' | 'manual' = 'program'): Promise<BattleSessionSnapshot> {
   const payload = await requestJson<{ data: BattleSessionSnapshot }>('/api/battle/sessions', {
-    method: 'POST', body: JSON.stringify({ teamA, teamB, battleMode: 'arena_2x3', controlMode: 'program', preparation: true, labelA: 'Forger', labelB: 'Rival' }),
+    method: 'POST', body: JSON.stringify({ teamA, teamB, battleMode: 'arena_2x3', controlMode, preparation: true, labelA: 'Forger', labelB: 'Rival' }),
   }, token);
   return payload.data;
 }
