@@ -1,0 +1,16 @@
+{
+  "chainId": 10143,
+  "rpcUrl": "https://testnet-rpc.monad.xyz",
+  "contract": "HeroForgeCards",
+  "address": "0x17bdc9D38BE086CDcEE39D524d33F484cCdD359a",
+  "deployer": "0xd479f97F53756cA15d43745b5B4fB8F77CAc8B94",
+  "deploymentTransaction": "0x2c3f84a654d7495d52e663a0c87b5bb6f58e7beb15d95a6cf4a29e9f14fb1df8",
+  "firstMintTransaction": "0x62b0ee1c0e216adfa5e400dfb7c987b5fb19e9bb80c5f3ff81707dfd048449de",
+  "firstTokenId": 1,
+  "applicationUrl": "https://hf.txzy.net/monad/",
+  "publicArtworkMintTransaction": "0x385befdbcff3a4b560ee3bbb73de43275d587d549b1a5b1f1e4d27e86535f319",
+  "publicArtworkTokenId": 2,
+  "webReleaseSha256": "c252a63bf99736ac54ad60a457f20afb9f4618195f2570af23a71cad01086937",
+  "sourceVerificationJob": "8154b5b7-d8ae-4877-abf0-64139da883f3",
+  "sourceVerification": "exact_match"
+}
