@@ -21,7 +21,7 @@ export function AppLogo({
   return (
     <div className={`flex items-center ${gap} ${className}`.trim()}>
       {showIcon && (
-        <img src="/logo.png" alt="Hero Forge" className={`${iconClassName} object-contain`} />
+        <img src={`${import.meta.env.BASE_URL}logo.png`} alt="Hero Forge" className={`${iconClassName} object-contain`} />
       )}
       {showText && (
         <div className="flex flex-col items-start leading-none text-white">

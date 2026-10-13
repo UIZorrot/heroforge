@@ -443,7 +443,11 @@ function AccessRequired({ onOpenAuth }: { onOpenAuth: () => void }) {
 }
 
 const App: React.FC = () => {
-  const [activeSection, setActiveSection] = useState<GameSectionKey>('home');
+  const [activeSection, setActiveSection] = useState<GameSectionKey>(() => (
+    window.location.pathname.replace(/\/+$/, '') === '/monad' || window.location.hash === '#monad'
+      ? 'onchain'
+      : 'home'
+  ));
   const [homeTab, setHomeTab] = useState<HomeSideKey>('welcome');
   const [forgeTab, setForgeTab] = useState<ForgeSideKey>('create');
   const [arenaTab, setArenaTab] = useState<ArenaSideKey>('queue');

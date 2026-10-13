@@ -21,7 +21,7 @@ const monadTestnet = defineChain({
   testnet: true,
 });
 
-const contractAddress = (import.meta.env.VITE_MONAD_TESTNET_CONTRACT_ADDRESS || '') as Address;
+const contractAddress = (import.meta.env.VITE_MONAD_TESTNET_CONTRACT_ADDRESS || '0x17bdc9D38BE086CDcEE39D524d33F484cCdD359a') as Address;
 const contractAbi = [
   { type: 'function', name: 'mintHero', stateMutability: 'nonpayable', inputs: [{ name: 'name', type: 'string' }, { name: 'archetype', type: 'string' }, { name: 'imageURI', type: 'string' }, { name: 'battlePower', type: 'uint32' }], outputs: [{ name: 'tokenId', type: 'uint256' }] },
   { type: 'function', name: 'balanceOf', stateMutability: 'view', inputs: [{ name: 'owner', type: 'address' }], outputs: [{ name: '', type: 'uint256' }] },
@@ -41,7 +41,7 @@ type MintedCard = { id: bigint; name: string; archetype: string; image: string; 
 type TokenMetadata = { name?: string; image?: string; attributes?: { trait_type?: string; value?: string | number }[] };
 
 function cardImageUri(role: string) {
-  return `${window.location.origin}/art/void-labyrinth/${role}-v2.webp`;
+  return new URL(`${import.meta.env.BASE_URL}art/void-labyrinth/${role}-v2.webp`, window.location.origin).href;
 }
 
 function resolveImage(uri: string) {

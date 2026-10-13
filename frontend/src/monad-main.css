@@ -1,0 +1,5 @@
+.monad-site { position: relative; min-height: 100vh; }
+.monad-site-header { position: absolute; z-index: 1; top: 0; right: 0; left: 0; display: flex; align-items: center; justify-content: space-between; padding: 22px clamp(22px, 5vw, 84px); border-bottom: 1px solid rgba(197, 173, 126, .12); }
+.monad-site-header a { text-decoration: none; }
+.monad-site-game-link { color: #c1a875; font-size: 11px; letter-spacing: .1em; }
+.monad-site-header a:focus-visible { outline: 2px solid #c1a875; outline-offset: 5px; }

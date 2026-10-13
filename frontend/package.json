@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "build:monad": "tsc -b && vite build --config vite.monad.config.ts",
     "test": "vitest run",
     "lint": "eslint .",
     "preview": "vite preview"
