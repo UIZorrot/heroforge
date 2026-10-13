@@ -6,6 +6,7 @@ import { VaultPage } from './components/VaultPage';
 import { ForgePage } from './components/ForgePage';
 import { ArenaPage } from './components/ArenaPage';
 import { PvePage } from './components/PvePage';
+import { MonadMintPage } from './components/MonadMintPage';
 import { VfxTestPage } from './components/VfxTestPage';
 import { MarketPage } from './components/MarketPage';
 import { SettingsPage } from './components/SettingsPage';
@@ -953,6 +954,10 @@ const App: React.FC = () => {
 
     if (activeSection === 'vfx') {
       return <VfxTestPage />;
+    }
+
+    if (activeSection === 'onchain') {
+      return <MonadMintPage />;
     }
 
     if (!isAuthenticated) return <AccessRequired onOpenAuth={() => setAuthOpen(true)} />;

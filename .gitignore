@@ -17,6 +17,8 @@ frontend/.playwright-cli/
 .wrangler/
 .vscode/
 artifacts/
+cache/
+contracts/node_modules/
 frontend/*-check.png
 frontend/*tile*.png
 videos/

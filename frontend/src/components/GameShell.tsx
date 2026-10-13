@@ -5,7 +5,7 @@ import { DustIcon } from './CurrencyIcons';
 import type { AuthUser } from '../types';
 import { IS_MOCK_MODE } from '../lib/runtimeMode';
 
-export type GameSectionKey = 'home' | 'forge' | 'vault' | 'arena' | 'vfx' | 'chronicle' | 'market' | 'settings';
+export type GameSectionKey = 'home' | 'forge' | 'vault' | 'arena' | 'vfx' | 'chronicle' | 'market' | 'onchain' | 'settings';
 export type ArenaSideKey = 'queue' | 'train' | 'battle';
 export type HomeSideKey = 'welcome' | 'profile' | 'friends';
 export type ForgeSideKey = 'create' | 'enchant';
@@ -55,6 +55,7 @@ const navItems: NavItem[] = [
   ...(IS_MOCK_MODE ? [{ key: 'vfx' as const, label: 'VFX' }] : []),
 
   { key: 'chronicle', label: 'Chronicle' },
+  { key: 'onchain', label: 'Monad' },
   { key: 'market', label: 'Market' },
 ];
 
@@ -82,6 +83,7 @@ const sideItemsBySection: Record<GameSectionKey, SideItem[]> = {
     { label: 'Market', icon: <Gem size={20} />, active: true },
     { label: 'Orders', icon: <WalletCards size={20} /> },
   ],
+  onchain: [],
   settings: [],
 };
 
@@ -147,7 +149,7 @@ export function GameShell({
             <AppLogo showText={false} iconClassName="h-9 w-9" />
           </button>
 
-          <nav className="flex h-full items-center justify-center gap-10">
+          <nav className="flex min-w-0 items-center justify-start gap-5 overflow-x-auto px-3 md:justify-center md:gap-10 md:px-0">
             {navItems.map((item) => {
               const active = item.key === activeSection;
               return (
@@ -155,7 +157,7 @@ export function GameShell({
                   key={item.key}
                   type="button"
                   onClick={() => onNavigate(item.key)}
-                  className={`relative h-full px-1 text-[11px] font-semibold uppercase tracking-[0.32em] transition-colors ${
+                  className={`relative h-full shrink-0 px-1 text-[11px] font-semibold uppercase tracking-[0.32em] transition-colors ${
                     active ? 'text-stone-100' : 'text-stone-500 hover:text-stone-300'
                   }`}
                 >
