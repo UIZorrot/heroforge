@@ -12,5 +12,28 @@
   "publicArtworkTokenId": 2,
   "webReleaseSha256": "c252a63bf99736ac54ad60a457f20afb9f4618195f2570af23a71cad01086937",
   "sourceVerificationJob": "8154b5b7-d8ae-4877-abf0-64139da883f3",
-  "sourceVerification": "exact_match"
+  "sourceVerification": "exact_match",
+  "videoRecordedMint": {
+    "chainId": 10143,
+    "status": "success",
+    "transaction": "0x5cad354459035031d5bcffc37cc741f29429331783667bf5002da4ddf6478bb4",
+    "contract": "0x17bdc9D38BE086CDcEE39D524d33F484cCdD359a",
+    "tokenId": 4,
+    "owner": "0x8d3D1b798fB929de29476EF6FCDCa9501Ee07ad7",
+    "metadata": {
+      "name": "Mirror Stalker Demo",
+      "description": "A HeroForge hero minted on Monad.",
+      "image": "https://hf.txzy.net/monad/art/void-labyrinth/archer-v2.webp",
+      "attributes": [
+        {
+          "trait_type": "Archetype",
+          "value": "Stalker"
+        },
+        {
+          "trait_type": "Battle Power",
+          "value": 5000
+        }
+      ]
+    }
+  }
 }
