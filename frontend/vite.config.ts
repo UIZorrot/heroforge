@@ -5,9 +5,14 @@ import react from '@vitejs/plugin-react'
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
   const ollamaApiKey = env.OLLAMA_API_KEY || env.VITE_OLLAMA_API_KEY
+  const assetRelease = process.env.HF_ASSET_RELEASE || ''
+  if (assetRelease && !/^[a-z0-9][a-z0-9_-]{0,63}$/i.test(assetRelease)) {
+    throw new Error('HF_ASSET_RELEASE must be a short letters/numbers/hyphens/underscores release identifier')
+  }
 
   return {
     plugins: [react()],
+    build: { assetsDir: assetRelease ? `assets/${assetRelease}` : 'assets' },
     server: {
       host: '0.0.0.0',
       port: 4488,

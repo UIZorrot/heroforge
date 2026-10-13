@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { createPublicClient, createWalletClient, custom, defineChain, http, type Address, type Hash } from 'viem';
 import './MonadMintPage.css';
+import { gameArtUrl } from '../lib/artAssets';
 
 type Eip1193Provider = {
   request: (args: { method: string; params?: unknown[] }) => Promise<unknown>;
@@ -41,11 +42,11 @@ type MintedCard = { id: bigint; name: string; archetype: string; image: string; 
 type TokenMetadata = { name?: string; image?: string; attributes?: { trait_type?: string; value?: string | number }[] };
 
 function cardImageUri(role: string) {
-  return new URL(`${import.meta.env.BASE_URL}art/void-labyrinth/${role}-v2.webp`, window.location.origin).href;
+  return gameArtUrl(new URL(`${import.meta.env.BASE_URL}art/void-labyrinth/${role}-v2.webp`, window.location.origin).href);
 }
 
 function resolveImage(uri: string) {
-  return uri.startsWith('ipfs://') ? `https://ipfs.io/ipfs/${uri.slice(7)}` : uri;
+  return uri.startsWith('ipfs://') ? `https://ipfs.io/ipfs/${uri.slice(7)}` : gameArtUrl(uri);
 }
 
 function decodeMetadata(uri: string): TokenMetadata | null {

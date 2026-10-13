@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import stoneUrl from '../assets/battle/stone-floor-tile.png';
 import type { PveTier } from './pveTypes';
+import { gameArtUrl } from './artAssets';
 
 export type VoidWorld = { select: (tier: PveTier, node: number) => void; dispose: () => void };
 
@@ -142,7 +143,7 @@ export function createVoidWorld(host: HTMLElement, onContextLost: () => void): V
       gilding.rotation.z=angle-Math.PI/2;
     }
     // Monsters stay card art: a shallow physical card and worn frame sit inside the gate.
-    const vision=new THREE.TextureLoader().load('/art/void-labyrinth/'+['sentinel','warden','boss'][index]+'-v2.webp',texture=>{if(disposed)texture.dispose();else draw(0);});
+    const vision=new THREE.TextureLoader().load(gameArtUrl('/art/void-labyrinth/'+['sentinel','warden','boss'][index]+'-v2.webp'),texture=>{if(disposed)texture.dispose();else draw(0);});
     vision.colorSpace=THREE.SRGBColorSpace; textures.add(vision);
     const card=new THREE.Group(); card.position.set(0,3.6,-.27); card.scale.setScalar(1.12); card.rotation.y=index===0?.055:index===2?-.055:0; group.add(card);
     block(0,0,0,2.48,3.7,.14,iron,card);

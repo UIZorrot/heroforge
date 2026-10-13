@@ -48,7 +48,9 @@ describe('campaign presentation', () => {
     const result = pveBattleResult(run)!;
     expect(result.board!.bottom[5]?.image).toBe(run.party[0].image);
     expect(result.boardHistory![0].bottom[5]?.image).toBe(run.party[0].image);
-    expect(result.board!.top[0]?.image).toBe('/art/void-labyrinth/sentinel-v2.webp');
+    const enemyPortrait = new URL(result.board!.top[0]!.image!, 'https://hf.txzy.net');
+    expect(enemyPortrait.pathname).toBe('/art/void-labyrinth/sentinel-v2.webp');
+    expect(enemyPortrait.searchParams.has('v')).toBe(true);
     expect(JSON.stringify(run)).toBe(original);
   });
   it('shows live team totals and retains the exact server event feed and costs', () => {

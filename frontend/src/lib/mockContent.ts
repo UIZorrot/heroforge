@@ -2,6 +2,7 @@ import type { EconomySnapshot, RelicDefinition, SavedHero } from '../types';
 import type { CharacterData, Skill } from './gameLogic';
 import { normalizeCharacterData } from './gameLogic';
 import { starterBalance } from './starterBalance';
+import { gameArtUrl } from './artAssets';
 
 type MockHeroSkill = Skill;
 
@@ -140,7 +141,7 @@ function hero(spec: MockHeroSpec, index: number): SavedHero {
   return {
     id: spec.id,
     createdAt: Date.now() - index * 3600000,
-    image: spec.image,
+    image: gameArtUrl(spec.image),
     character: character(spec),
     equippedRelicId: spec.equippedRelicId ?? null,
     enchantment: spec.enchantment ?? null,

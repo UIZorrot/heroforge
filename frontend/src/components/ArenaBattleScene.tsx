@@ -6,6 +6,7 @@ import { Application, Assets, BlurFilter, Container, Graphics, Particle, Particl
 import { Pause, Play, RotateCcw, Shield } from 'lucide-react';
 import arenaHallPerspective from '../assets/battle/arena-hall-perspective.png';
 import { CARD_FALLBACK_SRC } from '../lib/cards';
+import { gameArtUrl } from '../lib/artAssets';
 import {
   blackBackedVfxAlphaForLuminance,
   battleVfxTextureAssets,
@@ -467,7 +468,7 @@ function ArenaUnitCard({ unit, slot, side, currentEvent }: { unit: BattleBoardUn
         />
       )}
       <div data-battle-unit-hitbox className={cn('battle-unit__art relative h-[116px] overflow-hidden border border-black/70 bg-gradient-to-br xl:h-[124px] 2xl:h-[132px]', unitArtTone(unit))}>
-        <img src={image} alt="" draggable={false} className={cn('absolute inset-0 h-full w-full object-cover object-top opacity-90', buffDisplay?.artClass)} />
+        <img src={gameArtUrl(image)} alt="" draggable={false} className={cn('absolute inset-0 h-full w-full object-cover object-top opacity-90', buffDisplay?.artClass)} />
         <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(0,0,0,0.05),rgba(0,0,0,0.16)_42%,rgba(0,0,0,0.84)_100%)]" />
         <div className="absolute left-2 top-2 flex h-5 w-5 items-center justify-center border border-[#d8b06c]/50 bg-black/70 font-display text-[10px] text-[#f0d8ad]">
           {slot.lane + 1}

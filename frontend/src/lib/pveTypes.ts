@@ -1,6 +1,7 @@
 import type { BattleSessionAction, BattleSessionSnapshot } from '../types';
 import type { CharacterData } from './gameLogic';
 import type { BattleResult, BattleBoardState } from './battleTypes';
+import { gameArtUrl } from './artAssets';
 
 export type PveTier = 'threshold' | 'reflection' | 'heart';
 export type PveCreature = { id: string; name: string; role: string; lore: string; tactic: string };
@@ -34,11 +35,11 @@ export function pveBattleResult(run: PveRun, creatures: PveCreature[] = []): Bat
   const portraits = new Map(run.party.map(hero => [hero.slot, hero.image]));
   const names = new Map(creatures.map(creature => [creature.id, creature.name]));
   const enrich = (board: BattleBoardState): BattleBoardState => ({ ...board, topLabel: 'Void Labyrinth', bottomLabel: 'Expedition',
-    bottom: board.bottom.map(unit => unit ? { ...unit, image: portraits.get(unit.slot) ?? unit.image } : null),
+    bottom: board.bottom.map(unit => unit ? { ...unit, image: gameArtUrl(portraits.get(unit.slot) ?? unit.image) } : null),
     top: board.top.map(unit => {
       if (!unit) return null;
       const role = room.npcRoles?.[unit.tag];
-      return { ...unit, name: role ? names.get(role) ?? unit.name : unit.name, image: role ? `/art/void-labyrinth/${role}-v2.webp` : unit.image };
+      return { ...unit, name: role ? names.get(role) ?? unit.name : unit.name, image: gameArtUrl(role ? `/art/void-labyrinth/${role}-v2.webp` : unit.image) };
     }),
   });
   const hp = (side: 'bottom' | 'top', key: 'hp' | 'maxHp' | 'maxMp') => room.board![side].reduce((sum, unit) => sum + (unit?.[key] ?? 0), 0);

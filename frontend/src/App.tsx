@@ -36,6 +36,7 @@ import {
 import { normalizeCharacterData, type CharacterData, type Rarity } from './lib/gameLogic';
 import { createMockEconomy, createMockHeroes, mockEconomy, mockHeroes, mockRelicCatalog, rebalanceMockStarters } from './lib/mockContent';
 import { IS_MOCK_MODE, MOCK_STORAGE_KEYS } from './lib/runtimeMode';
+import { gameArtUrl } from './lib/artAssets';
 import type { AuthUser, BattleHistoryRecord, EconomySnapshot, HeroHistoryRecord, LadderSnapshot, SavedHero } from './types';
 
 type VaultSort = 'date' | 'bp' | 'name';
@@ -144,7 +145,7 @@ function normalizeHeroEnchantment(enchantment: HeroHistoryRecord['enchantment'])
 function heroImageFromSourcePayload(sourcePayload: unknown): string | undefined {
   if (!sourcePayload || typeof sourcePayload !== 'object') return undefined;
   const imageUrl = (sourcePayload as Record<string, unknown>).image_url;
-  return typeof imageUrl === 'string' && imageUrl.trim() ? imageUrl : undefined;
+  return typeof imageUrl === 'string' && imageUrl.trim() ? gameArtUrl(imageUrl) : undefined;
 }
 
 function heroRecordToSavedHero(record: HeroHistoryRecord): SavedHero {
