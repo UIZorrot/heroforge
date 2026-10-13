@@ -6,6 +6,8 @@ All gameplay and player-facing changes are recorded here. This log starts on 202
 
 ### Fixed
 
+- Removed a hardcoded API credential from an unused legacy helper before repository publication. Its historical copies still need removal or confirmed revocation before making the existing repository public; current-source cleanup alone does not clear Git history. Python syntax compilation and whitespace checks pass.
+
 - Restored the existing Chronicle navigation name and matching sign-in copy. PvE describes the campaign's play mode; it does not replace the section name. Void Labyrinth remains the chapter title. Navigation keys and campaign progress are unchanged; targeted TypeScript/lint and whitespace checks validate the copy correction.
 
 - Adding VFX cards after dragging a unit now reserves its existing slot first and places new cards in free slots; adding a card no longer overwrites the caster or primary target.
