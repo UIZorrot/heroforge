@@ -1,3 +1,4 @@
+import { battlePresentationEvents, battleUsesInstantVfx } from '../lib/battleVfxPresentation';
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent as ReactDragEvent } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { gsap } from 'gsap';
@@ -65,13 +66,13 @@ import { useBattleCamera } from './useBattleCamera';
 import { battleFlightSample } from '../lib/battleSceneDepth';
 import { INSTANT_PARTICLES, instantPresentationSize, PHYSICAL_INSTANT_SEQUENCES, isPhysicalInstantSequence } from '../lib/battleInstantParticles';
 import { renderInstantParticles } from './battleInstantRenderer';
-import { BATTLE_PRESENTATION, battleActorKeyframes, battleNextBeatDelay, battleStrikeVector, nextBattlePlaybackIndex } from '../lib/battlePresentation';
+import { BATTLE_PRESENTATION, battleActorKeyframes, battleActionSettleDelay, battleStrikeVector, battleActionBeat, nextBattleActionIndex } from '../lib/battlePresentation';
 
 // Preserve the authored physical hits; elemental instant effects stay procedural.
 const physicalHitAssetIds = new Set(PHYSICAL_INSTANT_SEQUENCES.map(instantHitSequenceAssetId));
 const runtimeVfxAssets = battleVfxTextureAssets.filter(asset => asset.role !== 'instant-hit-sequence' || physicalHitAssetIds.has(asset.id));
 
-const BattleImpactContext = createContext<string | null>(null);
+const BattleImpactContext = createContext<ReadonlySet<string>>(new Set());
 
 const BattleSelectionContext = createContext<{ selected: string | null; active?: string | null; select: (tag: string) => void }>({ selected: null, select: () => {} });
 
@@ -231,7 +232,7 @@ function isCombatMotionEvent(event?: BattleEvent | null) {
 
 export function battleUnitMotionKey(unit: BattleBoardUnit | null, event?: BattleEvent | null) {
   if (!unit) return 'empty-card-motion';
-  const active = isCombatMotionEvent(event) && (unitMatchesTag(unit, event?.attacker) || unitMatchesTag(unit, event?.defender));
+  const active = (isCombatMotionEvent(event) || Boolean(event && battleUsesInstantVfx([event]))) && (unitMatchesTag(unit, event?.attacker) || unitMatchesTag(unit, event?.defender));
   return active ? `${unit.tag}-motion-${eventKey(event)}` : `${unit.tag}-motion-idle`;
 }
 
@@ -334,8 +335,9 @@ function ArenaUnitCard({ unit, slot, side, currentEvent }: { unit: BattleBoardUn
   const isActor = unitMatchesTag(unit, currentEvent?.attacker);
   const isTarget = unitMatchesTag(unit, currentEvent?.defender);
   const impactedKey = useContext(BattleImpactContext);
-  const hasImpact = Boolean(currentEvent && impactedKey === eventKey(currentEvent));
-  const canMove = isCombatMotionEvent(currentEvent) && !prefersReducedMotion();
+  const hasImpact = Boolean(currentEvent && impactedKey.has(eventKey(currentEvent)));
+  const instantCast = currentEvent ? battleUsesInstantVfx([currentEvent]) : false;
+  const canMove = (isCombatMotionEvent(currentEvent) || instantCast) && !prefersReducedMotion();
   const tone = eventVfxTone(currentEvent);
   const mode = eventVfxMode(currentEvent);
   const hitDelay = 0;
@@ -349,10 +351,10 @@ function ArenaUnitCard({ unit, slot, side, currentEvent }: { unit: BattleBoardUn
     const target = findBattleUnitElement(stage, currentEvent.defender);
     if (source && target) setStrike(battleStrikeVector(battleSlotRect(source), battleSlotRect(target), mode !== 'instant'));
   }, [canMove, isActor, isTarget, currentEvent, mode]);
-  const actorFrames = useMemo(() => battleActorKeyframes(strike), [strike]);
+  const actorFrames = useMemo(() => instantCast ? battleActorKeyframes({ x: 0, y: -6 }) : battleActorKeyframes(strike), [instantCast, strike]);
   const recoil = currentEvent?.isCrit ? 34 : 24;
-  const recoilX = strike.directionX * recoil;
-  const recoilY = strike.directionY * recoil;
+  const recoilX = instantCast ? 0 : strike.directionX * recoil;
+  const recoilY = instantCast ? 10 : strike.directionY * recoil;
   const motionX = canMove && isActor ? actorFrames.x : canMove && isTarget && hasImpact ? [0, recoilX, recoilX, -recoilX * .15, 0, 0] : 0;
   const motionY = canMove && isActor ? actorFrames.y : canMove && isTarget && hasImpact ? [0, recoilY, recoilY, -recoilY * .15, 0, 0] : 0;
   const motionScale = canMove && isActor ? actorFrames.scale : canMove && isTarget && hasImpact ? [1, .94, .94, 1.025, 1, 1] : 1;
@@ -584,12 +586,14 @@ function FormationGrid({
   units,
   side,
   currentEvent,
+  actionEvents,
   editUnitSlots,
   onUnitSlotChange,
 }: {
   units: Array<BattleBoardUnit | null>;
   side: 'forger' | 'rival';
   currentEvent?: BattleEvent | null;
+  actionEvents?: BattleEvent[];
   editUnitSlots?: boolean;
   editableSide?: 'A' | 'B';
   onUnitSlotChange?: (unitTag: string, slot: number) => void;
@@ -614,7 +618,7 @@ function FormationGrid({
               unit={unit}
               slot={slot}
               side={side}
-              currentEvent={currentEvent}
+              currentEvent={unit?.tag === currentEvent?.attacker ? currentEvent : actionEvents?.find(event => unitMatchesTag(unit, event.defender)) ?? currentEvent}
               editUnitSlots={editUnitSlots}
               activeDragUnitTag={activeDragUnitTag}
               isDropTarget={activeDragUnitTag !== null && hoverSlot === slot.slot && activeDragUnitTag !== unit?.tag}
@@ -2485,7 +2489,7 @@ function BattleFloatingTextLayer({ event, disabled }: { event?: BattleEvent | nu
   const hostRef = useRef<HTMLDivElement | null>(null);
   const [anchor, setAnchor] = useState<FloatingTextAnchor | null>(null);
   const label = eventAmountLabel(event);
-  const shouldRender = Boolean(event && !disabled && label && label !== '0');
+  const shouldRender = Boolean(event && label && label !== '0');
   const hitDelay = 0;
 
   useLayoutEffect(() => {
@@ -2513,9 +2517,9 @@ function BattleFloatingTextLayer({ event, disabled }: { event?: BattleEvent | nu
             style={{ left: anchor.x, top: anchor.y }}
           >
             <motion.div
-              initial={{ opacity: 0, y: 26, scale: event.isCrit ? 0.68 : 0.78 }}
-              animate={{ opacity: [0, 1, 1, 0], y: [26, -6, -20, -50], scale: event.isCrit ? [0.68, 1.46, 1.16, 1] : [0.78, 1.18, 1.04, 0.96] }}
-              exit={{ opacity: 0, y: -54, scale: 0.92 }}
+              initial={disabled ? false : { opacity: 0, y: 26, scale: event.isCrit ? 0.68 : 0.78 }}
+              animate={disabled ? { opacity: 1, y: -12, scale: 1 } : { opacity: [0, 1, 1, 0], y: [26, -6, -20, -50], scale: event.isCrit ? [0.68, 1.46, 1.16, 1] : [0.78, 1.18, 1.04, 0.96] }}
+              exit={disabled ? { opacity: 0 } : { opacity: 0, y: -54, scale: 0.92 }}
               transition={{ duration: event.isCrit ? 0.44 : 0.38, delay: hitDelay, ease: [0.22, 1, 0.36, 1] }}
               className={cn(
                 'text-center font-display font-semibold leading-none tracking-normal [letter-spacing:0]',
@@ -2541,7 +2545,7 @@ function BattleFloatingTextLayer({ event, disabled }: { event?: BattleEvent | nu
   );
 }
 
-function BattleEffectLayer({ board, event, disabled, onImpact, onReady }: { board: BattleBoardState; event?: BattleEvent | null; disabled?: boolean; onImpact: (key: string) => void; onReady: () => void }) {
+function BattleEffectLayer({ board, displayBoard, actionEvents, disabled, onImpact, onReady }: { board: BattleBoardState; displayBoard: BattleBoardState; actionEvents: BattleEvent[]; disabled?: boolean; onImpact: (key: string) => void; onReady: () => void }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const appRef = useRef<Application | null>(null);
   const layerRef = useRef<Container | null>(null);
@@ -2620,10 +2624,10 @@ function BattleEffectLayer({ board, event, disabled, onImpact, onReady }: { boar
   }, [onReady, textureSignature]);
 
   useEffect(() => {
-    if (!renderUnavailable || !event || disabled) return;
-    const timer = window.setTimeout(() => onImpact(eventKey(event)), BATTLE_PRESENTATION.anticipationMs);
+    if (!renderUnavailable || !actionEvents.length || disabled) return;
+    const timer = window.setTimeout(() => actionEvents.forEach(event => onImpact(eventKey(event))), BATTLE_PRESENTATION.anticipationMs);
     return () => window.clearTimeout(timer);
-  }, [disabled, event, onImpact, renderUnavailable]);
+  }, [disabled, actionEvents, onImpact, renderUnavailable]);
 
   useEffect(() => {
     const app = appRef.current;
@@ -2641,7 +2645,7 @@ function BattleEffectLayer({ board, event, disabled, onImpact, onReady }: { boar
 
     const root = host.parentElement ?? host;
 
-    for (const unit of [...board.bottom, ...board.top]) {
+    for (const unit of [...displayBoard.bottom, ...displayBoard.top]) {
       if (!unit?.alive) continue;
       const activeKeys = activeBattleBuffKeys(unit.buffs.map((buff) => buff.name));
       if (!activeKeys.length) continue;
@@ -2689,13 +2693,13 @@ function BattleEffectLayer({ board, event, disabled, onImpact, onReady }: { boar
     }
 
     return clearPersistentEffects;
-  }, [board, disabled, renderToken]);
+  }, [displayBoard, disabled, renderToken]);
 
   useEffect(() => {
     const app = appRef.current;
     const layer = layerRef.current;
     const host = hostRef.current;
-    if (!app || !layer || !host || disabled || !event) {
+    if (!app || !layer || !host || disabled || !actionEvents.length) {
       tickerCleanupRef.current.forEach((cleanup) => cleanup());
       tickerCleanupRef.current = [];
       tweensRef.current.forEach((tween) => tween.kill());
@@ -2710,7 +2714,9 @@ function BattleEffectLayer({ board, event, disabled, onImpact, onReady }: { boar
     tickerCleanupRef.current = [];
     layer.removeChildren().forEach((child) => child.destroy({ children: true }));
 
-    const mode = eventVfxMode(event);
+    // All targets share one canvas and one anticipation beat.
+    for (const event of actionEvents) {
+    const mode = battleUsesInstantVfx(actionEvents) ? 'instant' : eventVfxMode(event);
     const tone = eventVfxTone(event);
     const palette = pixiPalette(tone);
     const profile = createProjectileVfxProfile(event);
@@ -2835,6 +2841,7 @@ function BattleEffectLayer({ board, event, disabled, onImpact, onReady }: { boar
 
     };
     tweensRef.current.push(gsap.delayedCall(BATTLE_PRESENTATION.anticipationMs / 1000, launch));
+    }
 
     return () => {
       tweensRef.current.forEach((tween) => tween.kill());
@@ -2842,7 +2849,7 @@ function BattleEffectLayer({ board, event, disabled, onImpact, onReady }: { boar
       tickerCleanupRef.current.forEach((cleanup) => cleanup());
       tickerCleanupRef.current = [];
     };
-  }, [board, disabled, event, onImpact, renderToken]);
+  }, [board, disabled, actionEvents, onImpact, renderToken]);
 
   return <div ref={hostRef} className="pointer-events-none absolute inset-0 z-30 overflow-hidden" />;
 }
@@ -3048,6 +3055,7 @@ function ArenaStage({
   onPresentImpact,
   onReady,
   currentEvent,
+  actionEvents,
   totalRounds,
   reducedMotion,
   resultReveal,
@@ -3062,6 +3070,7 @@ function ArenaStage({
   onPresentImpact: (key: string) => void;
   onReady: () => void;
   currentEvent?: BattleEvent | null;
+  actionEvents: BattleEvent[];
   totalRounds: number;
   reducedMotion?: boolean;
   resultReveal?: { outcome: BattleOutcome; result: BattleResult } | null;
@@ -3071,21 +3080,31 @@ function ArenaStage({
 }) {
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
   const stageRef = useRef<HTMLElement | null>(null);
-  const [impactedKey, setImpactedKey] = useState<string | null>(null);
-  const [impactPoint, setImpactPoint] = useState({ x: 0, y: 0, floorY: 0 });
+  type ImpactPoint = { x: number; y: number; floorY: number };
+  const [impacts, setImpacts] = useState<Record<string, ImpactPoint>>({});
+  const completed = useRef(new Set<string>());
+  useEffect(() => { completed.current = new Set(); setImpacts({}); }, [actionEvents]);
   const camera = useBattleCamera(stageRef, Boolean(reducedMotion));
   const onImpact = useCallback((key: string) => {
+    const event = actionEvents.find(event => eventKey(event) === key);
     const stage = stageRef.current;
-    const target = stage && currentEvent ? findBattleUnitElement(stage, currentEvent.defender) : null;
+    const target = stage && event ? findBattleUnitElement(stage, event.defender) : null;
+    let point = { x: 0, y: 0, floorY: 0 };
     if (stage && target) {
-      const host = stage.getBoundingClientRect();
-      const bounds = target.getBoundingClientRect();
-      setImpactPoint({ x: bounds.left + bounds.width / 2 - host.left, y: bounds.top + bounds.height * .4 - host.top, floorY: bounds.bottom - host.top + 5 });
+      const host = stage.getBoundingClientRect(), bounds = target.getBoundingClientRect();
+      point = { x: bounds.left + bounds.width / 2 - host.left, y: bounds.top + bounds.height * .4 - host.top, floorY: bounds.bottom - host.top + 5 };
     }
-    setImpactedKey(key);
-    onPresentImpact(key);
-  }, [currentEvent, onPresentImpact]);
-  const visibleBoard = currentEvent && impactedKey !== eventKey(currentEvent) && !reducedMotion ? beforeBoard ?? board : board;
+    setImpacts(previous => ({ ...previous, [key]: point }));
+    completed.current.add(key);
+    if (currentEvent && actionEvents.every(event => completed.current.has(eventKey(event)))) onPresentImpact(eventKey(currentEvent));
+  }, [actionEvents, currentEvent, onPresentImpact]);
+  const impactedKeys = useMemo(() => new Set(reducedMotion ? actionEvents.map(event => eventKey(event)) : Object.keys(impacts)), [actionEvents, impacts, reducedMotion]);
+  const pending = currentEvent && !actionEvents.every(event => impactedKeys.has(eventKey(event))) && !reducedMotion;
+  const visibleBoard = useMemo(() => !currentEvent ? beforeBoard ?? board : pending && beforeBoard ? {
+    ...beforeBoard,
+    bottom: beforeBoard.bottom.map(unit => unit && actionEvents.some(event => impactedKeys.has(eventKey(event)) && (unit.tag === event.defender || unit.tag === event.attacker)) ? board.bottom.find(final => final?.tag === unit.tag) ?? unit : unit),
+    top: beforeBoard.top.map(unit => unit && actionEvents.some(event => impactedKeys.has(eventKey(event)) && (unit.tag === event.defender || unit.tag === event.attacker)) ? board.top.find(final => final?.tag === unit.tag) ?? unit : unit),
+  } : board, [actionEvents, beforeBoard, board, currentEvent, impactedKeys, pending]);
   const actor = currentEvent ? findEventUnit(board, currentEvent.attacker) : null;
   const target = currentEvent ? findEventUnit(board, currentEvent.defender) : null;
   return (
@@ -3096,28 +3115,33 @@ function ArenaStage({
       {['far', 'middle', 'near'].map((depth, layer) => <div key={depth} className={`battle-stage__dust battle-stage__dust--${depth}`} aria-hidden="true">
         {Array.from({ length: layer === 2 ? 8 : 16 }, (_, index) => <i key={index} style={{ left: `${(index * 37 + layer * 19 + 7) % 100}%`, top: `${(index * 23 + layer * 31 + 11) % 100}%`, animationDelay: `${-index * 2.7 - layer * 5}s`, animationDuration: `${12 + (index % 5) * 1.4 - layer * 2}s` }} />)}
       </div>)}
-      {currentEvent && impactedKey === eventKey(currentEvent) && !reducedMotion && <div key={`light-${impactedKey}`} className="battle-stage__impact-light" style={{ left: impactPoint.x, top: impactPoint.y, width: currentEvent.isCrit ? 420 : 300, height: currentEvent.isCrit ? 360 : 260, background: `radial-gradient(ellipse,${paletteCss(pixiPalette(eventVfxTone(currentEvent)).hot, .28)},transparent 68%)` }} />}
-      {currentEvent && impactedKey === eventKey(currentEvent) && !reducedMotion && <div key={`ground-${impactedKey}`} className="battle-stage__ground-impact" aria-hidden="true" style={{ left: impactPoint.x, top: impactPoint.floorY, borderColor: paletteCss(pixiPalette(eventVfxTone(currentEvent)).core, .65), color: paletteCss(pixiPalette(eventVfxTone(currentEvent)).core, .3) }} />}
+      {!reducedMotion && actionEvents.filter(event => impactedKeys.has(eventKey(event))).map(event => {
+        const point = impacts[eventKey(event)];
+        return point ? <div key={`impact-${eventKey(event)}`} aria-hidden="true">
+          <div className="battle-stage__impact-light" style={{ left: point.x, top: point.y, width: event.isCrit ? 420 : 300, height: event.isCrit ? 360 : 260, background: `radial-gradient(ellipse,${paletteCss(pixiPalette(eventVfxTone(event)).hot, .28)},transparent 68%)` }} />
+          <div className="battle-stage__ground-impact" style={{ left: point.x, top: point.floorY, borderColor: paletteCss(pixiPalette(eventVfxTone(event)).core, .65), color: paletteCss(pixiPalette(eventVfxTone(event)).core, .3) }} />
+        </div> : null;
+      })}
       <header className="battle-stage__heading">
         <span>Round <strong>{board.round}</strong> / {Math.max(board.round, totalRounds)}</span>
         <div><h3>{currentEvent ? eventActionLabel(currentEvent) : 'The arena awaits'}</h3>
-          <p>{actor?.name ?? 'Your formation'} <span>→</span> {target?.name ?? 'Opposing formation'}</p>
+          <p>{actor?.name ?? 'Your formation'} <span>→</span> {actionEvents.length > 1 ? `${actionEvents.length} targets` : target?.name ?? 'Opposing formation'}</p>
         </div>
         <span className="battle-stage__status">{editUnitSlots ? (editableSide ? 'Arrange your cards' : 'Formation test') : 'Arena'}
           {!reducedMotion && <button type="button" className="battle-camera-toggle" aria-pressed={camera.locked} onClick={camera.toggle} title="Move the pointer across the arena to shift perspective. Lock the view to keep this angle.">{camera.locked ? 'View locked' : 'Lock view'}</button>}
         </span>
       </header>
-      <BattleEffectLayer board={board} event={currentEvent} disabled={reducedMotion} onImpact={onImpact} onReady={onReady} />
-      <BattleFloatingTextLayer event={currentEvent && impactedKey === eventKey(currentEvent) ? currentEvent : null} disabled={reducedMotion} />
+      <BattleEffectLayer board={board} displayBoard={visibleBoard} actionEvents={actionEvents} disabled={reducedMotion} onImpact={onImpact} onReady={onReady} />
+      {actionEvents.filter(event => impactedKeys.has(eventKey(event))).map(event => <BattleFloatingTextLayer key={eventKey(event)} event={event} disabled={reducedMotion} />)}
       <p className="battle-stage__scroll-hint">Swipe the table to see both formations</p>
       <BattleSelectionContext.Provider value={{ selected: selectedTag, active: !presentationBusy ? sceneControls?.manual?.actorTag : null, select: setSelectedTag }}>
-      <BattleImpactContext.Provider value={impactedKey}>
+      <BattleImpactContext.Provider value={impactedKeys}>
         <div className="battle-table-perspective">
           <div className="battle-table">
             <div className="battle-table__surface" aria-hidden="true"><div className="battle-table__rim" /><div className="battle-table__wash" /></div>
-            <FormationGrid units={visibleBoard.bottom} side="forger" currentEvent={currentEvent} editUnitSlots={editUnitSlots && (!editableSide || editableSide === 'A')} onUnitSlotChange={onUnitSlotChange} />
+            <FormationGrid units={visibleBoard.bottom} side="forger" currentEvent={currentEvent} actionEvents={actionEvents} editUnitSlots={editUnitSlots && (!editableSide || editableSide === 'A')} onUnitSlotChange={onUnitSlotChange} />
             <div className="battle-table__divide"><span>VS</span></div>
-            <FormationGrid units={visibleBoard.top} side="rival" currentEvent={currentEvent} editUnitSlots={editUnitSlots && (!editableSide || editableSide === 'B')} onUnitSlotChange={onUnitSlotChange} />
+            <FormationGrid units={visibleBoard.top} side="rival" currentEvent={currentEvent} actionEvents={actionEvents} editUnitSlots={editUnitSlots && (!editableSide || editableSide === 'B')} onUnitSlotChange={onUnitSlotChange} />
           </div>
         </div>
       </BattleImpactContext.Provider>
@@ -3181,21 +3205,24 @@ export function ArenaBattleScene({
   }, []);
 
   const playbackKey = events[eventIndex] ? `${playbackRun}-${eventIndex}-${eventKey(events[eventIndex])}` : null;
-  const beatStarted = useRef<{ key: string; at: number } | null>(null);
+  const beatStarted = useRef<{ key: string; at: number; impactAt?: number } | null>(null);
   useEffect(() => {
-    if (reducedMotion || !isPlaying || !presentationReady || !playbackKey) return;
+    if (reducedMotion || !presentationReady || !playbackKey) return;
     const now = performance.now();
     if (beatStarted.current?.key !== playbackKey) beatStarted.current = { key: playbackKey, at: now };
+    if (presentedEventKey !== eventKey(events[eventIndex]) || !battleActionBeat(events, eventIndex).complete) return;
+    beatStarted.current.impactAt ??= now;
+    if (!isPlaying) return;
     // Incoming live events cannot shorten the current action or its landing pause.
     const timer = window.setTimeout(() => {
-      if (eventIndex >= events.length - 1) {
+      if (battleActionBeat(events, eventIndex).end >= events.length - 1) {
         if (!liveSession) setIsPlaying(false);
         return;
       }
-      setEventIndex(current => nextBattlePlaybackIndex(current, events.length));
-    }, battleNextBeatDelay(beatStarted.current.at, now));
+      setEventIndex(current => nextBattleActionIndex(events, current));
+    }, battleActionSettleDelay(beatStarted.current.at, beatStarted.current.impactAt, now));
     return () => window.clearTimeout(timer);
-  }, [eventIndex, events.length, isPlaying, liveSession, playbackKey, presentationReady, reducedMotion]);
+  }, [eventIndex, events, isPlaying, liveSession, playbackKey, presentationReady, presentedEventKey, reducedMotion]);
 
   useEffect(() => {
     if (liveSession || autoStartKey === undefined || !events.length) return;
@@ -3216,47 +3243,55 @@ export function ArenaBattleScene({
 
   const started = eventIndex >= 0;
   const safeEventIndex = events.length && started ? Math.min(eventIndex, events.length - 1) : -1;
+  const beat = battleActionBeat(events, safeEventIndex);
+  const actionSignature = JSON.stringify(beat.complete ? battlePresentationEvents(beat.events) : []);
+  const actionEvents = useMemo(() => JSON.parse(actionSignature) as BattleEvent[], [actionSignature]);
   // Polling can replace arrays while the same beat is on screen. Keep the
   // presentation inputs stable so incoming events cannot restart its cast.
-  const eventSignature = JSON.stringify(safeEventIndex >= 0 ? events[safeEventIndex] ?? null : null);
+  const eventSignature = JSON.stringify(safeEventIndex >= 0 ? actionEvents[0] ?? null : null);
   const currentEvent = useMemo(() => JSON.parse(eventSignature) as BattleEvent | null, [eventSignature]);
   const currentRound = currentEvent?.round ?? board.round;
   const boardHistory = useMemo(() => result.boardHistory?.length ? result.boardHistory : [board], [board, result.boardHistory]);
-  const reachedFinalEvent = started && events.length > 0 && safeEventIndex >= events.length - 1;
+  const reachedFinalEvent = started && events.length > 0 && beat.complete && beat.end >= events.length - 1;
   const playbackFinished = reachedFinalEvent && !isPlaying;
   const [settledKey, setSettledKey] = useState<string | null>(null);
   const currentKey = currentEvent ? `${playbackRun}-${eventKey(currentEvent)}` : null;
-  const finalBeatSettled = reducedMotion || (currentKey !== null && settledKey === currentKey);
+  const finalBeatSettled = reducedMotion || (currentKey !== null && settledKey === currentKey && presentedEventKey === eventKey(currentEvent!));
   useEffect(() => {
-    if (!currentKey || (!presentationReady && !reducedMotion)) return;
-    const timer = window.setTimeout(() => setSettledKey(currentKey), PLAYBACK_STEP_MS);
+    if (!currentKey || (!presentationReady && !reducedMotion) || (!reducedMotion && presentedEventKey !== eventKey(currentEvent!))) return;
+    const now = performance.now();
+    const timing = beatStarted.current;
+    const delay = timing ? battleActionSettleDelay(timing.at, timing.impactAt ?? now, now) : PLAYBACK_STEP_MS;
+    const timer = window.setTimeout(() => setSettledKey(currentKey), delay);
     return () => window.clearTimeout(timer);
-  }, [currentKey, presentationReady, reducedMotion]);
+  }, [currentKey, currentEvent, presentationReady, presentedEventKey, reducedMotion]);
   const outcome = useMemo(() => battleOutcomeForBottom(result, result.board ?? board), [board, result]);
   const playbackBoardCandidate = useMemo(() => {
     if (!started) return boardHistory[0] ?? board;
     if (reachedFinalEvent) return result.board ?? boardHistory[boardHistory.length - 1] ?? board;
     if (boardHistory.length >= events.length) {
-      const historyIndex = battlePlaybackHistoryIndex(boardHistory.length, events.length, safeEventIndex);
+      const historyIndex = battlePlaybackHistoryIndex(boardHistory.length, events.length, beat.end);
       const indexedBoard = historyIndex >= 0 ? boardHistory[historyIndex] : undefined;
       if (indexedBoard) return indexedBoard;
     }
-    const completesRound = events[safeEventIndex + 1]?.round !== currentRound;
+    const completesRound = events[beat.end + 1]?.round !== currentRound;
     const eligibleBoards = boardHistory.filter((entry) => completesRound ? entry.round <= currentRound : entry.round < currentRound);
     return eligibleBoards[eligibleBoards.length - 1] ?? boardHistory[0] ?? board;
-  }, [board, boardHistory, currentRound, events, reachedFinalEvent, result.board, safeEventIndex, started]);
+  }, [board, boardHistory, currentRound, events, reachedFinalEvent, result.board, beat.end, started]);
   const boardSignature = JSON.stringify(playbackBoardCandidate);
   const playbackBoard = useMemo(() => JSON.parse(boardSignature) as BattleBoardState, [boardSignature]);
-  const beforeBoard = useMemo(() => {
+  const beforeBoardCandidate = useMemo(() => {
     if (safeEventIndex < 0) return boardHistory[0] ?? board;
     if (boardHistory.length >= events.length) {
-      const index = battlePlaybackHistoryIndex(boardHistory.length, events.length, safeEventIndex);
+      const index = battlePlaybackHistoryIndex(boardHistory.length, events.length, beat.start);
       return boardHistory[Math.max(0, index - 1)] ?? board;
     }
     return boardHistory.filter((entry) => entry.round < currentRound).at(-1) ?? boardHistory[0] ?? board;
-  }, [board, boardHistory, currentRound, events.length, safeEventIndex]);
+  }, [board, boardHistory, currentRound, events.length, beat.start]);
+  const beforeBoardSignature = JSON.stringify(beforeBoardCandidate);
+  const beforeBoard = useMemo(() => JSON.parse(beforeBoardSignature) as BattleBoardState, [beforeBoardSignature]);
   const shownBoard = currentEvent && presentedEventKey !== eventKey(currentEvent) && !reducedMotion ? beforeBoard : playbackBoard;
-  const visibleEvents = useMemo(() => (started ? events.slice(0, safeEventIndex + 1) : []), [events, safeEventIndex, started]);
+  const visibleEvents = useMemo(() => (started ? events.slice(0, beat.complete ? beat.end + 1 : beat.start) : []), [events, beat.end, beat.start, beat.complete, started]);
   const visibleLogs = useMemo(() => {
     if (!started) return [];
     const eventLogs = visibleEvents.map((event) => event.log).filter(Boolean);
@@ -3350,6 +3385,7 @@ export function ArenaBattleScene({
         onPresentImpact={onPresentImpact}
         onReady={onReady}
         currentEvent={presentationReady || reducedMotion ? currentEvent : null}
+        actionEvents={presentationReady || reducedMotion ? actionEvents : []}
         totalRounds={totalRounds}
         reducedMotion={reducedMotion}
         resultReveal={resultPreviewOutcome

@@ -1,3 +1,5 @@
+import type { BattleEvent } from './battleTypes';
+
 // Shared by Battle and VFX: a small lift, accelerating strike, then one smooth return.
 // The next unit waits a full 750 ms AFTER the acting card has landed.
 const actionMs = 460;
@@ -50,4 +52,26 @@ export function battleActorKeyframes(vector: { x: number; y: number }) {
     z: [0, 8, 8, 0],
     scale: [1, 1.012, 1.012, 1],
   };
+}
+
+/** Only explicit cast IDs group targets. Old replays retain one event per beat. */
+export function battleActionBeat(events: BattleEvent[], index: number) {
+  if (index < 0 || !events[index]) return { start: -1, end: -1, events: [] as BattleEvent[], complete: true };
+  const id = events[index].actionId;
+  let start = index, end = index;
+  if (id) {
+    while (start > 0 && events[start - 1].actionId === id) start--;
+    while (end + 1 < events.length && events[end + 1].actionId === id) end++;
+  }
+  const group = events.slice(start, end + 1);
+  return { start, end, events: group, complete: !id || group.length === (group[0].targetCount ?? 1) };
+}
+export function nextBattleActionIndex(events: BattleEvent[], index: number) {
+  const beat = battleActionBeat(events, index);
+  return beat.complete ? Math.min(beat.end + 1, events.length - 1) : index;
+}
+
+/** Polling may replace feeds, but cannot extend or shorten an existing cast pause. */
+export function battleActionSettleDelay(startedAt: number, impactAt: number, now: number) {
+  return Math.max(battleNextBeatDelay(startedAt, now), BATTLE_PRESENTATION.postLandingPauseMs - (now - impactAt), 0);
 }

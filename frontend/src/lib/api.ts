@@ -274,7 +274,7 @@ export async function battleHeroes(heroA: unknown, heroB: unknown, token?: strin
 export async function battleTeams(
   teamA: unknown[],
   teamB: unknown[],
-  size: '1v1' | '3v3' | '4v4' | 'arena_2x3',
+  size: '1v1' | '3v3' | '4v4' | 'arena_2x3' | 'pve_4v6',
   labelA: string,
   labelB: string,
   token?: string | null
@@ -292,7 +292,7 @@ export async function battleTeams(
 export async function createBattleSession(
   teamA: unknown[],
   teamB: unknown[],
-  battleMode: '1v1' | '4v4' | 'arena_2x3',
+  battleMode: '1v1' | '4v4' | 'arena_2x3' | 'pve_4v6',
   labelA: string,
   labelB: string,
   token?: string | null,
@@ -309,9 +309,9 @@ export async function createBattleSession(
   return payload.data;
 }
 
-export async function prepareBattleSession(teamA: unknown[], teamB: unknown[], token?: string | null, controlMode: 'program' | 'manual' = 'program'): Promise<BattleSessionSnapshot> {
+export async function prepareBattleSession(teamA: unknown[], teamB: unknown[], token?: string | null, controlMode: 'program' | 'manual' = 'program', battleMode: 'arena_2x3' | 'pve_4v6' = 'arena_2x3'): Promise<BattleSessionSnapshot> {
   const payload = await requestJson<{ data: BattleSessionSnapshot }>('/api/battle/sessions', {
-    method: 'POST', body: JSON.stringify({ teamA, teamB, battleMode: 'arena_2x3', controlMode, preparation: true, labelA: 'Forger', labelB: 'Rival' }),
+    method: 'POST', body: JSON.stringify({ teamA, teamB, battleMode, controlMode, preparation: true, labelA: 'Forger', labelB: 'Rival' }),
   }, token);
   return payload.data;
 }
@@ -367,13 +367,14 @@ export async function joinPvpQueue(
 export async function joinArenaQueue(
   formation: ArenaFormation,
   queueKey = 'ranked',
-  token?: string | null
+  token?: string | null,
+  controlMode: 'program' | 'manual' = 'program'
 ): Promise<PvpJoinResponse> {
   return await requestJson<PvpJoinResponse>(
     '/api/pvp/join',
     {
       method: 'POST',
-      body: JSON.stringify({ mode: 'arena_2x3', queueKey, formation }),
+      body: JSON.stringify({ mode: 'arena_2x3', queueKey, formation, controlMode }),
     },
     token
   );

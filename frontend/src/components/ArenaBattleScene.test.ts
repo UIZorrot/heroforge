@@ -1,3 +1,4 @@
+import { createVfxScenarioBoard, createVfxTestAction } from '../lib/vfxTestHarness';
 import { describe, expect, it } from 'vitest';
 import { battleOutcomeForBottom, battlePlaybackHistoryIndex, battleUnitMotionKey } from './ArenaBattleScene';
 import { createVfxTestBoard, createVfxTestEvent, createVfxTestResult } from '../lib/vfxTestHarness';
@@ -49,4 +50,11 @@ describe('ArenaBattleScene card motion', () => {
     expect(battleOutcomeForBottom({ ...result, winner: 'B', winnerLabel: board.topLabel }, board)).toBe('defeat');
     expect(battleOutcomeForBottom({ ...result, winner: 'Tie', winnerLabel: 'Tie' }, board)).toBe('draw');
   });
+});
+
+it('restarts the casting pose for consecutive group heals while single status cards stay idle', () => {
+  const board = createVfxScenarioBoard('buff', 'heal', 'pve');
+  const first = createVfxTestAction(board, 'buff', 'heal', 1, 6)[0];
+  const next = createVfxTestAction(board, 'buff', 'heal', 2, 6)[0];
+  expect(battleUnitMotionKey(board.bottom[0], first)).not.toBe(battleUnitMotionKey(board.bottom[0], next));
 });

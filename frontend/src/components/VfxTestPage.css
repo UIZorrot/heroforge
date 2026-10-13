@@ -17,3 +17,20 @@
 @media(max-width: 560px) {
   .vfx-lab__settings { grid-template-columns: minmax(0,1fr); }
 }
+
+.vfx-lab__formation-editor { border-bottom: 1px solid #ffffff14; padding-bottom: 18px; }
+.vfx-lab__editor-title { margin-bottom: 12px; color: #b49664; font-size: 10px; font-weight: 600; letter-spacing: .16em; text-transform: uppercase; }
+.vfx-lab__preset { display: grid; gap: 8px; margin-bottom: 12px; color: #b8a98e; font-size: 10px; }
+.vfx-lab__preset select { width: 100%; min-height: 44px; padding: 8px; border: 1px solid #b4966445; background: #17130d; color: #d5c09a; }
+.vfx-lab__count-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px; color: #c8bda9; font-size: 11px; }
+.vfx-lab__count-row > span small { display: block; margin-top: 3px; color: #78716c; font-size: 9px; }
+.vfx-lab__stepper { display: grid; grid-template-columns: 44px 48px 44px; align-items: center; }
+.vfx-lab__stepper button { display: grid; place-items: center; min-height: 44px; border: 1px solid #b4966430; background: #17130d; color: #d5c09a; cursor: pointer; }
+.vfx-lab__stepper button:hover:not(:disabled) { border-color: #b49664aa; background: #b4966418; }
+.vfx-lab__stepper button:disabled { opacity: .28; cursor: not-allowed; }
+.vfx-lab__stepper output { text-align: center; color: #ecdbb8; font-size: 14px; }
+.vfx-lab__stepper output small { margin-left: 2px; color: #78716c; font-size: 9px; }
+.vfx-lab__stepper select { width: 100%; min-height: 44px; padding-left: 12px; border: 1px solid #b4966430; border-inline: 0; background: #17130d; color: #ecdbb8; }
+.vfx-lab__target-row { padding-top: 10px; margin-top: 10px; border-top: 1px solid #ffffff0d; }
+.vfx-lab__target-feedback { margin-top: 10px; color: #b8a98e; font-size: 10px; }
+.vfx-lab__formation-editor :is(button,select):focus-visible { outline: 2px solid #d8b06c; outline-offset: 2px; }

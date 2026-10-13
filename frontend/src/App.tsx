@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ArrowRight, Gift, Mail, Newspaper, RefreshCw, Send, Sparkles, Swords, WalletCards, X } from 'lucide-react';
+import { ArrowRight, Mail, RefreshCw, Send, Sparkles, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { GameShell, type ArenaSideKey, type ForgeSideKey, type GameSectionKey, type HomeSideKey, type VaultSideKey } from './components/GameShell';
 import { VaultPage } from './components/VaultPage';
@@ -9,9 +9,9 @@ import { VfxTestPage } from './components/VfxTestPage';
 import { MarketPage } from './components/MarketPage';
 import { SettingsPage } from './components/SettingsPage';
 import { HomeExperience } from './components/HomeExperience';
+import { PlayerProfile } from './components/PlayerProfile';
 import { DailyActivity } from './components/DailyActivity';
 import { SectionHeader } from './components/Effects';
-import { PageHeader, PageHeaderStat } from './components/PageHeader';
 import {
   clearStoredSession,
   decomposeCard,
@@ -317,57 +317,11 @@ function AuthModal({ open, onClose, children }: { open: boolean; onClose: () => 
   );
 }
 
-function battleTypeLabel(battleType: string): string {
-  if (battleType.startsWith('pvp_')) return `PvP ${battleType.slice(4)}`;
-  if (battleType.startsWith('battle_session_')) return `Session ${battleType.slice('battle_session_'.length)}`;
-  return battleType.toUpperCase();
-}
-
-function battleRecordTitle(record: BattleHistoryRecord): string {
-  const labelA = record.payload?.labelA;
-  const labelB = record.payload?.labelB;
-  if (labelA && labelB) return `${labelA} vs ${labelB}`;
-  const board = record.result?.board;
-  if (board?.bottomLabel && board?.topLabel) return `${board.bottomLabel} vs ${board.topLabel}`;
-  return battleTypeLabel(record.battle_type);
-}
-
-function battleRecordDate(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-}
-
-const TRANSACTION_REASON_LABELS: Record<string, string> = {
-  forge_entry: 'Forge',
-  repair: 'Repair',
-  pve_entry: 'PvE entry',
-  pvp_entry: 'Arena entry',
-  pvp_stake: 'Arena stake',
-  pvp_revive: 'Arena revive',
-  pvp_queue_join_refund: 'Arena queue refund',
-  pvp_relic_drop: 'Arena shard drop',
-  pvp_reward: 'Arena reward',
-  daily_sign_in: 'Daily sign-in',
-  daily_task_reward: 'Daily task',
-  market_buy_relic: 'Market buy',
-  market_sell_relic: 'Market sell',
-  card_enchant: 'Shard enchant',
-  decompose: 'Card break',
-  test_grant: 'Grant',
-};
-
-function transactionReasonLabel(reason: string): string {
-  return TRANSACTION_REASON_LABELS[reason] ?? reason.replace(/_/g, ' ');
-}
-
 function HomePage({
   user,
   activeTab,
-  heroCount,
   heroes,
   onInspectHero,
-  bestHeroBp,
   dust,
   relics,
   economy,
@@ -446,260 +400,21 @@ function HomePage({
     setProfileLoadNonce((value) => value + 1);
   };
   const playerName = user?.email?.split('@')[0] || 'Visitor';
-  const profileLevel = previewContentEnabled ? 'Demo' : 'Beta';
-  const profileTitle = previewContentEnabled ? 'Simulation' : 'Player';
-  const combatRating = previewContentEnabled ? 'Not tracked' : ladder ? `${ladder.tier} · ${ladder.rating}` : ladderError ? 'Unavailable' : 'Loading';
-  const combatWinRate = previewContentEnabled ? 'Not tracked' : ladder ? `${ladder.win_rate}%` : '--';
-  const combatStreak = previewContentEnabled || !ladder
-    ? '--'
-    : String(ladder.recent_matches.findIndex((match) => match.result !== 'win') === -1
-      ? ladder.recent_matches.length
-      : ladder.recent_matches.findIndex((match) => match.result !== 'win'));
-  const todayKey = new Date().toISOString().slice(0, 10);
-  const creationsToday = (economy?.transactions ?? []).filter((transaction) =>
-    ['forge_entry', 'forge_card'].includes(transaction.reason)
-    && transaction.created_at?.slice(0, 10) === todayKey
-  ).length;
-  const relicUses = (economy?.transactions ?? []).filter((transaction) => transaction.reason === 'card_enchant').length;
-  const bestBp = bestHeroBp === null ? '--' : bestHeroBp.toLocaleString();
-  const membershipTitle = previewContentEnabled ? 'Local Simulation' : 'Founders Beta';
-  const membershipDescription = previewContentEnabled
-    ? 'Local test data is isolated from live accounts and may be reset.'
-    : 'Core beta scope is live: Forge, Vault, Train, Arena, Daily rewards, and the internal relic market.';
-  const header = (
-    <PageHeader
-      title="Home"
-      eyebrow={activeTab === 'profile' ? 'Account' : user ? 'Hero Forge' : 'Access'}
-      subtitle={activeTab === 'profile' ? 'Player Profile' : user ? 'Command Center' : 'Guest Lobby'}
-      description={
-        activeTab === 'profile'
-          ? previewContentEnabled
-            ? 'Local simulation profile. These values do not affect a live account.'
-            : 'Account state, progression, and unlocks.'
-          : user
-            ? 'Navigate your forge, vault, and battle lanes.'
-            : 'Forge images into playable heroes.'
-      }
-      stats={
-        <>
-          <PageHeaderStat label="Cards" value={user ? heroCount : 'Forge'} />
-          <PageHeaderStat label="Dust" value={user ? dust : 'Stake'} />
-          <PageHeaderStat label="Relics" value={user ? relics : 'Enchant'} />
-          <PageHeaderStat label="Access" value={user ? 'Active' : 'Guest'} />
-        </>
-      }
-    />
-  );
 
   if (!user) {
     return <HomeExperience onJoin={onOpenAuth} onNavigate={onNavigate} onInspect={onInspectHero} onFriends={onOpenFriends} />;
   }
 
   if (activeTab === 'profile') {
-    return (
-      <div className="mx-auto max-w-[1540px] px-6 py-8 2xl:px-8">
-        {header}
-        <section className="mt-7 grid gap-6 xl:grid-cols-[minmax(0,1fr)_390px]">
-          <div className="space-y-6">
-            <section className="grid gap-6 lg:grid-cols-[360px_minmax(0,1fr)]">
-              <div className="border border-white/8 bg-black/20 p-6">
-                <div className="flex items-start gap-5">
-                  <div className="flex h-20 w-20 items-center justify-center border border-[#b49664]/30 bg-[radial-gradient(circle_at_50%_20%,rgba(180,150,100,0.34),rgba(0,0,0,0.88)_70%)] font-display text-3xl text-stone-100">
-                    {user ? playerName.slice(0, 2).toUpperCase() : 'HF'}
-                  </div>
-                  <div className="min-w-0">
-                    <div className="text-[10px] uppercase tracking-[0.28em] text-[#b49664]">{previewContentEnabled ? 'Profile · Simulation' : 'Profile'}</div>
-                    <h2 className="mt-2 truncate font-display text-3xl font-light tracking-[0.12em] text-stone-100">{playerName}</h2>
-                    <div className="mt-2 text-xs uppercase tracking-[0.18em] text-stone-500">{user ? user.email : 'Not signed in'}</div>
-                  </div>
-                </div>
-                <div className="mt-6 grid grid-cols-2 gap-3">
-                  <SmallProfileStat label="Level" value={user ? profileLevel : '--'} />
-                  <SmallProfileStat label="Title" value={user ? profileTitle : 'Guest'} />
-                  <SmallProfileStat label="Cards" value={heroCount} />
-                  <SmallProfileStat label="Relics" value={relics} />
-                </div>
-              </div>
-
-              <div className="border border-white/8 bg-black/20 p-6">
-                <HomeSectionTitle icon={<WalletCards size={16} />} eyebrow="Account" title="Player Ledger" />
-                <div className="mt-6 grid gap-4 md:grid-cols-3">
-                  <ProfileLedgerCard label="Dust Balance" value={dust.toLocaleString()} hint="Forge, revive, and Arena stake currency" />
-                  <ProfileLedgerCard label="Relics Owned" value={relics.toLocaleString()} hint="Shards enchant cards; relics equip to a card's battle slot" />
-                  <ProfileLedgerCard label="Vault Size" value={heroCount.toLocaleString()} hint="Playable hero cards in this account" />
-                </div>
-                <div className="mt-6 grid gap-3 sm:grid-cols-3">
-                  <ProfileAction title="Account" description="Session and account preferences." onClick={() => onNavigate('settings')} />
-                  <ProfileAction title="Vault" description="Review cards, relics, and loadout." onClick={() => onNavigate('vault')} />
-                  <ProfileAction title="Arena" description="Queue or inspect your battle lane." onClick={() => onNavigate('arena')} />
-                </div>
-              </div>
-            </section>
-
-            <section className="grid gap-6 lg:grid-cols-2">
-              <div className="border border-white/8 bg-black/20 p-6">
-                <HomeSectionTitle icon={<Swords size={16} />} eyebrow="Arena" title="Combat Record" />
-                <div className="mt-6 grid grid-cols-3 gap-3">
-                  <SmallProfileStat label="Rating" value={user ? combatRating : '--'} />
-                  <SmallProfileStat label="Win Rate" value={user ? combatWinRate : '--'} />
-                  <SmallProfileStat label="Streak" value={user ? combatStreak : '--'} />
-                </div>
-                {ladderError && !previewContentEnabled && (
-                  <p role="status" className="mt-4 text-xs leading-5 text-stone-500">{ladderError}</p>
-                )}
-                <div className="mt-6 border-t border-white/8 pt-5">
-                  <div className="flex items-center justify-between text-[10px] uppercase tracking-[0.24em] text-stone-600">
-                    <span>Recent Battles</span>
-                    <span>{battleHistory?.length ? `${battleHistory.length} / 25 saved` : ''}</span>
-                  </div>
-                  {battleHistoryError ? (
-                    <div className="mt-4 border border-amber-400/20 bg-amber-400/5 p-4">
-                      <p role="alert" className="text-xs leading-5 text-amber-100">{battleHistoryError}</p>
-                      <button type="button" onClick={retryProfile} className="mt-3 inline-flex h-8 items-center gap-2 border border-amber-300/25 px-3 text-[9px] uppercase tracking-[0.2em] text-amber-100 hover:bg-amber-300/10">
-                        <RefreshCw size={11} /> Retry
-                      </button>
-                    </div>
-                  ) : battleHistory === null ? (
-                    <div className="mt-4 flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-stone-500">
-                      <RefreshCw className="animate-spin" size={12} />
-                      Loading combat record
-                    </div>
-                  ) : battleHistory.length === 0 ? (
-                    <p className="mt-4 text-xs leading-5 text-stone-500">
-                      {previewContentEnabled
-                        ? 'Test mode does not create live account history. Use Arena to preview combat without affecting production records.'
-                        : 'No battles recorded yet. Resolve an Arena match and it will appear here with a full replay.'}
-                    </p>
-                  ) : (
-                    <div className="mt-4 max-h-[320px] space-y-2 overflow-y-auto pr-1">
-                      {battleHistory.map((record) => (
-                        <button
-                          key={record.id}
-                          type="button"
-                          onClick={() => onOpenBattleReplay(record)}
-                          className="group flex w-full items-center justify-between gap-3 border border-white/8 bg-black/30 px-4 py-3 text-left transition-colors hover:border-[#b49664]/40 hover:bg-[#b49664]/5"
-                        >
-                          <div className="min-w-0">
-                            <div className="text-[9px] uppercase tracking-[0.22em] text-[#b49664]">{battleTypeLabel(record.battle_type)}</div>
-                            <div className="mt-1 truncate text-sm text-stone-200">{battleRecordTitle(record)}</div>
-                          </div>
-                          <div className="shrink-0 text-right">
-                            <div className="text-[10px] uppercase tracking-[0.18em] text-stone-400">
-                              {record.result?.winnerLabel ? `Winner ${record.result.winnerLabel}` : 'Resolved'}
-                            </div>
-                            <div className="mt-1 text-[10px] uppercase tracking-[0.14em] text-stone-600 group-hover:text-stone-500">
-                              {battleRecordDate(record.created_at)} · Replay
-                            </div>
-                          </div>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-              <div className="border border-white/8 bg-black/20 p-6">
-                <HomeSectionTitle icon={<Sparkles size={16} />} eyebrow="Forge" title="Creation Status" />
-                <div className="mt-6 grid grid-cols-3 gap-3">
-                  <SmallProfileStat label="Today" value={creationsToday} />
-                  <SmallProfileStat label="Best BP" value={bestBp} />
-                  <SmallProfileStat label="Relic Uses" value={relics ? relicUses : '--'} />
-                </div>
-              </div>
-            </section>
-          </div>
-
-          <aside className="space-y-6">
-            <section className="border border-white/8 bg-black/20 p-6">
-              <HomeSectionTitle icon={<Gift size={16} />} eyebrow="Status" title="Membership" />
-              <div className="mt-6 border border-[#b49664]/25 bg-[#b49664]/8 p-5">
-                <div className="text-sm uppercase tracking-[0.2em] text-stone-100">{user ? membershipTitle : 'Visitor'}</div>
-                <p className="mt-3 text-sm leading-6 text-stone-500">
-                  {user ? membershipDescription : 'Sign in to unlock persistent progress and daily claims.'}
-                </p>
-              </div>
-            </section>
-
-            <section className="border border-white/8 bg-black/20 p-6">
-              <HomeSectionTitle icon={<Newspaper size={16} />} eyebrow="Economy" title="Recent Activity" />
-              {(() => {
-                const catalog = Object.fromEntries((economy?.relic_catalog ?? []).map((item) => [item.relic_type, item.display_name]));
-                const recent = (economy?.transactions ?? []).slice(0, 8);
-                if (recent.length === 0) {
-                  return (
-                    <p className="mt-6 text-xs leading-5 text-stone-500">
-                      No activity yet. Forge, battle, trade, and daily claims will be recorded here.
-                    </p>
-                  );
-                }
-                return (
-                  <div className="mt-6 space-y-2">
-                    {recent.map((tx) => (
-                      <div key={tx.id} className="flex items-center justify-between gap-3 border border-white/8 bg-black/30 px-4 py-3">
-                        <div className="min-w-0">
-                          <div className="truncate text-xs uppercase tracking-[0.16em] text-stone-300">{transactionReasonLabel(tx.reason)}</div>
-                          <div className="mt-1 truncate text-[10px] uppercase tracking-[0.14em] text-stone-600">
-                            {tx.resource_type === 'relic' && tx.resource_key ? `${catalog[tx.resource_key] ?? tx.resource_key} · ` : ''}
-                            {tx.created_at ? battleRecordDate(tx.created_at) : ''}
-                          </div>
-                        </div>
-                        <div className={`shrink-0 text-sm font-light ${tx.delta >= 0 ? 'text-[#d8b06c]' : 'text-stone-400'}`}>
-                          {tx.delta >= 0 ? '+' : ''}{tx.delta.toLocaleString()} {tx.resource_type === 'dust' ? 'Dust' : ''}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                );
-              })()}
-            </section>
-          </aside>
-        </section>
-      </div>
-    );
+    return <PlayerProfile user={user} heroes={heroes} dust={dust} relics={relics} economy={economy}
+      ladder={ladder} history={battleHistory} historyError={battleHistoryError} ladderError={ladderError}
+      demo={previewContentEnabled} retry={retryProfile} onNavigate={onNavigate}
+      onInspect={onInspectHero} onReplay={onOpenBattleReplay} />;
   }
 
   return <HomeExperience playerName={playerName} heroes={heroes} dust={dust} relics={relics}
     onJoin={onOpenAuth} onNavigate={onNavigate} onInspect={onInspectHero} onFriends={onOpenFriends}
     daily={<DailyActivity token={dailyToken} demoMode={previewContentEnabled} economy={economy} onEconomyChange={onEconomyChange} />} />;
-}
-
-function HomeSectionTitle({ icon, eyebrow, title }: { icon: React.ReactNode; eyebrow: string; title: string }) {
-  return (
-    <div className="flex items-center gap-3">
-      <div className="flex h-10 w-10 items-center justify-center border border-white/10 bg-white/[0.03] text-[#d8b06c]">{icon}</div>
-      <div>
-        <div className="text-[10px] uppercase tracking-[0.28em] text-[#b49664]">{eyebrow}</div>
-        <h2 className="mt-1 font-display text-2xl font-light uppercase tracking-[0.16em] text-stone-100">{title}</h2>
-      </div>
-    </div>
-  );
-}
-
-function SmallProfileStat({ label, value }: { label: string; value: string | number }) {
-  return (
-    <div className="border border-white/8 bg-black/25 px-4 py-3">
-      <div className="text-[9px] uppercase tracking-[0.22em] text-stone-600">{label}</div>
-      <div className="mt-2 text-lg font-light text-stone-100">{value}</div>
-    </div>
-  );
-}
-
-function ProfileLedgerCard({ label, value, hint }: { label: string; value: string; hint: string }) {
-  return (
-    <div className="border border-white/8 bg-black/25 p-4">
-      <div className="text-[10px] uppercase tracking-[0.24em] text-stone-600">{label}</div>
-      <div className="mt-3 font-display text-3xl font-light text-stone-100">{value}</div>
-      <div className="mt-3 text-xs leading-5 text-stone-500">{hint}</div>
-    </div>
-  );
-}
-
-function ProfileAction({ title, description, onClick }: { title: string; description: string; onClick: () => void }) {
-  return (
-    <button type="button" onClick={onClick} className="border border-white/8 bg-black/25 p-4 text-left transition hover:border-[#b49664]/35 hover:bg-[#b49664]/5">
-      <div className="text-sm uppercase tracking-[0.18em] text-stone-200">{title}</div>
-      <div className="mt-2 text-xs leading-5 text-stone-500">{description}</div>
-    </button>
-  );
 }
 
 function AccessRequired({ onOpenAuth }: { onOpenAuth: () => void }) {
@@ -1035,7 +750,7 @@ const App: React.FC = () => {
       const normalizedHero = normalizeCharacterData(heroData);
       setCharacter(normalizedHero);
       const refreshedHeroes = await reloadCollections(token);
-      const forgedHeroId = refreshedHeroes.find((hero) => hero.character.name === normalizedHero.name)?.id ?? refreshedHeroes[0]?.id;
+      const forgedHeroId = normalizedHero.hero_id ?? refreshedHeroes.find((hero) => hero.character.name === normalizedHero.name)?.id ?? refreshedHeroes[0]?.id;
       if (forgedHeroId) {
         setSavedHeroes((current) => current.map((hero) => (
           hero.id === forgedHeroId ? { ...hero, image: base64Image } : hero

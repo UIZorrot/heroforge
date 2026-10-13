@@ -3,6 +3,7 @@ import { ChevronLeft, ChevronRight, Gem, Search, Shield, X } from 'lucide-react'
 import { DepthPreview } from './DepthPreview';
 import type { Rarity } from '../lib/gameLogic';
 import type { RelicCategory } from '../lib/relics';
+import { RELIC_COMBAT_STATUS } from '../lib/relics';
 import type { RelicDefinition, RelicKind } from '../types';
 import './VaultItems.css';
 
@@ -63,10 +64,11 @@ function ItemDetail({ item, onClose, onUse }: { item: VaultItem; onClose: () => 
           <span className="vault-item-rarity" data-rarity={item.rarity}>{item.rarity} · {item.family}</span>
           <h2 id={titleId}>{item.name}</h2>
           <p className="vault-item-detail__purpose">{material ? 'A consumable material for enchanting. Binding uses one shard from this stack.' : 'A standalone equipment item. Choose a hero and equip it in their relic slot.'}</p>
+          <p className="vault-item-detail__purpose">{RELIC_COMBAT_STATUS}</p>
           <dl>
             <div><dt>{material ? 'Enchant affinity' : 'Equipment category'}</dt><dd>{material ? item.definition?.forge_bias || item.family : item.category}</dd></div>
             {!material && item.definition?.battle_bias && <div><dt>Battle affinity</dt><dd>{item.definition.battle_bias}</dd></div>}
-            <div><dt>Effect</dt><dd>{item.definition?.effect_profile || 'No effect recorded.'}</dd></div>
+            <div><dt>Planned effect</dt><dd>{item.definition?.effect_profile || 'See the battle feature contract.'}</dd></div>
           </dl>
           {item.definition?.lore_summary && <p className="vault-item-detail__lore">{item.definition.lore_summary}</p>}
           <button type="button" className="vault-item-detail__use" disabled={item.amount <= 0} onClick={onUse}>{item.amount <= 0 ? 'Out of stock' : material ? 'Open Enchant' : 'Choose a card to equip'}</button>

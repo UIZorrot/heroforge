@@ -1,3 +1,6 @@
+import { battleActionSettleDelay } from './battlePresentation';
+import { battleActionBeat, nextBattleActionIndex } from './battlePresentation';
+import { createVfxScenarioBoard, createVfxTestAction } from './vfxTestHarness';
 import { describe, expect, it } from 'vitest';
 import { cubicBezier } from 'framer-motion';
 import { BATTLE_PRESENTATION, battleActorKeyframes, battleNextBeatDelay, battleStrikeVector, nextBattlePlaybackIndex } from './battlePresentation';
@@ -87,4 +90,32 @@ describe('small lift, accelerating strike and continuous return', () => {
     expect(battleNextBeatDelay(startedAt, landedAt + 750)).toBe(0);
     expect(battleNextBeatDelay(startedAt, landedAt + 1500)).toBe(0);
   });
+});
+
+describe('grouped skill playback', () => {
+  const board = createVfxScenarioBoard('projectile', 'fire', 'pve');
+  const cast = createVfxTestAction(board, 'projectile', 'fire', 1, 6);
+  it('plays all six target results as one beat, including indexes inside the cast', () => {
+    const next = createVfxTestAction(board, 'projectile', 'fire', 2, 1);
+    const events = [...cast, ...next];
+    expect(battleActionBeat(events, 3)).toMatchObject({ start: 0, end: 5, complete: true, events: cast });
+    expect(nextBattleActionIndex(events, 0)).toBe(6);
+    expect(battleActionBeat(events, 6).events).toEqual(next);
+  });
+  it('buffers an incomplete live cast and never advances past it', () => {
+    expect(battleActionBeat(cast.slice(0, 2), 0).complete).toBe(false);
+    expect(nextBattleActionIndex(cast.slice(0, 2), 0)).toBe(0);
+  });
+  it('keeps legacy events separate even when actor, skill and round match', () => {
+    const legacy = cast.map(event => ({ ...event, actionId: undefined }));
+    expect(battleActionBeat(legacy, 0).end).toBe(0);
+    expect(nextBattleActionIndex(legacy, 0)).toBe(1);
+  });
+});
+
+it('waits for the last impact and preserves the existing delay through live polling', () => {
+  const start = 1000, lastImpact = 1700;
+  expect(battleActionSettleDelay(start, lastImpact, 1700)).toBe(750);
+  expect(battleActionSettleDelay(start, lastImpact, 1900)).toBe(550);
+  expect(battleActionSettleDelay(start, lastImpact, 2450)).toBe(0);
 });

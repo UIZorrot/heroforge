@@ -6,7 +6,7 @@ import { ForgeRitualDialog } from './ForgeRitualDialog';
 import { PageHeader, PageHeaderStat } from './PageHeader';
 import { toNumber, type CharacterData } from '../lib/gameLogic';
 import { mockRelicCatalog, mockRelicInventory } from '../lib/mockContent';
-import { getRelicIconSrc, getRelicKind } from '../lib/relics';
+import { getRelicIconSrc, getRelicKind, RELIC_COMBAT_STATUS } from '../lib/relics';
 import type { EconomySnapshot, RelicDefinition, RelicKind, SavedHero } from '../types';
 
 export type ForgeSideKey = 'create' | 'enchant';
@@ -250,6 +250,7 @@ function ManageEnchantStage({
               </div>
             </div>
 
+            <p className="text-xs leading-5 text-stone-400">{RELIC_COMBAT_STATUS}</p>
             {(actionError || error) && <p role="alert" className="text-sm text-amber-200">{actionError || error}</p>}
             <button
               type="button"

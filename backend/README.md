@@ -1,5 +1,7 @@
 # Backend
 
+Gameplay changes are maintained in [CHANGELOG.md](../CHANGELOG.md). Current combat rules and concrete plans for missing features are in [the battle feature contract](../docs/battle-feature-contract.md).
+
 This service handles:
 
 - forging heroes from image input

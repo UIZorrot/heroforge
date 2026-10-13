@@ -1,4 +1,5 @@
 import base64
+import hashlib
 import json
 import logging
 import os
@@ -338,6 +339,18 @@ The skill object must include:
 Do not output final numeric magnitudes, MP cost, damage multipliers, or cooldowns.
 The backend generator will decide all of those values.
 
+Combat contract:
+- TARGET_NUM counts affected living units, including the selected primary target.
+- Ally includes the caster. Self always affects only the caster.
+- IS_PASSIVE means an opening passive: it triggers once after battle preparation,
+  costs no MP or action, and cannot be manually cast. Generate support passives
+  with TARGET Self or Ally, DMG 0, IS_STUN false, and a named timed status.
+- Named healing and damage-over-time statuses first tick at the next round start.
+- Prayer and curse modify exactly the marked stat fields; do not describe an
+  unmarked stat as changing. Frozen uses BUFF_EV for slow/evasion and BUFF_AC for accuracy.
+- Stun duration counts skipped actions. Do not invent resurrection, summoning,
+  cleansing, shields, or cooldowns: those mechanics are not implemented yet.
+
 Output JSON exactly in this format:
 {
   "name": "<Character Name>",
@@ -424,7 +437,7 @@ def _agent_scope_for_request():
         return "battle:create"
     if path.startswith("/api/battle/sessions/") and method == "GET":
         return "battle:read"
-    if path.startswith("/api/battle/sessions/") and path.endswith("/actions") and method == "POST":
+    if path.startswith("/api/battle/sessions/") and path.endswith(("/actions", "/confirm")) and method == "POST":
         return "battle:act"
     if method == "GET" and path == "/api/me/battles":
         return "battle:read"
@@ -462,17 +475,19 @@ def session_required(fn):
 
 
 def save_hero_history(user, source_payload, hero_payload):
-    execute(
-        """
-        INSERT INTO heroes (user_id, source_payload, hero_payload)
-        VALUES (%s, %s::jsonb, %s::jsonb)
-        """,
-        (
-            user["id"] if user else None,
-            serialize_json(source_payload),
-            serialize_json(hero_payload),
-        ),
-    )
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO heroes (user_id, source_payload, hero_payload)
+                VALUES (%s, %s::jsonb, %s::jsonb)
+                RETURNING id
+                """,
+                (user["id"] if user else None, serialize_json(source_payload), serialize_json(hero_payload)),
+            )
+            row = cur.fetchone()
+        conn.commit()
+        return row
 
 
 def save_hero_generation_history(
@@ -1572,6 +1587,12 @@ def _join_pvp_queue(user, data, require_team_payload: bool = False):
         battle_mode = _normalize_pvp_battle_mode(data.get("battleMode") or data.get("battle_mode"), len(hero_ids) if isinstance(hero_ids, list) else None)
         formation = None
 
+    # Control belongs to the match contract, never to one participant's UI.
+    control_mode = str(data.get("controlMode") or data.get("control_mode") or
+                       ("manual" if battle_mode == "arena_2x3" else "rest")).strip().lower()
+    if control_mode not in {"program", "manual", "rest"}:
+        raise ValueError("controlMode must be program, manual or rest")
+
     if not isinstance(hero_ids, list):
         raise ValueError("heroIds must be an array")
     hero_ids = [str(hero_id) for hero_id in hero_ids if str(hero_id).strip()]
@@ -1656,7 +1677,7 @@ def _join_pvp_queue(user, data, require_team_payload: bool = False):
                         battle_mode,
                         int(stake_dust),
                         int(total_bp),
-                        serialize_json({"hero_ids": hero_ids, "team": team_snapshot, "total_bp": total_bp}),
+                        serialize_json({"hero_ids": hero_ids, "team": team_snapshot, "total_bp": total_bp, "control_mode": control_mode}),
                         serialize_json(formation_snapshot),
                         settings.pvp_queue_ttl_minutes,
                     ),
@@ -1684,6 +1705,8 @@ def _join_pvp_queue(user, data, require_team_payload: bool = False):
                     FROM pvp_queue_entries
                     WHERE queue_key = %s
                       AND battle_mode = %s
+                      AND COALESCE(team_snapshot->>'control_mode',
+                          CASE WHEN battle_mode = 'arena_2x3' THEN 'manual' ELSE 'rest' END) = %s
                       AND status = 'waiting'
                       AND user_id <> %s
                       AND expires_at > now()
@@ -1695,6 +1718,7 @@ def _join_pvp_queue(user, data, require_team_payload: bool = False):
                     (
                         queue_key,
                         battle_mode,
+                        control_mode,
                         user["id"],
                         int(total_bp),
                         max(int(total_bp), 1),
@@ -1754,6 +1778,7 @@ def _join_pvp_queue(user, data, require_team_payload: bool = False):
                                 {
                                     "queue_key": queue_key,
                                     "battle_mode": battle_mode,
+                                    "control_mode": control_mode,
                                     "tolerance_pct": tolerance_pct,
                                 }
                             ),
@@ -1798,9 +1823,7 @@ def _join_pvp_queue(user, data, require_team_payload: bool = False):
     team_b = entry_b["team_snapshot"].get("team", []) if isinstance(entry_b.get("team_snapshot"), dict) else []
     label_a = "Player A"
     label_b = "Player B"
-    # Browser matches wait for both formations, then accept manual turns.
-    # Explicit REST controller queues retain their turn-based contract.
-    session_control_mode = "manual" if battle_mode == "arena_2x3" else "rest"
+    session_control_mode = control_mode
 
     try:
         session = battle_sessions.create_battle_session(
@@ -2186,9 +2209,13 @@ def forge():
 
         # Step 3: Scale
         final_hero = adjust_based_on_bp(p2_data)
+        # Keep the normalized portrait with the saved hero, without sending it
+        # through the second text-model call again.
+        image_url = f"data:image/png;base64,{image_part['data']}"
+        saved_source = {**p2_input, "image_url": image_url}
         generation_row = save_hero_generation_history(
             user,
-            p2_input,
+            saved_source,
             {"p1": p1_data, "p2": p2_data},
             final_hero,
             template=p2_data.get("template"),
@@ -2196,13 +2223,16 @@ def forge():
             bp_final=int(final_hero.get("BP") or 0),
             model_name=LLM_MODEL_NAME,
             prompt_version="p2_v2",
+            source_image_hash=hashlib.sha256(base64.b64decode(image_part["data"])).hexdigest(),
+            source_image_url=image_url,
             status="completed",
         )
-        save_hero_history(user, p2_input, final_hero)
+        saved_hero = save_hero_history(user, saved_source, final_hero)
         _safe_record_daily_task_progress(user["id"], "forge_one_card")
 
         response = dict(final_hero)
         response["generation_id"] = str(generation_row["id"]) if generation_row else None
+        response["hero_id"] = str(saved_hero["id"]) if saved_hero else None
         response["economy"] = economy_snapshot(user)
         return jsonify(response)
 
@@ -2259,6 +2289,8 @@ def battle_team():
         if not team_a or not team_b:
             return jsonify({"error": "Two teams required for battle"}), 400
 
+        if size == "pve_4v6" and (len(team_a) > 4 or len(team_b) > 6):
+            return jsonify({"error": "pve_4v6 allows at most 4 player units and 6 enemies"}), 400
         result = run_team_duel(team_a, team_b, size, label_a, label_b, control_mode=control_mode)
         try:
             save_battle_history(current_user(), size, data, result)
@@ -2355,6 +2387,8 @@ def create_battle_session_route():
             return jsonify({"error": "Battle sessions currently support rest control only"}), 400
         if not isinstance(team_a, list) or not isinstance(team_b, list) or not team_a or not team_b:
             return jsonify({"error": "Two teams are required"}), 400
+        if battle_mode == "pve_4v6" and (len(team_a) > 4 or len(team_b) > 6):
+            return jsonify({"error": "pve_4v6 allows at most 4 player units and 6 enemies"}), 400
 
         session = battle_sessions.create_battle_session(
             battle_mode=battle_mode,
@@ -3071,6 +3105,9 @@ def pvp_entry_status(entry_id):
     battle_session = None
     if match:
         match, battle_session = _sync_pvp_match_session(match["id"])
+        session = battle_sessions.get_battle_session(str((match or {}).get("battle_session_id") or ""))
+        if session:
+            battle_session = _battle_session_view(session, user)
     return jsonify({"ok": True, "entry": entry, "match": match, "battle_session": battle_session})
 
 

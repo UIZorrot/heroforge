@@ -24,7 +24,7 @@ function SkillDetails({ skill, index }: { skill: Skill; index: number }) {
   const duration = Number(skill.BUFF_TIME);
   return <article className="forge-details__skill">
     <header><span className="forge-details__skill-number">{String(index + 1).padStart(2, '0')}</span>
-      <div><span className="forge-details__kicker">{truthy(skill.IS_PASSIVE) ? 'Passive' : 'Active'}{skill.ROLE ? ` · ${label(skill.ROLE)}` : ''}</span><h4>{skill.name || 'Unnamed skill'}</h4></div>
+      <div><span className="forge-details__kicker">{truthy(skill.IS_PASSIVE) ? 'Opening passive' : 'Active'}{skill.ROLE ? ` · ${label(skill.ROLE)}` : ''}</span><h4>{skill.name || 'Unnamed skill'}</h4></div>
       <span className="forge-details__mana">{numeric(skill.MP_COST)} <small>MP</small></span>
     </header>
     <p>{skill.description || 'No description available.'}</p>
@@ -35,7 +35,8 @@ function SkillDetails({ skill, index }: { skill: Skill; index: number }) {
       {skill.TYPE && <div><dt>Type</dt><dd>{label(skill.TYPE)}</dd></div>}
       {activeEffects.map(([key, name]) => <div key={key}><dt>{name}</dt><dd>{numeric(skill[key])}</dd></div>)}
       {skill.BUFF_NAME && <div><dt>Status</dt><dd>{label(skill.BUFF_NAME)}</dd></div>}
-      {duration > 0 && <div><dt>Duration</dt><dd>{duration} {duration === 1 ? 'turn' : 'turns'}</dd></div>}
+      {truthy(skill.IS_PASSIVE) && <div><dt>Trigger</dt><dd>Once at battle start · no action cost</dd></div>}
+      {duration > 0 && <div><dt>Duration</dt><dd>{duration} {skill.BUFF_NAME === 'stun' || truthy(skill.IS_STUN) ? 'skipped action(s)' : 'round(s)'}</dd></div>}
       {truthy(skill.IS_STUN) && <div><dt>Stun</dt><dd>Yes</dd></div>}
     </dl>
   </article>;

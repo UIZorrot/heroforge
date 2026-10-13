@@ -1180,6 +1180,9 @@ def test_forge_and_battle_persistence(harness):
     assert int(hero_b["state"]["HP"]) > 0
     assert hero_a["generation_id"]
     assert hero_b["generation_id"]
+    assert hero_a["hero_id"] != hero_b["hero_id"]
+    assert hero_a["template"] == "warrior"
+    assert hero_b["template"] == "mage"
 
     economy = harness.economy(headers)
     assert economy["wallet"]["dust_balance"] == 300
@@ -1189,6 +1192,14 @@ def test_forge_and_battle_persistence(harness):
     assert len(hero_rows) >= 2
     hero_ids = {row["hero_payload"]["name"]: row["id"] for row in hero_rows}
     assert set(hero_ids) >= {"Northwind", "Starfall"}
+    assert hero_ids["Northwind"] == hero_a["hero_id"]
+    assert hero_ids["Starfall"] == hero_b["hero_id"]
+    persisted = {row["id"]: row for row in harness.heroes(headers)}
+    assert persisted[hero_a["hero_id"]]["source_payload"]["image_url"] == f"data:image/png;base64,{image_a}"
+    assert persisted[hero_b["hero_id"]]["source_payload"]["image_url"] == f"data:image/png;base64,{image_b}"
+    generation = harness.db_module.fetch_one("SELECT source_image_url, source_image_hash FROM hero_generations WHERE id = %s", (hero_a["generation_id"],))
+    assert generation["source_image_url"] == persisted[hero_a["hero_id"]]["source_payload"]["image_url"]
+    assert len(generation["source_image_hash"]) == 64
 
     battle_a = copy.deepcopy(hero_a)
     battle_b = copy.deepcopy(hero_b)
@@ -1475,10 +1486,11 @@ def test_friend_request_and_stake_free_friend_challenge_resolve_end_to_end(harne
 
 
 @pytest.mark.integration
-def test_browser_arena_ranked_match_accepts_manual_turns_with_thirty_second_deadlines(harness):
-    headers_a = harness.login("integration-auto-arena-a@example.com")
+@pytest.mark.parametrize("control_mode", ["manual", "program"])
+def test_browser_arena_ranked_match_accepts_manual_turns_with_thirty_second_deadlines(harness, control_mode):
+    headers_a = harness.login(f"integration-{control_mode}-arena-a@example.com")
     user_a_id = harness.last_user["id"]
-    headers_b = harness.login("integration-auto-arena-b@example.com")
+    headers_b = harness.login(f"integration-{control_mode}-arena-b@example.com")
     user_b_id = harness.last_user["id"]
 
     hero_ids = []
@@ -1495,23 +1507,26 @@ def test_browser_arena_ranked_match_accepts_manual_turns_with_thirty_second_dead
 
     first = harness.client.post(
         "/api/pvp/join", headers=headers_a,
-        json={"mode": "arena_2x3", "queueKey": "ranked-auto", "formation": {"front_0": hero_ids[0]}},
+        json={"mode": "arena_2x3", "queueKey": "ranked-auto", "controlMode": control_mode, "formation": {"front_0": hero_ids[0]}},
     )
     assert first.status_code == 200
     assert first.get_json()["status"] == "waiting"
 
     second = harness.client.post(
         "/api/pvp/join", headers=headers_b,
-        json={"mode": "arena_2x3", "queueKey": "ranked-auto", "formation": {"front_0": hero_ids[1]}},
+        json={"mode": "arena_2x3", "queueKey": "ranked-auto", "controlMode": control_mode, "formation": {"front_0": hero_ids[1]}},
     )
     assert second.status_code == 200, second.get_data(as_text=True)
     payload = second.get_json()
     assert payload["status"] == "matched"
     assert payload["match"]["status"] == "running"
     assert payload["battle_session"]["status"] == "preparing"
+    assert payload["battle_session"]["controlMode"] == control_mode
     assert payload["battle"] is None
     session_id = payload["battle_session"]["sessionId"]
-    outsider = harness.login("integration-ready-outsider@example.com")
+    assert harness.pvp_entry_status(headers_a, first.get_json()["entry"]["id"])["battle_session"]["viewerSide"] == "A"
+    assert harness.pvp_entry_status(headers_b, payload["entry"]["id"])["battle_session"]["viewerSide"] == "B"
+    outsider = harness.login(f"integration-ready-{control_mode}-outsider@example.com")
     forbidden = harness.client.post(f"/api/battle/sessions/{session_id}/confirm", headers=outsider, json={"positions": {"A1": 0}})
     assert forbidden.status_code == 403
     wrong_side = harness.client.post(f"/api/battle/sessions/{session_id}/confirm", headers=headers_b, json={"positions": {"A1": 0}})
@@ -1523,14 +1538,46 @@ def test_browser_arena_ranked_match_accepts_manual_turns_with_thirty_second_dead
     assert waiting["status"] == "preparing" and not waiting["events"]
     locked = harness.client.post(f"/api/battle/sessions/{session_id}/confirm", headers=headers_a, json={"positions": {"A1": 0}})
     assert locked.status_code == 409
-    second_ready = harness.client.post(f"/api/battle/sessions/{session_id}/confirm", headers=headers_b, json={"positions": {"B1": 0}})
+    key = harness.client.post("/api/me/agent-keys", headers=headers_b, json={"name": "Arena control"}).get_json()["data"]["secret"]
+    agent_b = harness.headers(key)
+    second_ready = harness.client.post(f"/api/battle/sessions/{session_id}/confirm", headers=agent_b, json={"positions": {"B1": 0}})
     assert second_ready.status_code == 200, second_ready.get_data(as_text=True)
-    assert second_ready.get_json()["data"]["status"] == "awaiting_action"
-    finished = _resolve_manual_session(harness, session_id, headers_a, headers_b)
-    assert finished["status"] == "resolved" and finished["result"]["controlMode"] == "manual"
+    if control_mode == "manual":
+        assert second_ready.get_json()["data"]["status"] == "awaiting_action"
+        finished = _resolve_manual_session(harness, session_id, headers_a, agent_b)
+    else:
+        finished = second_ready.get_json()["data"]
+        denied = harness.client.post(f"/api/battle/sessions/{session_id}/actions", headers=agent_b,
+                                     json={"action": {"kind": "attack", "actorTag": "B1"}})
+        assert denied.status_code == 409
+    assert finished["status"] == "resolved" and finished["result"]["controlMode"] == control_mode
     assert finished["boardHistory"][0]["bottom"][5]["name"] == "Auto Alpha"
     retry = harness.client.post(f"/api/battle/sessions/{session_id}/confirm", headers=headers_b, json={"positions": {"B1": 0}})
     assert retry.status_code == 200 and len(retry.get_json()["data"]["events"]) == len(finished["events"])
+
+
+@pytest.mark.integration
+def test_arena_matchmaking_separates_control_modes(harness):
+    players = []
+    for index, mode in enumerate(("manual", "program", "manual")):
+        headers = harness.login(f"integration-mode-pool-{index}@example.com")
+        user_id = harness.last_user["id"]
+        with harness.db_module.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("INSERT INTO heroes (user_id, source_payload, hero_payload) VALUES (%s, '{}'::jsonb, %s::jsonb) RETURNING id",
+                            (user_id, harness.db_module.serialize_json(_board_hero(f"Pool {index}", hp=950, atk=95, defense=24, speed=50))))
+                hero_id = str(cur.fetchone()["id"])
+            conn.commit()
+        response = harness.client.post("/api/pvp/join", headers=headers,
+            json={"mode": "arena_2x3", "queueKey": "same-pool", "controlMode": mode, "formation": {"front_0": hero_id}})
+        assert response.status_code == 200, response.get_data(as_text=True)
+        players.append((headers, response.get_json()))
+    assert players[0][1]["status"] == players[1][1]["status"] == "waiting"
+    assert players[2][1]["status"] == "matched"
+    assert players[2][1]["opponent"]["id"] == players[0][1]["entry"]["id"]
+    assert players[2][1]["battle_session"]["controlMode"] == "manual"
+    assert harness.pvp_entry_status(players[1][0], players[1][1]["entry"]["id"])["entry"]["status"] == "waiting"
+    harness.pvp_cancel(players[1][0], players[1][1]["entry"]["id"])
 
 
 @pytest.mark.integration
@@ -2389,3 +2436,42 @@ def test_simulation_preparation_api_requires_creator_confirmation(harness):
     retry = harness.client.post(f"/api/battle/sessions/{session_id}/confirm", headers=headers, json={"positions": {"A1": 5}})
     assert retry.status_code == 200
     assert len(harness.battles(headers)) == 1
+
+
+@pytest.mark.integration
+def test_pve_session_api_keeps_six_enemies_and_rejects_overflow(harness):
+    headers = harness.login("integration-pve-4v6@example.com")
+    party = [_board_hero(f"Party {i}", speed=150 + i, range_mode="ranged", target_num=6) for i in range(4)]
+    enemies = [_board_hero(f"Monster {i}", speed=20, range_mode="ranged") for i in range(6)]
+    for hero in party:
+        hero["skill"]["s1"]["RANGE"] = "enemy"
+    body = {"battleMode": "pve_4v6", "controlMode": "manual", "preparation": True,
+            "teamA": party, "teamB": enemies}
+    response = harness.client.post("/api/battle/sessions", headers=headers, json=body)
+    assert response.status_code == 201, response.get_data(as_text=True)
+    snapshot = response.get_json()["data"]
+    assert snapshot["battleMode"] == "pve_4v6"
+    assert snapshot["status"] == "preparing"
+    assert snapshot["events"] == []
+    assert len([unit for unit in snapshot["board"]["bottom"] if unit]) == 4
+    assert snapshot["board"]["top"][5]["name"] == "Monster 5"
+    session_id = snapshot["sessionId"]
+    ready = harness.client.post(f"/api/battle/sessions/{session_id}/confirm", headers=headers,
+                                json={"positions": {f"A{i+1}": i for i in range(4)}})
+    assert ready.status_code == 200, ready.get_data(as_text=True)
+    current = ready.get_json()["data"]
+    cast = harness.client.post(f"/api/battle/sessions/{session_id}/actions", headers=headers,
+        json={"action": {"kind": "skill", "skillSlot": "s1", "actorTag": current["activeActorTag"],
+                         "targetTag": "B6", "expectedEventCount": len(current["events"])}})
+    assert cast.status_code == 200, cast.get_data(as_text=True)
+    events = cast.get_json()["data"]["events"]
+    assert len(events) == 6
+    assert events[0]["defender"] == "B6"
+    assert len({event["actionId"] for event in events}) == 1
+    assert all(event["targetCount"] == 6 for event in events)
+    for overflow in ({"teamA": party + [party[0]]}, {"teamB": enemies + [enemies[0]]}):
+        rejected = harness.client.post("/api/battle/sessions", headers=headers, json={**body, **overflow})
+        assert rejected.status_code == 400
+    rejected = harness.client.post("/api/battle/team", headers=headers,
+        json={"size": "pve_4v6", "teamA": party, "teamB": enemies + [enemies[0]]})
+    assert rejected.status_code == 400

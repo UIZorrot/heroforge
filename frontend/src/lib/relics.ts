@@ -2,6 +2,8 @@ import type { RelicDefinition, RelicKind } from '../types';
 
 export type RelicCategory = 'weapon' | 'armor' | 'accessory' | 'artifact';
 
+export const RELIC_COMBAT_STATUS = 'Battle effects planned. Equipment and bindings are saved, but do not change combat stats yet.';
+
 /** Mirrors backend relic_catalog.get_relic_kind: low_* entries are shards. */
 export function getRelicKind(relic?: Pick<RelicDefinition, 'relic_type' | 'kind'> | null): RelicKind {
   if (relic?.kind === 'shard' || relic?.kind === 'relic') return relic.kind;

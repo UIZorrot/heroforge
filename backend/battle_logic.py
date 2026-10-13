@@ -83,7 +83,11 @@ def _visual_type_contract(source: Dict[str, Any] | None, fallback_type: Any = No
 def _event_visual_contract(actor: "Battler", skill: Dict[str, Any] | None = None) -> Dict[str, str | None]:
     state = actor.character.get("state", {})
     fallback_type = state.get("TYPE") if isinstance(state, dict) else None
-    return _visual_type_contract(skill if isinstance(skill, dict) else state, fallback_type)
+    source = skill if isinstance(skill, dict) else state
+    visual = _visual_type_contract(source, fallback_type)
+    presentation = str(source.get("VFX_PRESENTATION", source.get("vfxPresentation", "auto"))).lower()
+    visual["vfx_presentation"] = "instant" if presentation == "sky" else presentation if presentation in {"instant", "direct"} else "auto"
+    return visual
 
 
 def _state_snapshot(unit: "Battler") -> Dict[str, Any]:
@@ -91,14 +95,14 @@ def _state_snapshot(unit: "Battler") -> Dict[str, Any]:
     return {
         "HP": unit.hp,
         "MP": unit.mp,
-        "ATK": unit.base_atk,
-        "DEF": unit.base_def,
-        "CC": unit.base_cc,
-        "SPEED": unit.base_spd,
+        "ATK": unit.atk,
+        "DEF": unit.def_val,
+        "CC": unit.cc,
+        "SPEED": unit.spd,
         "CA": unit.base_ca,
         "PI": unit.base_pi,
-        "EV": unit.base_ev,
-        "AC": unit.base_ac,
+        "EV": unit.ev,
+        "AC": unit.ac,
         "TYPE": unit.character.get("state", {}).get("TYPE"),
         "type_catalog": visual["type_catalog"],
         "type_effect": visual["type_effect"],
@@ -131,23 +135,33 @@ class Battler:
         self.buffs: List[Dict[str, Any]] = []
 
     def sum_buff(self, name: str) -> float:
-        return sum(b["value"] for b in self.buffs if b["name"] == name)
+        return sum(b["value"] for b in self.buffs if b["name"] == name and "effects" not in b)
+
+    def stat_modifier(self, field: str) -> int:
+        return sum(
+            _safe_int(buff.get("effects", {}).get(field, 0))
+            * (1 if buff["name"] in {"pray", "heal"} else -1)
+            for buff in self.buffs
+            if buff["name"] in {"pray", "heal", "curse", "frozen", "poison", "wound", "burn"}
+            and not (field == "BUFF_DMG" and buff["name"] in {"poison", "wound", "burn"})
+        )
 
     @property
     def atk(self):
-        return max(1, self.base_atk - self.sum_buff("curse") + self.sum_buff("pray"))
+        return max(1, self.base_atk - self.sum_buff("curse") + self.sum_buff("pray") + self.stat_modifier("BUFF_DMG"))
 
     @property
     def def_val(self):
-        return max(0, self.base_def - self.sum_buff("curse") + self.sum_buff("pray"))
+        return min(80, max(0, self.base_def - self.sum_buff("curse") + self.sum_buff("pray") + self.stat_modifier("BUFF_DEF")))
 
     @property
     def spd(self):
-        return max(1, self.base_spd + self.sum_buff("pray") - self.sum_buff("frozen") * 5)
+        frost = sum(_safe_int(buff.get("effects", {}).get("BUFF_EV", 0)) for buff in self.buffs if buff["name"] == "frozen")
+        return max(1, self.base_spd + self.sum_buff("pray") - (self.sum_buff("frozen") + frost) * 5)
 
     @property
     def cc(self):
-        return self.base_cc
+        return min(100, max(0, self.base_cc + self.stat_modifier("BUFF_CC")))
 
     @property
     def ca(self):
@@ -155,11 +169,11 @@ class Battler:
 
     @property
     def ac(self):
-        return max(0, self.base_ac - self.sum_buff("frozen"))
+        return min(100, max(0, self.base_ac - self.sum_buff("frozen") + self.stat_modifier("BUFF_AC")))
 
     @property
     def ev(self):
-        return max(0, self.base_ev - (self.base_ev if self.sum_buff("frozen") > 0 else 0))
+        return min(100, max(0, self.base_ev - (self.base_ev if self.sum_buff("frozen") > 0 else 0) + self.stat_modifier("BUFF_EV")))
 
     @property
     def pi(self):
@@ -169,12 +183,15 @@ class Battler:
     def is_stunned(self):
         return any(b["name"] == "stun" for b in self.buffs)
 
-    def add_buff(self, name: str, duration: int, value: float, logs: List[str]):
+    def add_buff(self, name: str, duration: int, value: float, logs: List[str], effects=None):
         if not name or duration <= 0:
             return
 
         normalized = BUFF_ALIASES.get(str(name).strip().lower(), str(name).strip().lower())
-        self.buffs.append({"name": normalized, "duration": duration, "value": value})
+        buff = {"name": normalized, "duration": duration, "value": value}
+        if effects is not None:
+            buff["effects"] = dict(effects)
+        self.buffs.append(buff)
 
         label = normalized
         if normalized == "wound":
@@ -198,6 +215,26 @@ class Battler:
         burn_damage = self.sum_buff("burn")
         regen_value = self.sum_buff("heal")
 
+        for buff in self.buffs:
+            effects = buff.get("effects", {})
+            hp_effect = _safe_int(effects.get("BUFF_HP", 0))
+            if buff["name"] in {"wound", "poison", "burn"}:
+                dot = hp_effect or _safe_int(effects.get("BUFF_DMG", 0))
+                if buff["name"] == "wound":
+                    wound_damage += dot
+                elif buff["name"] == "poison":
+                    poison_damage += dot
+                else:
+                    burn_damage += dot
+            elif buff["name"] in {"heal", "pray"}:
+                regen_value += hp_effect
+            elif buff["name"] in {"curse", "frozen"}:
+                poison_damage += hp_effect
+
+            if self.hp > 0 and effects.get("BUFF_MP"):
+                sign = -1 if buff["name"] in {"curse", "frozen", "wound", "poison", "burn"} else 1
+                self.mp = min(self.max_mp, max(0, self.mp + sign * _safe_int(effects["BUFF_MP"])))
+
         if wound_damage > 0:
             dmg = int(wound_damage)
             self.hp = max(0, self.hp - dmg)
@@ -219,7 +256,14 @@ class Battler:
             push_event_fn(round_num, self.tag, "heal", 0, False, False, False, "heal", 0, heal_amt)
 
         for buff in self.buffs:
-            buff["duration"] -= 1
+            if buff["name"] != "stun":
+                buff["duration"] -= 1
+        self.buffs = [buff for buff in self.buffs if buff["duration"] > 0]
+
+    def consume_stun(self):
+        for buff in self.buffs:
+            if buff["name"] == "stun":
+                buff["duration"] -= 1
         self.buffs = [buff for buff in self.buffs if buff["duration"] > 0]
 
 
@@ -264,8 +308,11 @@ def _is_support_skill(skill: Dict[str, Any] | None) -> bool:
         isinstance(skill, dict)
         and _skill_damage(skill) <= 0
         and _skill_target_mode(skill) in {"self", "ally"}
-        and _skill_role(skill) in SUPPORT_SKILL_ROLES
     )
+
+
+def _is_passive(skill: Dict[str, Any] | None) -> bool:
+    return isinstance(skill, dict) and str(skill.get("IS_PASSIVE", "")).lower() in {"true", "1"}
 
 
 def _buff_value_from_skill(skill: Dict[str, Any]) -> int:
@@ -361,7 +408,7 @@ def build_public_battle_observation(
 
 @dataclass(frozen=True)
 class BattleAction:
-    kind: Literal["attack", "skill", "pass"]
+    kind: Literal["attack", "skill", "wait", "pass"]
     target_tag: str | None = None
     skill_slot: Literal["s1", "s2"] | None = None
 
@@ -383,10 +430,7 @@ class ProgramBattleController:
         if target_mode == "self":
             return actor_tag
         if target_mode == "ally":
-            for unit in allies:
-                if unit.get("tag") != actor_tag:
-                    return unit.get("tag")
-            return None
+            return min(allies, key=lambda unit: _safe_int(unit.get("hp", 0)) / max(1, _safe_int(unit.get("maxHp", 1)))).get("tag") if allies else None
         if target_mode == "enemy":
             if not enemies:
                 return None
@@ -429,7 +473,7 @@ class ProgramBattleController:
         available_skills = []
         for slot in ("s1", "s2"):
             skill = skills.get(slot)
-            if not isinstance(skill, dict):
+            if not isinstance(skill, dict) or _is_passive(skill):
                 continue
             skill_cost = _infer_skill_cost(skill)
             if mp >= skill_cost:
@@ -535,7 +579,7 @@ def _ordered_board_targets(
         return [attacker]
 
     pool = allies if target_mode == "ally" else enemies
-    living = [unit for unit in pool if unit and unit.hp > 0 and unit is not attacker]
+    living = [unit for unit in pool if unit and unit.hp > 0]
     if not living:
         return []
 
@@ -543,7 +587,7 @@ def _ordered_board_targets(
     same_lane = [unit for unit in living if unit.slot_index == attacker.slot_index]
 
     def lane_distance(unit: Battler) -> int:
-        return abs(unit.slot_index - attacker.slot_index)
+        return abs(_safe_int(unit.slot_index, 0) - _safe_int(attacker.slot_index, 0))
 
     def priority(unit: Battler):
         dist = lane_distance(unit)
@@ -570,8 +614,87 @@ def _ordered_board_targets(
     if not ordered and range_mode not in {"melee", "ranged"}:
         ordered = sorted(living, key=priority)
 
-    limit = _target_num(skill)
-    return ordered[:limit]
+    return ordered
+
+
+def _affected_targets(primary: Battler | None, candidates: List[Battler], skill: Dict[str, Any] | None) -> List[Battler]:
+    """The player chooses the primary target; remaining targets follow range priority."""
+    if primary is None:
+        return []
+    return ([primary] + [unit for unit in candidates if unit is not primary])[:_target_num(skill)]
+
+
+def _resolve_skill_hit(actor: Battler, target: Battler, skill, round_num, push_event, logs, mp_cost=0, action_id=None, target_index=0, target_count=1):
+    """Shared by manual sessions, automatic team combat and legacy 1v1 combat."""
+    skill_damage = _skill_damage(skill)
+    visual = _event_visual_contract(actor, skill)
+    buff_name = str((skill or {}).get("BUFF_NAME") or "").strip().lower()
+    buff_name = BUFF_ALIASES.get(buff_name, buff_name)
+    event_args = {
+        "action_id": action_id,
+        "target_index": target_index,
+        "target_count": target_count,
+        "defender_tag": target.tag,
+        "attacker_slot": actor.slot_index,
+        "defender_slot": target.slot_index,
+        "attack_type": str((skill or {}).get("TYPE") or actor.character.get("state", {}).get("TYPE") or ""),
+        "buff_name": buff_name or None,
+        "skill_role": _skill_role(skill),
+        "range_mode": _skill_range(skill) if skill else None,
+        **visual,
+    }
+    is_crit, damage = False, 0
+    if not _is_support_skill(skill):
+        hit_chance = max(0.2, min(1.5, 1 + (actor.ac - target.ev) / 100.0))
+        if random.random() > hit_chance:
+            push_event(round_num, actor.tag, "skill" if skill else "attack", 0, False, True, False,
+                       skill.get("name") if skill else None, mp_cost, **event_args)
+            return
+        is_crit = random.random() < actor.cc / 100.0
+        mitigation = min(0.8, max(0.0, (target.def_val - actor.pi * 0.5) / 100.0))
+        damage = max(1, int((actor.atk + skill_damage) * (1 + actor.ca / 100.0 if is_crit else 1) * (1 - mitigation)))
+        target.hp = max(0, target.hp - damage)
+
+    applied_stun = False
+    heal = 0
+    if skill and target.hp > 0:
+        duration = max(0, _safe_int(skill.get("BUFF_TIME", 0)))
+        effects = {field: max(0, _safe_int(skill.get(field, 0))) for field in
+                   ("BUFF_HP", "BUFF_MP", "BUFF_DMG", "BUFF_CC", "BUFF_DEF", "BUFF_EV", "BUFF_AC")}
+        if buff_name == "stun" or str(skill.get("IS_STUN", "")).lower() in {"true", "1"}:
+            target.add_buff("stun", max(1, duration), 0, logs)
+            applied_stun = True
+        if buff_name in BUFF_TYPE_EFFECTS and buff_name != "stun" and duration > 0 and any(effects.values()):
+            target.add_buff(buff_name, duration, _buff_value_from_skill(skill), logs, effects=effects)
+        elif not buff_name and _is_support_skill(skill):
+            # Untimed support effects are immediate; named statuses tick at round start.
+            heal = min(target.max_hp - target.hp, effects["BUFF_HP"])
+            target.hp += heal
+            target.mp = min(target.max_mp, target.mp + effects["BUFF_MP"])
+            stat_effects = {key: value for key, value in effects.items() if key not in {"BUFF_HP", "BUFF_MP"}}
+            if any(stat_effects.values()):
+                target.add_buff("pray", max(1, duration), _buff_value_from_skill(skill), logs, effects=stat_effects)
+
+    push_event(round_num, actor.tag, "skill" if skill else "attack", damage, is_crit, False, applied_stun,
+               skill.get("name") if skill else None, mp_cost, heal, **event_args)
+
+
+def _apply_opening_passives(team_a, team_b, round_num, push_event, logs):
+    # Opening passives fire once, without using a turn or MP. Their statuses have
+    # the same duration as active skills and start ticking on the following round.
+    for own, enemy in ((team_a, team_b), (team_b, team_a)):
+        for actor in own:
+            if not actor or actor.hp <= 0:
+                continue
+            for skill_slot, skill in actor.character.get("skill", {}).items():
+                if not _is_passive(skill):
+                    continue
+                targets = _ordered_board_targets(actor, own, enemy, skill)
+                affected = targets[:_target_num(skill)]
+                for index, target in enumerate(affected):
+                    _resolve_skill_hit(actor, target, skill, round_num, push_event, logs,
+                                       action_id=f"opening:{actor.tag}:{skill_slot}",
+                                       target_index=index, target_count=len(affected))
 
 
 def _alive_total(team: List[Battler]) -> int:
@@ -614,7 +737,7 @@ def _run_board_duel(
     events: List[Dict[str, Any]] = []
     logs: List[str] = []
     max_rounds = 30
-    board_history: List[Dict[str, Any]] = []
+    board_history: List[Dict[str, Any]] = [_board_snapshot(1, team_a_units, team_b_units, label_a, label_b)]
 
     def push_event(
         round_num,
@@ -637,6 +760,10 @@ def _run_board_duel(
         type_catalog=None,
         type_effect=None,
         buff_type_effect=None,
+        vfx_presentation=None,
+        action_id=None,
+        target_index=0,
+        target_count=1,
     ):
         if defender_tag is None:
             attacker_side = str(attacker_tag)[0] if str(attacker_tag) else "A"
@@ -657,6 +784,10 @@ def _run_board_duel(
         logs.append(log)
         events.append({
             "round": round_num,
+            "vfxPresentation": vfx_presentation,
+            "actionId": action_id,
+            "targetIndex": target_index,
+            "targetCount": target_count,
             "attacker": attacker_tag,
             "defender": defender_tag,
             "attackerSlot": attacker_slot,
@@ -692,6 +823,7 @@ def _run_board_duel(
             "log": log,
             "timestamp": int(time.time() * 1000),
         })
+        board_history.append(_board_snapshot(round_num, team_a_units, team_b_units, label_a, label_b))
 
     def apply_skill(actor: Battler, enemy_team: List[Battler], round_num: int):
         if actor.is_stunned:
@@ -708,6 +840,7 @@ def _run_board_duel(
                 attack_type=actor.character.get("state", {}).get("TYPE"),
                 **_event_visual_contract(actor),
             )
+            actor.consume_stun()
             return
 
         own_team = team_a_units if actor.tag.startswith("A") else team_b_units
@@ -723,7 +856,7 @@ def _run_board_duel(
             chosen_skill = None
 
         skill_cost = _infer_skill_cost(chosen_skill) if chosen_skill else 0
-        if chosen_skill and actor.mp < skill_cost:
+        if chosen_skill and (_is_passive(chosen_skill) or actor.mp < skill_cost):
             chosen_skill = None
             skill_cost = 0
 
@@ -755,92 +888,24 @@ def _run_board_duel(
             )
             return
 
-        skill_damage = _skill_damage(chosen_skill)
-        attack_type = str((chosen_skill or {}).get("TYPE") or actor.character.get("state", {}).get("TYPE") or "").strip()
-        buff_name = str((chosen_skill or {}).get("BUFF_NAME") or "").strip().lower()
-        skill_role = _skill_role(chosen_skill)
-        range_mode = _skill_range(chosen_skill) if chosen_skill else None
-        visual = _event_visual_contract(actor, chosen_skill)
+        affected_targets = _affected_targets(target, targets, chosen_skill)
+        action_id = f"cast:{len(events)}"
+        for index, affected in enumerate(affected_targets):
+            _resolve_skill_hit(actor, affected, chosen_skill, round_num, push_event, logs,
+                               skill_cost if index == 0 else 0, action_id, index, len(affected_targets))
 
-        is_crit = False
-        final_damage = 0
-        if not _is_support_skill(chosen_skill):
-            hit_chance = max(0.2, min(1.5, 1 + (actor.ac - target.ev) / 100.0))
-
-            if random.random() > hit_chance:
-                push_event(
-                    round_num,
-                    actor.tag,
-                    "skill" if chosen_skill else "attack",
-                    0,
-                    False,
-                    True,
-                    False,
-                    chosen_skill.get("name") if chosen_skill else None,
-                    skill_cost,
-                    defender_tag=target.tag,
-                    attacker_slot=actor.slot_index,
-                    defender_slot=target.slot_index,
-                    attack_type=attack_type,
-                    buff_name=buff_name or None,
-                    skill_role=skill_role or None,
-                    range_mode=range_mode,
-                    **visual,
-                )
-                return
-
-            is_crit = random.random() < actor.cc / 100.0
-            crit_multiplier = 1 + actor.ca / 100.0 if is_crit else 1.0
-            mitigation = max(0.0, (target.def_val - actor.pi * 0.5) / 100.0)
-
-            raw_damage = (actor.atk + skill_damage) * crit_multiplier
-            final_damage = max(1, int(raw_damage * (1.0 - mitigation)))
-            target.hp = max(0, target.hp - final_damage)
-
-        applied_stun = False
-        if chosen_skill:
-            buff_name = str(chosen_skill.get("BUFF_NAME", "")).strip().lower()
-            duration = max(0, _safe_int(chosen_skill.get("BUFF_TIME", 0), 0))
-
-            if buff_name == "stun" or str(chosen_skill.get("IS_STUN", "")).lower() == "true":
-                target.add_buff("stun", max(1, duration or 1), 0, logs)
-                applied_stun = True
-
-            buff_value = _buff_value_from_skill(chosen_skill)
-
-            if buff_name and duration > 0 and buff_value != 0:
-                target.add_buff(buff_name, duration, buff_value, logs)
-
-        push_event(
-            round_num,
-            actor.tag,
-            "skill" if chosen_skill else "attack",
-            final_damage,
-            is_crit,
-            False,
-            applied_stun,
-            chosen_skill.get("name") if chosen_skill else None,
-            skill_cost,
-            defender_tag=target.tag,
-            attacker_slot=actor.slot_index,
-            defender_slot=target.slot_index,
-            attack_type=attack_type,
-            buff_name=buff_name or None,
-            skill_role=skill_role or None,
-            range_mode=range_mode,
-            **visual,
-        )
+    _apply_opening_passives(team_a_units, team_b_units, 1, push_event, logs)
 
     for round_num in range(1, max_rounds + 1):
         if _alive_total(team_a_units) <= 0 or _alive_total(team_b_units) <= 0:
             break
 
         for unit in team_a_units + team_b_units:
-            if unit and unit.hp > 0:
+            if round_num > 1 and unit and unit.hp > 0:
                 unit.tick_buffs(round_num, push_event)
 
         if _alive_total(team_a_units) <= 0 or _alive_total(team_b_units) <= 0:
-            board_history.append(_board_snapshot(round_num, team_a_units, team_b_units, label_a, label_b))
+            board_history[-1] = _board_snapshot(round_num, team_a_units, team_b_units, label_a, label_b)
             break
 
         turn_order = [unit for unit in team_a_units + team_b_units if unit and unit.hp > 0]
@@ -856,7 +921,7 @@ def _run_board_duel(
             if _alive_total(team_a_units) <= 0 or _alive_total(team_b_units) <= 0:
                 break
 
-        board_history.append(_board_snapshot(round_num, team_a_units, team_b_units, label_a, label_b))
+        board_history[-1] = _board_snapshot(round_num, team_a_units, team_b_units, label_a, label_b)
 
     total_a = _alive_total(team_a_units)
     total_b = _alive_total(team_b_units)
@@ -915,12 +980,12 @@ def _pick_skill(atk: Battler, round_num: int) -> Dict[str, Any] | None:
     if not isinstance(skills, dict):
         return None
 
-    ordered_skills = [skill for _, skill in sorted(skills.items()) if isinstance(skill, dict)]
+    ordered_skills = [skill for _, skill in sorted(skills.items()) if isinstance(skill, dict) and not _is_passive(skill)]
     if not ordered_skills:
         return None
 
-    s1 = skills.get("s1") if isinstance(skills.get("s1"), dict) else ordered_skills[0]
-    s2 = skills.get("s2") if isinstance(skills.get("s2"), dict) else (ordered_skills[1] if len(ordered_skills) > 1 else None)
+    s1 = skills.get("s1") if isinstance(skills.get("s1"), dict) and not _is_passive(skills["s1"]) else ordered_skills[0]
+    s2 = skills.get("s2") if isinstance(skills.get("s2"), dict) and not _is_passive(skills["s2"]) else (ordered_skills[1] if len(ordered_skills) > 1 else None)
     planned = s1 if round_num % 4 != 0 else s2
     return planned or s1 or ordered_skills[0]
 
@@ -973,6 +1038,12 @@ def run_auto_duel(
         type_catalog=None,
         type_effect=None,
         buff_type_effect=None,
+        vfx_presentation=None,
+        action_id=None,
+        target_index=0,
+        target_count=1,
+        attacker_slot=None,
+        defender_slot=None,
     ):
         defender_tag = defender_tag or ("B" if attacker_tag == "A" else "A")
 
@@ -991,8 +1062,14 @@ def run_auto_duel(
         logs.append(log)
         events.append({
             "round": round_num,
+            "vfxPresentation": vfx_presentation,
+            "actionId": action_id,
+            "targetIndex": target_index,
+            "targetCount": target_count,
             "attacker": attacker_tag,
             "defender": defender_tag,
+            "attackerSlot": attacker_slot,
+            "defenderSlot": defender_slot,
             "actionType": action_type,
             "skillName": skill_name,
             "attackType": attack_type,
@@ -1028,6 +1105,7 @@ def run_auto_duel(
     def perform_attack(atk: Battler, defen: Battler, round_num: int):
         if atk.is_stunned:
             push_event(round_num, atk.tag, "stunned", 0, False, False, False, **_event_visual_contract(atk))
+            atk.consume_stun()
             return
 
         observation, action = _choose_battle_action(battle_controller, atk, [atk], [defen], round_num, label_a, label_b)
@@ -1043,94 +1121,28 @@ def run_auto_duel(
             chosen_skill = None
 
         skill_cost = _infer_skill_cost(chosen_skill) if chosen_skill else 0
-        if chosen_skill and atk.mp < skill_cost:
+        if chosen_skill and (_is_passive(chosen_skill) or atk.mp < skill_cost):
             chosen_skill = None
             skill_cost = 0
 
         atk.mp = max(0, atk.mp - skill_cost)
 
-        skill_damage = _skill_damage(chosen_skill)
-        attack_type = str((chosen_skill or {}).get("TYPE") or atk.character.get("state", {}).get("TYPE") or "").strip()
-        buff_name = str((chosen_skill or {}).get("BUFF_NAME") or "").strip().lower()
-        skill_role = _skill_role(chosen_skill)
-        range_mode = _skill_range(chosen_skill) if chosen_skill else None
         target = _target_for_skill(atk, defen, chosen_skill) if chosen_skill else defen
-        visual = _event_visual_contract(atk, chosen_skill)
+        _resolve_skill_hit(atk, target, chosen_skill, round_num, push_event, logs, skill_cost)
 
-        is_crit = False
-        final_damage = 0
-        if not _is_support_skill(chosen_skill):
-            hit_chance = max(0.2, min(1.5, 1 + (atk.ac - target.ev) / 100.0))
-
-            if random.random() > hit_chance:
-                push_event(
-                    round_num,
-                    atk.tag,
-                    "skill" if chosen_skill else "attack",
-                    0,
-                    False,
-                    True,
-                    False,
-                    chosen_skill.get("name") if chosen_skill else None,
-                    skill_cost,
-                    attack_type=attack_type,
-                    buff_name=buff_name or None,
-                    skill_role=skill_role or None,
-                    range_mode=range_mode,
-                    defender_tag=target.tag,
-                    **visual,
-                )
-                return
-
-            is_crit = random.random() < atk.cc / 100.0
-            crit_multiplier = 1 + atk.ca / 100.0 if is_crit else 1.0
-            mitigation = max(0.0, (target.def_val - atk.pi * 0.5) / 100.0)
-
-            raw_damage = (atk.atk + skill_damage) * crit_multiplier
-            final_damage = max(1, int(raw_damage * (1.0 - mitigation)))
-            target.hp = max(0, target.hp - final_damage)
-
-        applied_stun = False
-        if chosen_skill:
-            buff_name = str(chosen_skill.get("BUFF_NAME", "")).strip().lower()
-            duration = max(0, _safe_int(chosen_skill.get("BUFF_TIME", 0), 0))
-
-            if buff_name == "stun" or str(chosen_skill.get("IS_STUN", "")).lower() == "true":
-                target.add_buff("stun", max(1, duration or 1), 0, logs)
-                applied_stun = True
-
-            buff_value = _buff_value_from_skill(chosen_skill)
-
-            if buff_name and duration > 0 and buff_value != 0:
-                target.add_buff(buff_name, duration, buff_value, logs)
-
-        push_event(
-            round_num,
-            atk.tag,
-            "skill" if chosen_skill else "attack",
-            final_damage,
-            is_crit,
-            False,
-            applied_stun,
-            chosen_skill.get("name") if chosen_skill else None,
-            skill_cost,
-            attack_type=attack_type,
-            buff_name=buff_name or None,
-            skill_role=skill_role or None,
-            range_mode=range_mode,
-            defender_tag=target.tag,
-            **visual,
-        )
+    _apply_opening_passives([p_a], [p_b], 1, push_event, logs)
 
     for round_num in range(1, max_rounds + 1):
         if p_a.hp <= 0 or p_b.hp <= 0:
             break
 
-        p_a.tick_buffs(round_num, push_event)
+        if round_num > 1:
+            p_a.tick_buffs(round_num, push_event)
         if p_a.hp <= 0:
             break
 
-        p_b.tick_buffs(round_num, push_event)
+        if round_num > 1:
+            p_b.tick_buffs(round_num, push_event)
         if p_b.hp <= 0:
             break
 
@@ -1189,7 +1201,9 @@ def run_team_duel(
             "details": result,
         }
 
-    lanes = 6 if size == "arena_2x3" else 4 if size == "4v4" else 3
+    if size == "pve_4v6" and (not team_a or not team_b or len(team_a) > 4 or len(team_b) > 6):
+        raise ValueError("pve_4v6 requires 1-4 player units and 1-6 enemies")
+    lanes = 6 if size in {"arena_2x3", "pve_4v6"} else 4 if size == "4v4" else 3
     result = _run_board_duel(team_a, team_b, label_a, label_b, lanes, controller=controller, control_mode=control_mode)
     return {
         "winner": result["winner"],
@@ -1200,6 +1214,7 @@ def run_team_duel(
         "events": result["events"],
         "details": result,
         "board": result["board"],
+        "boardHistory": result["boardHistory"],
         "finalHpA": result["finalHpA"],
         "finalHpB": result["finalHpB"],
         "maxHpA": result["maxHpA"],

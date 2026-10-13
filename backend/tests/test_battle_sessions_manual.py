@@ -93,3 +93,18 @@ def test_illegal_target_and_unaffordable_skill_do_not_consume_turn():
     with pytest.raises(battle_sessions.BattleSessionError):
         room.submit_action(action(room) | {"kind": "skill", "skillSlot": "s1"})
     assert not room.events
+
+
+def test_wait_restores_ten_percent_hp_and_mp_and_is_exposed_for_every_human_turn():
+    room = session(two_players=False)
+    actor = room.current_actor
+    actor.hp = actor.max_hp - 100
+    actor.mp = actor.max_mp - 50
+    hp_before, mp_before = actor.hp, actor.mp
+    wait = next(option for option in room.public_snapshot()["actionOptions"] if option["kind"] == "wait")
+    assert wait["name"] == "Wait"
+    room.submit_action({"actorTag": actor.tag, "kind": "wait", "targetTag": actor.tag, "expectedEventCount": 0})
+    assert actor.hp == min(actor.max_hp, hp_before + (actor.max_hp + 9) // 10)
+    assert actor.mp == min(actor.max_mp, mp_before + (actor.max_mp + 9) // 10)
+    assert room.events[0]["actionType"] == "heal"
+    assert room.events[0]["skillName"] == "Wait"

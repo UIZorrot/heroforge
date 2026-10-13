@@ -38,6 +38,20 @@ describe('manual training', () => {
     expect(next.events![0].damage).toBe(0);
     expect(next.events![0].mpCostApplied).toBe(10);
   });
+  it('offers Wait to every unit and restores ten percent of max HP and MP', () => {
+    const initial = start();
+    const actor = initial.board!.bottom.find(unit => unit?.tag === initial.activeActorTag)!;
+    actor.hp = Math.max(0, actor.maxHp - 100);
+    actor.mp = Math.max(0, actor.maxMp - 50);
+    const hpBefore = actor.hp;
+    const mpBefore = actor.mp;
+    const wait = manualOptions(initial.board!, actor).find(option => option.kind === 'wait');
+    expect(wait).toMatchObject({ name: 'Wait', cost: 0, targets: [actor.tag] });
+    const next = advanceLocalManualBattle(initial, { actorTag: actor.tag, kind: 'wait', targetTag: actor.tag, expectedEventCount: 0 });
+    expect(next.board!.bottom.find(unit => unit?.tag === actor.tag)!.hp).toBe(Math.min(actor.maxHp, hpBefore + Math.ceil(actor.maxHp * 0.1)));
+    expect(next.board!.bottom.find(unit => unit?.tag === actor.tag)!.mp).toBe(Math.min(actor.maxMp, mpBefore + Math.ceil(actor.maxMp * 0.1)));
+    expect(next.events![0]).toMatchObject({ actionType: 'heal', skillName: 'Wait' });
+  });
   it('plays through to a result while alternating human choices and AI actions', () => {
     let room = start();
     for (let step = 0; step < 200 && room.status !== 'resolved'; step++) {

@@ -340,6 +340,7 @@ export interface ClientBattleSummary {
 
 export type PvpQueueStatus = 'waiting' | 'matched' | 'cancelled' | 'expired';
 export type PvpBattleMode = '1v1' | '4v4' | 'arena_2x3';
+export type BattleMode = PvpBattleMode | 'pve_4v6';
 
 export interface BattleSessionUnit {
   tag: string;
@@ -371,7 +372,7 @@ export interface BattleSessionObservation {
 
 export interface BattleSessionSnapshot {
   sessionId: string;
-  battleMode: PvpBattleMode;
+  battleMode: BattleMode;
   controlMode: 'rest' | 'program' | 'manual';
   actionOptions?: import('./lib/battleTypes').BattleActionOption[];
   labelA: string;
@@ -399,12 +400,13 @@ export interface BattleSessionSnapshot {
 export interface BattleSessionAction {
   expectedEventCount?: number;
   actorTag: string;
-  kind: 'attack' | 'skill';
+  kind: 'attack' | 'skill' | 'wait';
   targetTag?: string | null;
   skillSlot?: 's1' | 's2' | null;
 }
 
 export interface PvpTeamSnapshot {
+  control_mode?: 'program' | 'manual' | 'rest';
   hero_ids: string[];
   team: Array<{
     id: string;

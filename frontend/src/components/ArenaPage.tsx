@@ -16,7 +16,7 @@ import {
   Zap,
 } from 'lucide-react';
 import { BattleVisualizer } from './BattleVisualizer';
-import { advanceLocalManualBattle, startLocalManualBattle } from '../lib/manualBattle';
+import { advanceLocalManualBattle, startLocalManualBattle, simulateLocalAutoBattle } from '../lib/manualBattle';
 import { acceptBattleSessionSnapshot, applyPreparationPositions, formationPositions, movePreparationCard } from '../lib/battlePreparation';
 import { cancelPvpEntry, submitBattleSessionAction, prepareBattleSession, confirmBattleFormation, createFriendChallenge, fetchBattleSession, fetchFriends, fetchPvpEntryStatus, getStoredToken, joinArenaQueue, removeFriend, respondFriendChallenge, respondFriendRequest, sendFriendRequest } from '../lib/api';
 import { resolveRarity, normalizeCardType, toNumber, type Rarity } from '../lib/gameLogic';
@@ -286,22 +286,6 @@ function cloneBattleUnits(units: Array<BattleBoardUnit | null>) {
   return units.map(cloneBattleUnit);
 }
 
-function unitSpeed(unit: BattleBoardUnit | null) {
-  return toNumber(unit?.state?.SPEED, 0);
-}
-
-function unitAttack(unit: BattleBoardUnit | null) {
-  return toNumber(unit?.state?.ATK, 20);
-}
-
-function unitDefense(unit: BattleBoardUnit | null) {
-  return toNumber(unit?.state?.DEF, 0);
-}
-
-function firstAliveUnit(units: Array<BattleBoardUnit | null>) {
-  return units.find((unit) => unit && unit.alive && unit.hp > 0) ?? null;
-}
-
 function teamHp(units: Array<BattleBoardUnit | null>) {
   return units.reduce((sum, unit) => sum + Math.max(0, unit?.hp ?? 0), 0);
 }
@@ -322,71 +306,10 @@ function createTrainingBoardSnapshot(round: number, bottom: Array<BattleBoardUni
 }
 
 function simulateTrainingBattle(bottom: Array<BattleBoardUnit | null>, top: Array<BattleBoardUnit | null>, riverLabel = 'Training') {
-  const events: BattleResult['events'] = [];
-  const logs: string[] = [];
-  const boardHistory: NonNullable<BattleResult['board']>[] = [createTrainingBoardSnapshot(1, bottom, top, riverLabel)];
-  const maxRounds = 12;
-
-  for (let round = 1; round <= maxRounds && teamAlive(bottom) > 0 && teamAlive(top) > 0; round += 1) {
-    const turnOrder = [...bottom, ...top]
-      .filter((unit): unit is BattleBoardUnit => Boolean(unit && unit.alive && unit.hp > 0))
-      .sort((a, b) => unitSpeed(b) - unitSpeed(a) || a.tag.localeCompare(b.tag));
-
-    for (const actor of turnOrder) {
-      if (!actor.alive || actor.hp <= 0) continue;
-      const targetTeam = actor.side === 'A' ? top : bottom;
-      const target = firstAliveUnit(targetTeam);
-      if (!target) break;
-
-      const rawDamage = unitAttack(actor) - Math.floor(unitDefense(target) * 0.45);
-      const damage = Math.max(1, rawDamage);
-      target.hp = Math.max(0, target.hp - damage);
-      target.alive = target.hp > 0;
-      const actionType = round % 3 === 1 ? 'skill' : 'attack';
-      const skillName = actionType === 'skill'
-        ? String(actor.state?.TYPE ?? 'Skill Strike').split(' ')[0] + ' Strike'
-        : undefined;
-      const log = `[Round ${round}] ${actor.tag} uses ${skillName ? `[${skillName}]` : '[Attack]'} on ${target.tag} for ${damage} damage`;
-
-      logs.push(log);
-      events.push({
-        round,
-        attacker: actor.tag,
-        defender: target.tag,
-        attackerSlot: actor.slot,
-        defenderSlot: target.slot,
-        actionType,
-        skillName,
-        attackType: String(actor.state?.TYPE ?? 'weapon'),
-        buffName: null,
-        skillRole: actionType === 'skill' ? 'attack' : null,
-        rangeMode: 'front',
-        damage,
-        heal: 0,
-        isCrit: false,
-        isMiss: false,
-        isStunned: false,
-        hpA: teamHp(bottom),
-        hpB: teamHp(top),
-        mpA: bottom.reduce((sum, unit) => sum + Math.max(0, unit?.mp ?? 0), 0),
-        mpB: top.reduce((sum, unit) => sum + Math.max(0, unit?.mp ?? 0), 0),
-        maxHpA: bottom.reduce((sum, unit) => sum + Math.max(0, unit?.maxHp ?? 0), 0),
-        maxHpB: top.reduce((sum, unit) => sum + Math.max(0, unit?.maxHp ?? 0), 0),
-        maxMpA: bottom.reduce((sum, unit) => sum + Math.max(0, unit?.maxMp ?? 0), 0),
-        maxMpB: top.reduce((sum, unit) => sum + Math.max(0, unit?.maxMp ?? 0), 0),
-        buffsA: [],
-        buffsB: [],
-        mpCostApplied: 0,
-        log,
-        timestamp: Date.now() + events.length,
-      });
-      boardHistory.push(createTrainingBoardSnapshot(round, bottom, top, riverLabel));
-
-      if (teamAlive(bottom) === 0 || teamAlive(top) === 0) break;
-    }
-  }
-
-  return { events, logs, boardHistory };
+  const result = simulateLocalAutoBattle(createTrainingBoardSnapshot(1, bottom, top, riverLabel));
+  bottom.splice(0, bottom.length, ...(result.board?.bottom ?? []));
+  top.splice(0, top.length, ...(result.board?.top ?? []));
+  return { events: result.events, logs: result.logs, boardHistory: result.boardHistory ?? [] };
 }
 
 function enrichBoardUnits(units: Array<BattleBoardUnit | null> | undefined, heroes: SavedHero[]) {
@@ -713,6 +636,8 @@ export function ArenaPage({ heroes, economy, token, demoMode = false, activeTab,
   const [battleResult, setBattleResult] = useState<BattleResult | null>(null);
   const [battleSession, setBattleSession] = useState<BattleSessionSnapshot | null>(null);
   const [combatControl, setCombatControl] = useState<'program' | 'manual'>('program');
+  const [matchControl, setMatchControl] = useState<'program' | 'manual'>('manual');
+  const [localControl, setLocalControl] = useState<'program' | 'manual'>('program');
   const actionPending = useRef(false);
   const [localPreparation, setLocalPreparation] = useState<BattleBoardState | null>(null);
   const [formationDraft, setFormationDraft] = useState<{ id: string; positions: Record<string, number> } | null>(null);
@@ -829,7 +754,7 @@ export function ArenaPage({ heroes, economy, token, demoMode = false, activeTab,
   const shownBattleResult = preparationResult ?? liveBattleResult ?? replayResult;
   const battleLoaded = activeTab === 'battle' && Boolean(shownBattleResult);
 
-  const beginPreparation = useCallback(async (teamA: SavedHero[], teamB: SavedHero[]) => {
+  const beginPreparation = useCallback(async (teamA: SavedHero[], teamB: SavedHero[], control = combatControl) => {
     if (!teamA.length || !teamB.length) { setError('Choose cards for both sides first.'); return; }
     if (!demoMode && (!currentToken || currentToken === 'mock-token')) { setError('Please login first.'); return; }
     setBusy(true); setError(''); setMessage('');
@@ -837,11 +762,12 @@ export function ArenaPage({ heroes, economy, token, demoMode = false, activeTab,
       setBattleResult(null); setBattleSession(null); setLocalPreparation(null); setFormationDraft(null);
       setMatchRecord(null); setQueueEntry(null); setResumeEntryId(null);
       if (demoMode) {
+        setLocalControl(control);
         const bottom = Array.from({ length: 6 }, (_, index) => teamA[index] ? unitFromHero(teamA[index], 'A', index) : null);
         const top = Array.from({ length: 6 }, (_, index) => teamB[index] ? unitFromHero(teamB[index], 'B', index) : null);
         setLocalPreparation(createTrainingBoardSnapshot(1, bottom, top));
       } else {
-        setBattleSession(await prepareBattleSession(teamA.map(heroSessionPayload), teamB.map(heroSessionPayload), currentToken, combatControl));
+        setBattleSession(await prepareBattleSession(teamA.map(heroSessionPayload), teamB.map(heroSessionPayload), currentToken, control));
       }
       onTabChange('battle');
     } catch (err) { setError(err instanceof Error ? err.message : 'Failed to prepare battle.'); }
@@ -857,7 +783,7 @@ export function ArenaPage({ heroes, economy, token, demoMode = false, activeTab,
     if (!preparationBoard || ownReady || busy) return;
     setBusy(true); setError('');
     try {
-      if (localPreparation && combatControl === 'manual') {
+      if (localPreparation && localControl === 'manual') {
         setBattleSession(startLocalManualBattle(preparationBoard));
         setLocalPreparation(null);
       } else if (localPreparation) {
@@ -1212,6 +1138,7 @@ export function ArenaPage({ heroes, economy, token, demoMode = false, activeTab,
           bp_value: totalBp,
           status: 'waiting',
           team_snapshot: {
+            control_mode: matchControl,
             hero_ids: selectedHeroes.map((hero) => hero.id),
             team: selectedHeroes.map((hero) => ({ id: hero.id, hero_payload: hero.character, created_at: now.toISOString() })),
             total_bp: totalBp,
@@ -1235,14 +1162,14 @@ export function ArenaPage({ heroes, economy, token, demoMode = false, activeTab,
             match_id: `sim-match-${entryId}`,
             matched_at: new Date().toISOString(),
           });
-          void beginPreparation(selectedHeroes, opponents);
+          void beginPreparation(selectedHeroes, opponents, matchControl);
           setMessage(`Rival found at ${formatNumber(opponentBp)} BP. Confirm your formation to begin.`);
           mockQueueTimerRef.current = null;
           onTabChange('battle');
         }, 1800);
         return;
       }
-      const response = await joinArenaQueue(arenaFormation, queueKey, currentToken);
+      const response = await joinArenaQueue(arenaFormation, queueKey, currentToken, matchControl);
       setQueueEntry(response.entry);
       setMatchRecord(response.match ?? null);
       const sessionId = response.battle_session?.sessionId ?? response.match?.battle_session_id ?? null;
@@ -1316,6 +1243,8 @@ export function ArenaPage({ heroes, economy, token, demoMode = false, activeTab,
         const response = await fetchPvpEntryStatus(resumeEntryId, currentToken);
         if (cancelled) return;
         setQueueEntry(response.entry);
+        const queuedControl = response.entry.team_snapshot.control_mode;
+        if (queuedControl === 'program' || queuedControl === 'manual') setMatchControl(queuedControl);
         setMatchRecord(response.match ?? null);
         const sessionId = response.battle_session?.sessionId ?? response.match?.battle_session_id ?? null;
         const liveSession = sessionId ? await fetchBattleSession(sessionId, currentToken) : response.battle_session ?? null;
@@ -1384,7 +1313,7 @@ export function ArenaPage({ heroes, economy, token, demoMode = false, activeTab,
         </section>
       )}
 
-      {(activeTab === 'train' || (activeTab === 'battle' && !shownBattleResult)) && <div className="flex items-center justify-center gap-3 py-4" role="group" aria-label="Battle control mode"><span className="mr-3 text-xs text-stone-400">Battle control</span>{(['program', 'manual'] as const).map(mode => <button key={mode} type="button" aria-pressed={combatControl === mode} disabled={busy} onClick={() => setCombatControl(mode)} className={cn('border px-5 py-2 text-xs', combatControl === mode ? 'border-[#d5b57c] bg-[#806838]/20 text-[#eddbb6]' : 'border-white/10 text-stone-400')}>{mode === 'manual' ? 'Manual' : 'Auto'}</button>)}</div>}
+      {activeTab === 'train' && <div className="flex flex-wrap items-center justify-center gap-3 py-4" role="group" aria-label="Training control mode"><span className="mr-3 text-xs text-stone-400">Solo training</span>{(['program', 'manual'] as const).map(mode => <button key={mode} type="button" aria-pressed={combatControl === mode} disabled={busy} onClick={() => setCombatControl(mode)} className={cn('border px-5 py-2 text-xs', combatControl === mode ? 'border-[#d5b57c] bg-[#806838]/20 text-[#eddbb6]' : 'border-white/10 text-stone-400')}>{mode === 'manual' ? 'Practice manual turns' : 'Auto simulation'}</button>)}</div>}
       {activeTab === 'battle' && shownBattleResult ? (
         <section className="space-y-4">
           {!preparationBoard && (!battleResult || replayResult) && (
@@ -1841,6 +1770,17 @@ export function ArenaPage({ heroes, economy, token, demoMode = false, activeTab,
           </main>
 
           <aside className="border border-white/8 bg-black/20">
+            <fieldset className="border-b border-white/10 p-5" disabled={busy || waiting}>
+              <legend className="px-1 pt-5 text-xs uppercase tracking-[.18em] text-[#d5b57c]">Match type</legend>
+              <div className="grid grid-cols-2 gap-3">
+                {(['manual', 'program'] as const).map(mode => <label key={mode} className={cn('cursor-pointer border p-4', matchControl === mode ? 'border-[#b49664]/70 bg-[#b49664]/10' : 'border-white/10', (waiting || busy) && 'cursor-default opacity-60')}>
+                  <input className="sr-only peer" type="radio" name="match-type" value={mode} checked={matchControl === mode} onChange={() => setMatchControl(mode)} />
+                  <span className="block text-sm text-stone-100 peer-focus-visible:outline peer-focus-visible:outline-2">{mode === 'manual' ? 'Manual' : 'Auto'}</span>
+                  <span className="mt-2 block text-xs leading-5 text-stone-400">{mode === 'manual' ? 'Both players choose actions. Agents welcome.' : 'Both teams fight automatically.'}</span>
+                </label>)}
+              </div>
+              <p className="mt-4 text-xs leading-5 text-stone-400">{demoMode ? 'Demo queue uses a simulated opponent. ' : 'Matched only with the same match type. Both players must confirm their formation. '}{matchControl === 'manual' && !demoMode && '30 seconds per turn, shared by player and Agent.'}</p>
+            </fieldset>
             <RosterStrip label="Forger" team={selectedHeroes} tone="gold" />
             <PowerComparison left={totalBp} leftLabel="Forger" rightLabel="Rival" />
             <div className="border-t border-white/8 px-5 py-5">
@@ -1881,7 +1821,7 @@ export function ArenaPage({ heroes, economy, token, demoMode = false, activeTab,
                 className="mt-5 inline-flex h-14 w-full items-center justify-center gap-3 bg-[#9a7338] px-5 text-[13px] font-semibold uppercase tracking-[0.24em] text-stone-100 transition hover:bg-[#b18647] disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {busy ? <RefreshCw size={17} className="animate-spin" /> : <Zap size={17} />}
-                {waiting ? 'Searching' : 'Find Match'}
+                {waiting ? `Searching · ${matchControl === 'manual' ? 'Manual' : 'Auto'}` : `Find ${matchControl === 'manual' ? 'Manual' : 'Auto'} Match`}
               </button>
               <button
                 type="button"

@@ -2,13 +2,19 @@ export interface BuffState {
   name: string;
   duration: number;
   value: number;
+  effects?: Record<string, number>;
 }
 
 export type BattleBoardSkill = Partial<import('./gameLogic').Skill>;
 
-export type BattleActionOption = { kind: 'attack' | 'skill'; skillSlot?: 's1' | 's2'; name: string; cost: number; targets: string[]; disabled?: string | null };
+export type BattleActionOption = { kind: 'attack' | 'skill' | 'wait'; skillSlot?: 's1' | 's2'; name: string; cost: number; targets: string[]; disabled?: string | null };
 
 export interface BattleEvent {
+  /** Contiguous per-target results of one cast; absent on legacy replays. */
+  actionId?: string | null;
+  targetIndex?: number;
+  targetCount?: number;
+  vfxPresentation?: 'auto' | 'instant' | 'sky' | 'direct' | null;
   round: number;
   attacker: string;
   defender: string;

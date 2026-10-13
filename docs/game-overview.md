@@ -1,5 +1,7 @@
 # Hero Forge Game Overview
 
+Current executable combat rules and planned gaps are tracked in [battle-feature-contract.md](battle-feature-contract.md); ongoing changes are recorded in [CHANGELOG.md](../CHANGELOG.md). Relic/enchantment combat bonuses and the Chronicle campaign are still planned features, even though inventory and lifecycle APIs already exist.
+
 ## One-line pitch
 
 Hero Forge is a dark tactical hero-card battler where users forge heroes from images, tune builds through a rule-based numeric engine, test them in a sandbox train mode, and fight ranked PvP matches with dust stakes.
@@ -22,7 +24,7 @@ The player is not just collecting cards. They are running a command console for 
 4. The hero is saved into the vault.
 5. The player tests the hero in Train, either 1v1 or 4v4.
 6. The player enters Arena for formal PvP matchmaking.
-7. Dust is spent on creation, repair, and PvP/PvE participation.
+7. Dust is spent on creation, repair, and PvP participation; the first PvE campaign draft proposes free entry.
 8. Relics are the only item type. They can be equipped for battle and consumed separately to enchant an existing card.
 
 ## Game modes
@@ -57,11 +59,12 @@ The formal PvP mode.
 
 ### PvE
 
-Theme-tower style progression.
+First campaign design: [Void Labyrinth](pve-void-labyrinth-v1.md), currently planned, not playable as a campaign.
 
-- dust entry cost
-- structured floors / stages
-- reward and challenge loop separate from PvP
+- Three fixed challenges for deployed team BP totals of 1000, 5000 and 10000; shared theme, different enemy compositions and boss mechanics. Enemy budgets do not rescale with the entering team.
+- Ten visited nodes: six normal encounters, two camps, one elite and one boss; two branch choices reconnect. Draft data defines 30 encounters across the three tiers.
+- Phase one proposes free entry/retries, carried HP/MP, durable checkpoints and finite first-clear rewards. Dust entry fees are deferred; no ranked stakes or permanent card death.
+- Existing pve_4v6 battle/session support handles up to four players and six enemies. Campaign progression, NPC scripts, intent UI, persistence and rewards still require implementation.
 
 ## Economy
 
@@ -70,7 +73,7 @@ The game has two user resources:
 - Dust: the universal spendable currency
   - forge cost
   - repair cost
-  - PvE entry cost
+  - PvE entry cost (deferred; phase-one campaign draft is free)
   - PvP stake
 - Relics: typed inventory resources
   - collected by type

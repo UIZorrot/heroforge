@@ -4,7 +4,7 @@ import { buyDiamondPack, buyDustPack, buyMarketRelic, fetchMarketBoard, sellMark
 import { PageHeader, PageHeaderStat } from './PageHeader';
 import { mockRelicCatalog } from '../lib/mockContent';
 import { DustIcon } from './CurrencyIcons';
-import { getRelicCategory, getRelicIconSrc, getRelicKind, type RelicCategory } from '../lib/relics';
+import { getRelicCategory, getRelicIconSrc, getRelicKind, RELIC_COMBAT_STATUS, type RelicCategory } from '../lib/relics';
 import { currentIsoWeekKey, resolvePurchaseWindow } from '../lib/marketShop';
 import type { CurrencyDiamondPack, CurrencyDustPack, EconomySnapshot, MarketBoardSnapshot, MarketRelicListing, SavedHero } from '../types';
 
@@ -225,6 +225,7 @@ function ListingTile({
 
         <p className="mt-4 line-clamp-2 text-sm leading-6 text-stone-400">{listing.lore_summary}</p>
         <div className="mt-3 text-[11px] leading-5 text-stone-500">{listing.effect_profile}</div>
+        <div className="mt-2 text-[11px] leading-5 text-stone-400">{RELIC_COMBAT_STATUS}</div>
 
         <div className="mt-4 flex items-center justify-between border-t border-white/8 pt-4 text-[10px] uppercase tracking-[0.18em] text-stone-500">
           <span>Depth {formatNumber(listing.market_depth)}</span>

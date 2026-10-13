@@ -1,3 +1,4 @@
+import { normalizeVfxPresentation } from './battleVfxPresentation';
 import { normalizeBattleProjectileTypeEffect } from './battleVfxCatalog';
 
 export type Rarity = 'common' | 'rare' | 'epic' | 'mythic';
@@ -43,10 +44,13 @@ export interface Skill {
   BUFF_AC?: string | number;
   MP_COST?: string | number;
   MP_COST_RATE?: string | number;
+  VFX_PRESENTATION?: 'auto' | 'instant' | 'direct';
   ROLE?: string;
 }
 
 export interface CharacterData {
+  hero_id?: string;
+  generation_id?: string;
   name: string;
   description: string;
   extra?: string;
@@ -164,6 +168,7 @@ function normalizeSkill(raw: Record<string, unknown> | undefined): Skill {
     type_catalog: typeCatalog,
     type_effect: typeCatalog === 'proj' ? normalizeBattleProjectileTypeEffect(rawTypeEffect) : rawTypeEffect,
     buff_type_effect: normalizeToken(raw?.buff_type_effect ?? raw?.buffTypeEffect, ''),
+    VFX_PRESENTATION: normalizeVfxPresentation(raw?.VFX_PRESENTATION ?? raw?.vfxPresentation),
     RANGE: toStringValue(raw?.RANGE, 'enemy'),
     IS_PASSIVE: normalizeBooleanString(raw?.IS_PASSIVE),
     IS_STUN: normalizeBooleanString(raw?.IS_STUN),
@@ -217,6 +222,8 @@ export function normalizeCharacterData(source: unknown): CharacterData {
 
   return {
     name: toStringValue(payload.name, 'Unknown Hero'),
+    hero_id: payload.hero_id ? toStringValue(payload.hero_id) : undefined,
+    generation_id: payload.generation_id ? toStringValue(payload.generation_id) : undefined,
     description: toStringValue(payload.description, ''),
     extra: toStringValue(payload.extra, ''),
     BP: toStringValue(payload.BP, '1000'),

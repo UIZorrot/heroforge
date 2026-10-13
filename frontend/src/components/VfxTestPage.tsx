@@ -1,11 +1,17 @@
+import { battleUsesInstantVfx, type BattleVfxPresentation } from '../lib/battleVfxPresentation';
 import { useEffect, useMemo, useState } from 'react';
-import { Crosshair, Move, Play, RotateCcw, Shield, Sparkles, Zap } from 'lucide-react';
+import { Crosshair, Minus, Move, Play, Plus, RotateCcw, Shield, Sparkles, Zap } from 'lucide-react';
 import { ArenaBattleScene, type BattleOutcome } from './ArenaBattleScene';
 import { PageHeader } from './PageHeader';
 import { cn } from '../lib/utils';
 import {
-  createVfxTestBoard,
-  createVfxTestEvent,
+  createVfxScenarioBoard,
+  placeVfxTeamUnits,
+  vfxFormationCounts,
+  vfxTestCount,
+  type VfxTestTeamCounts,
+  createVfxTestAction,
+  type VfxTestFormation,
   createVfxTestResult,
   vfxTestCategories,
   vfxTestOptions,
@@ -20,33 +26,21 @@ const categoryIcons: Record<VfxTestCategory, typeof Zap> = {
   buff: Shield,
 };
 
-function placeTeamUnits(units: Array<BattleBoardUnit | null>, slotOverrides?: Map<string, number>) {
-  const nextTeam = Array<BattleBoardUnit | null>(6).fill(null);
-
-  for (const unit of units) {
-    if (!unit) continue;
-    const slot = slotOverrides?.get(unit.tag) ?? unit.slot;
-    nextTeam[slot] = { ...unit, slot };
-  }
-
-  return nextTeam;
-}
-
 function mergeBoardLayout(nextBoard: BattleBoardState, currentBoard: BattleBoardState) {
   const bottomSlots = new Map(currentBoard.bottom.filter((unit): unit is BattleBoardUnit => Boolean(unit)).map((unit) => [unit.tag, unit.slot]));
   const topSlots = new Map(currentBoard.top.filter((unit): unit is BattleBoardUnit => Boolean(unit)).map((unit) => [unit.tag, unit.slot]));
 
   return {
     ...nextBoard,
-    bottom: placeTeamUnits(nextBoard.bottom, bottomSlots),
-    top: placeTeamUnits(nextBoard.top, topSlots),
+    bottom: placeVfxTeamUnits(nextBoard.bottom, bottomSlots),
+    top: placeVfxTeamUnits(nextBoard.top, topSlots),
   };
 }
 
 function moveUnitWithinTeam(units: Array<BattleBoardUnit | null>, unitTag: string, targetSlot: number) {
   const teamUnits = units.filter((unit): unit is BattleBoardUnit => Boolean(unit));
   const actor = teamUnits.find((unit) => unit.tag === unitTag);
-  if (!actor || actor.slot === targetSlot) return placeTeamUnits(units);
+  if (!actor || actor.slot === targetSlot) return placeVfxTeamUnits(units);
 
   const occupant = teamUnits.find((unit) => unit.slot === targetSlot);
   const slotByTag = new Map(teamUnits.map((unit) => [unit.tag, unit.slot]));
@@ -56,7 +50,7 @@ function moveUnitWithinTeam(units: Array<BattleBoardUnit | null>, unitTag: strin
     slotByTag.set(occupant.tag, actor.slot);
   }
 
-  return placeTeamUnits(units, slotByTag);
+  return placeVfxTeamUnits(units, slotByTag);
 }
 
 export function VfxTestPage() {
@@ -65,23 +59,27 @@ export function VfxTestPage() {
   const [sequence, setSequence] = useState(1);
   const [amount, setAmount] = useState(360);
   const [crit, setCrit] = useState(false);
-  const [fullFormation, setFullFormation] = useState(false);
+  const [formation, setFormation] = useState<VfxTestFormation>('duel');
+  const [customCounts, setCustomCounts] = useState<VfxTestTeamCounts>({ allies: 1, enemies: 1 });
+  const teamCounts = useMemo(() => vfxFormationCounts(formation, customCounts), [formation, customCounts]);
+  const [targetCount, setTargetCount] = useState(1);
+  const [presentation, setPresentation] = useState<BattleVfxPresentation>('auto');
   const [resultPreview, setResultPreview] = useState<Exclude<BattleOutcome, 'draw'> | null>(null);
 
   const options = vfxTestOptions[category];
   const selectedEffect = options.some((option) => option.value === effect) ? effect : options[0]?.value ?? effect;
-  const defaultBoard = useMemo(() => createVfxTestBoard(category, selectedEffect, fullFormation), [category, selectedEffect, fullFormation]);
-  const [board, setBoard] = useState<BattleBoardState>(() => createVfxTestBoard('projectile', vfxTestOptions.projectile[0]?.value ?? ''));
+  const defaultBoard = useMemo(() => createVfxScenarioBoard(category, selectedEffect, formation, customCounts), [category, selectedEffect, formation, customCounts]);
+  const [board, setBoard] = useState<BattleBoardState>(() => createVfxScenarioBoard('projectile', vfxTestOptions.projectile[0]?.value ?? '', 'duel'));
 
   useEffect(() => {
     setBoard((currentBoard) => mergeBoardLayout(defaultBoard, currentBoard));
   }, [defaultBoard]);
 
-  const event = useMemo(
-    () => createVfxTestEvent(category, selectedEffect, sequence, { amount, crit }),
-    [amount, category, crit, selectedEffect, sequence]
+  const events = useMemo(
+    () => createVfxTestAction(board, category, selectedEffect, sequence, targetCount, { amount, crit, presentation }),
+    [amount, board, category, crit, selectedEffect, sequence, targetCount, presentation]
   );
-  const result = useMemo(() => createVfxTestResult(board, event), [board, event]);
+  const result = useMemo(() => createVfxTestResult(board, events), [board, events]);
   const previewBoard = useMemo<BattleBoardState>(() => {
     if (!resultPreview) return board;
     const defeatedSide = resultPreview === 'victory' ? 'top' : 'bottom';
@@ -109,6 +107,12 @@ export function VfxTestPage() {
       aliveB: previewBoard.top.filter((unit) => unit?.alive && unit.hp > 0).length,
     };
   }, [previewBoard, result, resultPreview]);
+
+  function adjustCards(side: keyof VfxTestTeamCounts, delta: number) {
+    setCustomCounts({ ...teamCounts, [side]: vfxTestCount(teamCounts[side] + delta) });
+    setFormation('custom');
+    setResultPreview(null);
+  }
 
   function resetFormation() {
     setBoard(defaultBoard);
@@ -156,6 +160,35 @@ export function VfxTestPage() {
           </div>
 
           <div className="vfx-lab__settings space-y-6 p-5">
+            <section className="vfx-lab__formation-editor" aria-label="Test cards and targets">
+              <div className="vfx-lab__editor-title">Cards & targets</div>
+              <label className="vfx-lab__preset">Formation<select aria-label="Test formation" value={formation} onChange={event => { setFormation(event.target.value as VfxTestFormation); setResultPreview(null); }}>
+                <option value="duel">Duel · 1 vs 1</option><option value="full">Full · 6 vs 6</option><option value="pve">PvE · 4 vs 6</option><option value="custom">Custom</option>
+              </select></label>
+              {(['allies', 'enemies'] as const).map(side => {
+                const label = side === 'allies' ? 'ally' : 'enemy';
+                return <div key={side} className="vfx-lab__count-row">
+                  <span>{side === 'allies' ? 'Allies' : 'Enemies'}<small>test cards</small></span>
+                  <div className="vfx-lab__stepper">
+                    <button type="button" aria-label={`Remove ${label} card`} title={`Remove last ${label} card`} disabled={teamCounts[side] <= 1} onClick={() => adjustCards(side, -1)}><Minus size={15} /></button>
+                    <output aria-label={`${side === 'allies' ? 'Ally' : 'Enemy'} card count`}>{teamCounts[side]}<small>/6</small></output>
+                    <button type="button" aria-label={`Add ${label} card`} title={`Add ${label} card`} disabled={teamCounts[side] >= 6} onClick={() => adjustCards(side, 1)}><Plus size={15} /></button>
+                  </div>
+                </div>;
+              })}
+              <div className="vfx-lab__count-row vfx-lab__target-row">
+                <label htmlFor="vfx-target-count">Spell targets</label>
+                <div className="vfx-lab__stepper">
+                  <button type="button" aria-label="Decrease skill targets" disabled={targetCount <= 1} onClick={() => setTargetCount(value => vfxTestCount(value - 1))}><Minus size={15} /></button>
+                  <select id="vfx-target-count" aria-label="Skill target count" value={targetCount} onChange={event => setTargetCount(vfxTestCount(Number(event.target.value)))}>
+                    {[1, 2, 3, 4, 5, 6].map(count => <option key={count} value={count}>{count}</option>)}
+                  </select>
+                  <button type="button" aria-label="Increase skill targets" disabled={targetCount >= 6} onClick={() => setTargetCount(value => vfxTestCount(value + 1))}><Plus size={15} /></button>
+                </div>
+              </div>
+              <p className="vfx-lab__target-feedback" aria-live="polite">{events.length} of {targetCount} targets affected</p>
+            </section>
+
             <div>
               <div className="mb-3 text-[10px] font-semibold uppercase tracking-[0.24em] text-stone-600">Category</div>
               <div className="grid grid-cols-2 gap-2">
@@ -291,7 +324,11 @@ export function VfxTestPage() {
             </div>
 
             <div className="border-t border-white/8 pt-5">
-              <label className="vfx-lab__formation-toggle"><input type="checkbox" checked={fullFormation} onChange={(event) => setFullFormation(event.target.checked)} />Full formation · 6 vs 6</label>
+              <div className="vfx-lab__slots mb-4"><label className="col-span-2">Delivery<select aria-label="Skill delivery" value={presentation} onChange={event => setPresentation(event.target.value as BattleVfxPresentation)}>
+                <option value="auto">Auto · skill default</option><option value="instant">Instant · on target</option><option value="direct">Direct · caster to target</option>
+              </select></label></div>
+              <p className="mb-2 text-xs text-[#bca176]">{battleUsesInstantVfx(events) ? 'Instant · simultaneous target impacts' : 'Direct · cast, travel, impact'}</p>
+              <p className="mb-4 text-xs text-stone-500">{targetCount} requested · {events.length} affected. Heal / Pray target allies; harmful effects target enemies.</p>
               <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.24em] text-stone-600">
                 <Move size={14} />
                 Slot Drag
@@ -321,12 +358,12 @@ export function VfxTestPage() {
 
         <section className="vfx-lab__preview min-w-0">
           <ArenaBattleScene
-            key={`${category}-${selectedEffect}-${sequence}-${amount}-${crit ? 'crit' : 'normal'}-${fullFormation}-${resultPreview ?? 'effect'}`}
+            key={`${category}-${selectedEffect}-${sequence}-${amount}-${crit ? 'crit' : 'normal'}-${formation}-${teamCounts.allies}-${teamCounts.enemies}-${targetCount}-${presentation}-${resultPreview ?? 'effect'}`}
             board={previewBoard}
-            events={resultPreview ? [] : [event]}
-            logs={resultPreview ? [] : [event.log]}
+            events={resultPreview ? [] : events}
+            logs={resultPreview ? [] : events.map(event => event.log)}
             result={previewResult}
-            autoStartKey={`${category}-${selectedEffect}-${sequence}-${amount}-${crit ? 'crit' : 'normal'}-${fullFormation}-${resultPreview ?? 'effect'}`}
+            autoStartKey={`${category}-${selectedEffect}-${sequence}-${amount}-${crit ? 'crit' : 'normal'}-${formation}-${teamCounts.allies}-${teamCounts.enemies}-${targetCount}-${presentation}-${resultPreview ?? 'effect'}`}
             showCommanders={false}
             showResultReveal={false}
             resultPreviewOutcome={resultPreview}

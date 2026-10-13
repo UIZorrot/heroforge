@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { BattleBoardUnit, BattleActionOption } from '../lib/battleTypes';
 import type { BattleSessionAction } from '../types';
 import './BattleSceneHud.css';
@@ -9,14 +9,32 @@ export type BattleSceneControls = {
 };
 
 export function BattleUnitInspector({ unit, onClose }: { unit: BattleBoardUnit; onClose: () => void }) {
+  const inspectorRef = useRef<HTMLElement>(null);
+  const [flow, setFlow] = useState(false);
+  useEffect(() => {
+    const inspector = inspectorRef.current;
+    const table = inspector?.parentElement?.querySelector('.battle-table-perspective');
+    if (!inspector || !table) return;
+    // Once expanded into the flow, keep its wider layout until it is closed.
+    const measure = () => setFlow(current => current || inspector.scrollHeight + 166 > table.clientHeight);
+    const observer = new ResizeObserver(measure);
+    observer.observe(inspector);
+    observer.observe(table);
+    measure();
+    return () => observer.disconnect();
+  }, []);
   const stats = Object.entries(unit.state ?? {}).filter(([key]) => !['HP', 'MP', 'TYPE', 'type_catalog', 'type_effect', 'buff_type_effect'].includes(key));
-  return <aside className={`battle-inspector battle-inspector--${unit.side === 'A' ? 'left' : 'right'}`} aria-label={`${unit.name} details`} onPointerMove={event => event.stopPropagation()}>
+  return <aside ref={inspectorRef} className={`battle-inspector battle-inspector--${unit.side === 'A' ? 'left' : 'right'}${flow ? ' battle-inspector--flow' : ''}`} aria-label={`${unit.name} details`} onPointerMove={event => event.stopPropagation()}>
     <header><span>{unit.side === 'A' ? 'Left formation' : 'Right formation'} · {unit.tag}</span><button type="button" onClick={onClose} aria-label="Close unit details">×</button></header>
     <h3>{unit.name}</h3><p className="battle-inspector__type">{unit.state?.TYPE ?? 'Hero'}{!unit.alive && ' · Fallen'}</p>
     <dl className="battle-inspector__vitals"><div><dt>HP</dt><dd>{unit.hp.toLocaleString()} <small>/ {unit.maxHp.toLocaleString()}</small></dd></div><div><dt>MP</dt><dd>{unit.mp.toLocaleString()} <small>/ {unit.maxMp.toLocaleString()}</small></dd></div></dl>
     <dl className="battle-inspector__stats">{stats.map(([key, value]) => <div key={key}><dt>{key}</dt><dd>{value}</dd></div>)}</dl>
     {unit.buffs.length > 0 && <div className="battle-inspector__buffs">{unit.buffs.map((buff, index) => <span key={`${buff.name}-${index}`}>{buff.name} · {buff.duration} turns · {buff.value}</span>)}</div>}
-    <div className="battle-inspector__skills">{Object.entries(unit.skills ?? {}).map(([slot, skill]) => skill && <details key={`${unit.tag}-${slot}`}><summary>{skill.name ?? slot}<span>{skill.MP_COST ?? 0} MP</span></summary><p>{skill.description || 'No description available.'}</p><small>{[skill.TYPE, skill.ROLE, skill.RANGE, skill.TARGET].filter(Boolean).join(' · ')}</small></details>)}</div>
+    <div className="battle-inspector__skills">
+      <details><summary>Basic Attack<span>0 MP · Normal attack</span></summary><p>Strike one opposing unit with the unit's standard attack.</p><small>ATTACK · ENEMY</small></details>
+      <details><summary>Wait<span>0 MP · Recover 10% HP + 10% MP</span></summary><p>Hold position and recover 10% of maximum health and mana.</p><small>SUPPORT · SELF</small></details>
+      {Object.entries(unit.skills ?? {}).map(([slot, skill]) => skill && <details key={`${unit.tag}-${slot}`}><summary>{skill.name ?? slot}<span>{['true', '1'].includes(String(skill.IS_PASSIVE).toLowerCase()) ? 'Opening passive' : `${skill.MP_COST ?? 0} MP`}</span></summary><p>{skill.description || 'No description available.'}</p><small>{[skill.TYPE, skill.ROLE, skill.RANGE, skill.TARGET, `${skill.TARGET_NUM ?? 1} target(s)`].filter(Boolean).join(' · ')}</small></details>)}
+    </div>
   </aside>;
 }
 
@@ -48,13 +66,13 @@ function ManualCommands({ manual, selected, units, presentationBusy }: { manual:
   const actor = units.find(unit => unit.tag === manual.actorTag);
   const ownTurn = actor?.side === manual.ownSide && manual.options.length > 0;
   const option = manual.options[choice];
-  const target = selected && option?.targets.includes(selected.tag) ? selected : null;
+  const target = option?.kind === 'wait' ? actor ?? null : selected && option?.targets.includes(selected.tag) ? selected : null;
   const disabled = presentationBusy || manual.busy || !ownTurn || remaining === 0;
   return <div className="battle-scene-dock battle-scene-dock--manual" onPointerMove={event => event.stopPropagation()}>
     <p aria-live="polite">{presentationBusy ? 'Resolving the action…' : ownTurn ? `${actor?.name} · Your turn` : `${actor?.name ?? 'Opponent'} is taking a turn…`}</p>
     {manual.waitingUntil && manual.options.length > 0 && remaining !== null && <div className="battle-scene-dock__timer" data-urgent={remaining <= 5} role="timer" aria-label="Time remaining"><strong>{remaining}s</strong><span>{remaining === 0 ? 'Time expired · resolving action' : 'Automatic action when time runs out'}</span></div>}
-    {ownTurn && <><div className="battle-scene-dock__abilities">{manual.options.map((item, index) => <button key={item.skillSlot ?? item.kind} type="button" aria-pressed={choice === index} disabled={disabled || Boolean(item.disabled)} title={item.disabled ?? `${item.cost} MP`} onClick={() => setChoice(index)}>{item.name}<small>{item.cost ? `${item.cost} MP` : 'No MP cost'}</small></button>)}</div>
-    <div className="battle-scene-dock__cast"><span>{option?.disabled ?? (target ? `Target · ${target.name}` : 'Select a unit on the battlefield to target.')}</span><button type="button" className="battle-scene-dock__confirm" disabled={disabled || !target || !option || Boolean(option.disabled)} onClick={() => option && target && manual.actorTag && manual.onAction({ actorTag: manual.actorTag, kind: option.kind, skillSlot: option.skillSlot, targetTag: target.tag, expectedEventCount: manual.revision })}>{manual.busy ? 'Sending…' : option?.kind === 'skill' ? 'Cast skill' : 'Attack'}</button></div>
+    {ownTurn && <><div className="battle-scene-dock__abilities">{manual.options.map((item, index) => <button key={item.skillSlot ?? item.kind} type="button" aria-pressed={choice === index} disabled={disabled || Boolean(item.disabled)} title={item.disabled ?? `${item.cost} MP`} onClick={() => setChoice(index)}>{item.name}<small>{item.kind === 'wait' ? 'Recover 10% HP · 10% MP' : item.cost ? `${item.cost} MP` : 'No MP cost'}</small></button>)}</div>
+    <div className="battle-scene-dock__cast"><span>{option?.disabled ?? (target ? `Target · ${target.name}` : 'Select a unit on the battlefield to target.')}</span><button type="button" className="battle-scene-dock__confirm" disabled={disabled || !target || !option || Boolean(option.disabled)} onClick={() => option && target && manual.actorTag && manual.onAction({ actorTag: manual.actorTag, kind: option.kind, skillSlot: option.skillSlot, targetTag: target.tag, expectedEventCount: manual.revision })}>{manual.busy ? 'Sending…' : option?.kind === 'wait' ? 'Wait' : option?.kind === 'skill' ? 'Cast skill' : 'Attack'}</button></div>
     {option && !target && <small>Valid targets: {option.targets.map(tag => units.find(unit => unit.tag === tag)?.name ?? tag).join(', ') || 'None'}</small>}</>}
   </div>;
 }

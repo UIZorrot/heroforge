@@ -8,7 +8,7 @@ import { VAULT_OVERVIEW_VISIBLE, type VaultSideKey } from './GameShell';
 import { normalizeCardType, resolveRarity, toNumber, type Rarity } from '../lib/gameLogic';
 import { CARD_FALLBACK_SRC } from '../lib/cards';
 import { mockHeroes, mockRelicCatalog, mockRelicInventory } from '../lib/mockContent';
-import { getRelicCategory, getRelicIconSrc, getRelicKind } from '../lib/relics';
+import { getRelicCategory, getRelicIconSrc, getRelicKind, RELIC_COMBAT_STATUS } from '../lib/relics';
 import type { EconomySnapshot, SavedHero } from '../types';
 
 type VaultSort = 'date' | 'bp' | 'name';
@@ -337,6 +337,7 @@ function HeroDetailPanel({
             {equippedRelic ? equippedRelic.name : 'None equipped'}
           </div>
         </div>
+        <p className="mt-2 text-xs leading-5 text-stone-400">{RELIC_COMBAT_STATUS}</p>
         <div className="mt-3 grid grid-cols-3 gap-2">
           <button
             type="button"

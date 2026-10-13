@@ -627,6 +627,29 @@ def _build_skill(skill: Dict[str, Any], state: Dict[str, str], template: str) ->
     else:
         generated["IS_STUN"] = "True" if _truthy(skill.get("IS_STUN")) else "False"
 
+    if is_passive:
+        # New passives are opening support effects. Old saved cards are left intact.
+        generated["DMG"] = "0"
+        generated["IS_STUN"] = "False"
+        generated["ROLE"] = "defense" if role == "defense" else "buff"
+        if generated["TARGET"] not in {"self", "ally"}:
+            generated.update(TARGET="self", RANGE="self", TARGET_NUM="1")
+        if generated.get("BUFF_NAME") not in {"pray", "heal"}:
+            generated["BUFF_NAME"] = "pray"
+
+    # A named status must have a real effect even if a model omits its marker.
+    buff_fields = active_fields[1:]
+    if generated.get("BUFF_NAME") != "stun" and not any(_truthy(generated[field]) for field in buff_fields):
+        fallback_field = {"heal": "BUFF_HP", "pray": "BUFF_DEF" if role == "defense" else "BUFF_DMG",
+                          "curse": "BUFF_DMG", "frozen": "BUFF_EV", "poison": "BUFF_DMG",
+                          "wound": "BUFF_DMG", "burn": "BUFF_DMG"}.get(generated.get("BUFF_NAME"))
+        if fallback_field:
+            generated[fallback_field] = str(max(1, _skill_numeric_value(fallback_field, skill, state, profile, role)))
+    if generated.get("BUFF_NAME") in CANONICAL_BUFF_NAMES or generated["IS_STUN"] == "True":
+        generated["BUFF_TIME"] = str(min(3, max(1, _safe_int(generated["BUFF_TIME"], 1))))
+    elif not any(_truthy(generated[field]) for field in buff_fields):
+        generated["BUFF_TIME"] = "0"
+
     visual = _visual_type_contract(skill, state.get("TYPE"))
     generated["type_catalog"] = str(visual["type_catalog"])
     generated["type_effect"] = str(visual["type_effect"])
@@ -662,6 +685,7 @@ def adjust_based_on_bp(character_json: Dict[str, Any]) -> Dict[str, Any]:
         "extra": str(character_json.get("extra", "")),
         "BP": str(original_bp),
         "rarity": rarity,
+        "template": template,
         "state": generated_state,
         "skill": adjusted_skills,
     }

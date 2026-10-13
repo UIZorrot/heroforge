@@ -24,7 +24,7 @@ def _now_ms() -> int:
 
 
 def _lanes_for_mode(battle_mode: str) -> int:
-    if battle_mode == "arena_2x3":
+    if battle_mode in {"arena_2x3", "pve_4v6"}:
         return 6
     return 4 if battle_mode == "4v4" else 1
 
@@ -33,7 +33,7 @@ def _normalize_action(action: Dict[str, Any] | None) -> Dict[str, Any]:
     if not isinstance(action, dict):
         raise BattleSessionError("action is required")
     kind = str(action.get("kind") or "attack").strip().lower()
-    if kind not in {"attack", "skill"}:
+    if kind not in {"attack", "skill", "wait"}:
         raise BattleSessionError("unsupported action kind")
     target_tag = action.get("targetTag")
     skill_slot = action.get("skillSlot")
@@ -92,6 +92,8 @@ class BattleSession:
     _preparation_lock: Any = field(default_factory=threading.RLock, repr=False)
 
     def __post_init__(self) -> None:
+        if self.battle_mode == "pve_4v6" and (not self.team_a_payload or not self.team_b_payload or len(self.team_a_payload) > 4 or len(self.team_b_payload) > 6):
+            raise BattleSessionError("pve_4v6 requires 1-4 player units and 1-6 enemies")
         lanes = _lanes_for_mode(self.battle_mode)
         self.team_a_units = [battle_logic.Battler(hero, "A", index) for index, hero in enumerate(self.team_a_payload[:lanes])]
         self.team_b_units = [battle_logic.Battler(hero, "B", index) for index, hero in enumerate(self.team_b_payload[:lanes])]
@@ -112,6 +114,7 @@ class BattleSession:
             self.expected_action_source = "confirmation"
             self._append_board_history()
             return
+        self._append_board_history()
         self._begin_round(time.time())
         self._append_board_history()
         if self.control_mode == "program":
@@ -175,6 +178,10 @@ class BattleSession:
         type_catalog: str | None = None,
         type_effect: str | None = None,
         buff_type_effect: str | None = None,
+        vfx_presentation: str | None = None,
+        action_id: str | None = None,
+        target_index: int = 0,
+        target_count: int = 1,
     ) -> None:
         if defender_tag is None:
             attacker_side = str(attacker_tag)[0] if str(attacker_tag) else "A"
@@ -196,6 +203,10 @@ class BattleSession:
         self.events.append(
             {
                 "round": round_num,
+                "vfxPresentation": vfx_presentation,
+                "actionId": action_id,
+                "targetIndex": target_index,
+                "targetCount": target_count,
                 "attacker": attacker_tag,
                 "defender": defender_tag,
                 "attackerSlot": attacker_slot,
@@ -232,6 +243,7 @@ class BattleSession:
                 "timestamp": _now_ms(),
             }
         )
+        self.board_history.append(battle_logic._board_snapshot(self.round, self.team_a_units, self.team_b_units, self.label_a, self.label_b))
 
     def _alive_a(self) -> int:
         return sum(max(0, unit.hp) for unit in self.team_a_units if unit)
@@ -278,16 +290,22 @@ class BattleSession:
 
     def _append_board_history(self) -> None:
         snapshot = battle_logic._board_snapshot(self.round, self.team_a_units, self.team_b_units, self.label_a, self.label_b)
-        if not self.board_history or self.board_history[-1] != snapshot:
+        if not self.board_history:
             self.board_history.append(snapshot)
+        else:
+            self.board_history[-1] = snapshot
 
     def _begin_round(self, now: float) -> None:
         if self.status == "resolved":
             return
 
-        for unit in self.team_a_units + self.team_b_units:
-            if unit and unit.hp > 0:
-                unit.tick_buffs(self.round, self._push_event)
+        if self.round == 1:
+            battle_logic._apply_opening_passives(self.team_a_units, self.team_b_units,
+                                                self.round, self._push_event, self.logs)
+        else:
+            for unit in self.team_a_units + self.team_b_units:
+                if unit and unit.hp > 0:
+                    unit.tick_buffs(self.round, self._push_event)
 
         if self._alive_a() <= 0 or self._alive_b() <= 0:
             self._finalize()
@@ -359,6 +377,37 @@ class BattleSession:
             )
             self.last_action_source = action_source
             self.last_action = normalized | {"actorTag": actor.tag}
+            actor.consume_stun()
+            self._advance_turn_or_round()
+            return
+
+        if normalized["kind"] == "wait":
+            hp_restore = min(max(0, actor.max_hp - actor.hp), (actor.max_hp + 9) // 10)
+            mp_restore = min(max(0, actor.max_mp - actor.mp), (actor.max_mp + 9) // 10)
+            actor.hp += hp_restore
+            actor.mp += mp_restore
+            self._push_event(
+                self.round,
+                actor.tag,
+                "heal",
+                0,
+                False,
+                False,
+                False,
+                "Wait",
+                0,
+                hp_restore,
+                defender_tag=actor.tag,
+                attacker_slot=actor.slot_index,
+                defender_slot=actor.slot_index,
+                attack_type=actor.character.get("state", {}).get("TYPE"),
+                skill_role="support",
+                range_mode="self",
+                type_catalog="instant",
+                type_effect="heal",
+            )
+            self.last_action_source = action_source
+            self.last_action = normalized | {"actorTag": actor.tag, "hpRestored": hp_restore, "mpRestored": mp_restore}
             self._advance_turn_or_round()
             return
 
@@ -371,6 +420,8 @@ class BattleSession:
             if not isinstance(skills, dict) or skill_slot not in skills:
                 raise BattleSessionError("unknown skillSlot")
             chosen_skill = skills[skill_slot]
+            if battle_logic._is_passive(chosen_skill):
+                raise BattleSessionError("Passive skills trigger automatically at battle start")
 
         own_team = self.team_a_units if actor.tag.startswith("A") else self.team_b_units
         enemy_team = self.team_b_units if actor.tag.startswith("A") else self.team_a_units
@@ -380,7 +431,8 @@ class BattleSession:
         target = None
         target_tag = normalized.get("targetTag")
         if target_tag:
-            for candidate in targets:
+            selectable = targets if self.control_mode == "manual" else targets[:battle_logic._target_num(chosen_skill)]
+            for candidate in selectable:
                 if candidate.tag == target_tag:
                     target = candidate
                     break
@@ -395,118 +447,18 @@ class BattleSession:
 
         actor.mp = max(0, actor.mp - skill_cost)
 
-        skill_damage = battle_logic._safe_int(chosen_skill.get("DMG", 0), 0) if chosen_skill else 0
-        attack_type = str((chosen_skill or {}).get("TYPE") or actor.character.get("state", {}).get("TYPE") or "").strip()
-        buff_name = str((chosen_skill or {}).get("BUFF_NAME") or "").strip().lower()
-        skill_role = str((chosen_skill or {}).get("ROLE") or "").strip().lower()
-        range_mode = battle_logic._skill_range(chosen_skill) if chosen_skill else None
-        target_mode = str((chosen_skill or {}).get("TARGET") or "Enemy").strip().lower()
-        visual = battle_logic._event_visual_contract(actor, chosen_skill)
-
+        affected_targets = battle_logic._affected_targets(target, targets, chosen_skill)
+        action_id = f"{self.session_id}:{len(self.events)}"
+        for index, affected in enumerate(affected_targets):
+            battle_logic._resolve_skill_hit(actor, affected, chosen_skill, self.round,
+                                            self._push_event, self.logs,
+                                            skill_cost if index == 0 else 0, action_id, index, len(affected_targets))
         if not target:
-            self._push_event(
-                self.round,
-                actor.tag,
-                "skill" if chosen_skill else "attack",
-                0,
-                False,
-                True,
-                False,
-                chosen_skill.get("name") if chosen_skill else None,
-                skill_cost,
-                defender_tag="-",
-                attacker_slot=actor.slot_index,
-                attack_type=attack_type,
-                buff_name=buff_name or None,
-                skill_role=skill_role or None,
-                range_mode=range_mode,
-                **visual,
-            )
-            self.last_action_source = action_source
-            self.last_action = normalized | {"actorTag": actor.tag}
-            self._advance_turn_or_round()
-            return
-
-        is_support_skill = bool(
-            chosen_skill
-            and skill_damage <= 0
-            and target_mode in {"self", "ally"}
-            and skill_role in {"buff", "support", "heal", "defense", "utility"}
-        )
-
-        is_crit = False
-        final_damage = 0
-        if not is_support_skill:
-            hit_chance = max(0.2, min(1.5, 1 + (actor.ac - target.ev) / 100.0))
-            if random.random() > hit_chance:
-                self._push_event(
-                    self.round,
-                    actor.tag,
-                    "skill" if chosen_skill else "attack",
-                    0,
-                    False,
-                    True,
-                    False,
-                    chosen_skill.get("name") if chosen_skill else None,
-                    skill_cost,
-                    defender_tag=target.tag,
-                    attacker_slot=actor.slot_index,
-                    defender_slot=target.slot_index,
-                    attack_type=attack_type,
-                    buff_name=buff_name or None,
-                    skill_role=skill_role or None,
-                    range_mode=range_mode,
-                    **visual,
-                )
-                self.last_action_source = action_source
-                self.last_action = normalized | {"actorTag": actor.tag}
-                self._advance_turn_or_round()
-                return
-
-            is_crit = random.random() < actor.cc / 100.0
-            crit_multiplier = 1 + actor.ca / 100.0 if is_crit else 1.0
-            mitigation = max(0.0, (target.def_val - actor.pi * 0.5) / 100.0)
-
-            raw_damage = (actor.atk + skill_damage) * crit_multiplier
-            final_damage = max(1, int(raw_damage * (1.0 - mitigation)))
-            target.hp = max(0, target.hp - final_damage)
-
-        applied_stun = False
-        if chosen_skill:
-            duration = max(0, battle_logic._safe_int(chosen_skill.get("BUFF_TIME", 0), 0))
-            if buff_name == "stun" or str(chosen_skill.get("IS_STUN", "")).lower() == "true":
-                target.add_buff("stun", max(1, duration or 1), 0, self.logs)
-                applied_stun = True
-
-            buff_value = 0
-            for field in ["BUFF_HP", "BUFF_MP", "BUFF_DMG", "BUFF_CC", "BUFF_DEF", "BUFF_EV", "BUFF_AC"]:
-                value = battle_logic._safe_int(chosen_skill.get(field, 0), 0)
-                if value != 0:
-                    buff_value = value
-                    break
-
-            if buff_name and duration > 0 and buff_value != 0:
-                target.add_buff(buff_name, duration, buff_value, self.logs)
-
-        self._push_event(
-            self.round,
-            actor.tag,
-            "skill" if chosen_skill else "attack",
-            final_damage,
-            is_crit,
-            False,
-            applied_stun,
-            chosen_skill.get("name") if chosen_skill else None,
-            skill_cost,
-            defender_tag=target.tag,
-            attacker_slot=actor.slot_index,
-            defender_slot=target.slot_index,
-            attack_type=attack_type,
-            buff_name=buff_name or None,
-            skill_role=skill_role or None,
-            range_mode=range_mode,
-            **visual,
-        )
+            self._push_event(self.round, actor.tag, "skill" if chosen_skill else "attack",
+                             0, False, True, False,
+                             chosen_skill.get("name") if chosen_skill else None, skill_cost,
+                             defender_tag="-", attacker_slot=actor.slot_index,
+                             **battle_logic._event_visual_contract(actor, chosen_skill))
 
         self.last_action_source = action_source
         self.last_action = normalized | {"actorTag": actor.tag}
@@ -558,6 +510,14 @@ class BattleSession:
             self.label_b,
         )
         action = controller.choose_action(observation)
+        # Wait is reserved for a human's deliberate recovery action. A program
+        # controller (including a custom one) is never allowed to spend its turn
+        # on it, so fall back to a normal attack if one is returned accidentally.
+        if action.kind == "wait":
+            action = battle_logic.BattleAction(
+                kind="attack",
+                target_tag=self._manual_targets(actor, None)[0].tag if self._manual_targets(actor, None) else None,
+            )
         own_team = self.team_a_units if actor.tag.startswith("A") else self.team_b_units
         enemy_team = self.team_b_units if actor.tag.startswith("A") else self.team_a_units
         chosen_skill = None
@@ -603,11 +563,15 @@ class BattleSession:
         options = []
         skills = actor.character.get("skill", {})
         for slot, skill in [(None, None)] + [(k, v) for k, v in skills.items() if k in {"s1", "s2"} and isinstance(v, dict)]:
+            if battle_logic._is_passive(skill):
+                continue
             cost = battle_logic._infer_skill_cost(skill) if skill else 0
             targets = [unit.tag for unit in self._manual_targets(actor, skill)]
             options.append({"kind": "skill" if slot else "attack", "skillSlot": slot,
                             "name": skill.get("name", slot) if skill else "Attack", "cost": cost,
                             "targets": targets, "disabled": "Not enough MP" if cost > actor.mp else "No legal targets" if not targets else None})
+        options.append({"kind": "wait", "skillSlot": None, "name": "Wait", "cost": 0,
+                        "targets": [actor.tag], "disabled": None})
         return options
 
     def submit_action(self, action: Dict[str, Any]) -> Dict[str, Any]:
