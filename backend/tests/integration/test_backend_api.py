@@ -252,6 +252,8 @@ def test_new_user_can_forge_four_cards_without_login_refills(harness):
     for i in range(4):
         harness.forge(headers, _sample_image_base64(), materials={})
         assert harness.economy(headers)["wallet"]["dust_balance"] == 500 - (i + 1) * 100
+    # Advance only this account's test timestamp past the email resend cooldown.
+    harness.db_module.execute("UPDATE login_codes SET created_at=now()-interval '61 seconds' WHERE email=%s", (email,))
     headers = harness.login(email)
     assert harness.economy(headers)["wallet"]["dust_balance"] == 100
     roster_after = harness.client.get("/api/me/heroes", headers=headers).get_json()["data"]
@@ -263,6 +265,46 @@ def test_new_user_can_forge_four_cards_without_login_refills(harness):
     assert failed.status_code == 500
     assert harness.economy(headers)["wallet"]["dust_balance"] == 100
     assert len(harness.client.get("/api/me/heroes", headers=headers).get_json()["data"]) == len(roster_after)
+
+
+@pytest.mark.integration
+def test_forge_record_failure_rolls_back_card_and_generation_and_refunds(harness, monkeypatch):
+    headers = harness.login("integration-forge-persistence-failure@example.com")
+    user_id = harness.last_user["id"]
+    before = len(harness.heroes(headers))
+    harness.set_forge_sequence([_hero_pair("Broken Save", "knight", 1000, "weapon", "Cut", "Guard")])
+
+    def fail_save(*args, **kwargs):
+        raise RuntimeError("Injected hero save failure")
+
+    monkeypatch.setattr(harness.app_module, "save_hero_history", fail_save)
+    response = harness.client.post("/api/forge", headers=headers,
+                                   json={"image": _sample_image_base64(), "materials": {}})
+    assert response.status_code == 500
+    assert harness.economy(headers)["wallet"]["dust_balance"] == 500
+    assert len(harness.heroes(headers)) == before
+    assert harness.db_module.fetch_one("SELECT count(*) AS n FROM hero_generations WHERE user_id=%s", (user_id,))["n"] == 0
+
+
+@pytest.mark.integration
+def test_saved_forge_survives_wallet_read_failure_without_refund(harness, monkeypatch):
+    headers = harness.login("integration-forge-wallet-read-failure@example.com")
+    user_id = harness.last_user["id"]
+    before = len(harness.heroes(headers))
+    harness.set_forge_sequence([_hero_pair("Committed Hero", "knight", 1000, "weapon", "Cut", "Guard")])
+
+    def fail_read(*args, **kwargs):
+        raise RuntimeError("Injected optional wallet read failure")
+
+    monkeypatch.setattr(harness.app_module, "economy_snapshot", fail_read)
+    response = harness.client.post("/api/forge", headers=headers,
+                                   json={"image": _sample_image_base64(), "materials": {}})
+    assert response.status_code == 200
+    assert response.get_json()["hero_id"]
+    assert len(harness.heroes(headers)) == before + 1
+    assert harness.db_module.get_user_wallet(user_id)["dust_balance"] == 400
+    assert harness.db_module.fetch_one("SELECT count(*) AS n FROM hero_generations WHERE user_id=%s", (user_id,))["n"] == 1
+    assert harness.db_module.fetch_one("SELECT count(*) AS n FROM resource_transactions WHERE user_id=%s AND reason='forge_refund'", (user_id,))["n"] == 0
 
 
 @pytest.mark.integration

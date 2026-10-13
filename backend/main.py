@@ -6,6 +6,7 @@ import os
 import secrets
 import threading
 from functools import wraps
+from contextlib import nullcontext
 from datetime import date, datetime, timezone
 from uuid import UUID
 from flask import Flask, request, jsonify
@@ -474,8 +475,8 @@ def session_required(fn):
     return wrapper
 
 
-def save_hero_history(user, source_payload, hero_payload):
-    with get_connection() as conn:
+def save_hero_history(user, source_payload, hero_payload, *, connection=None):
+    with (nullcontext(connection) if connection is not None else get_connection()) as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
@@ -486,7 +487,8 @@ def save_hero_history(user, source_payload, hero_payload):
                 (user["id"] if user else None, serialize_json(source_payload), serialize_json(hero_payload)),
             )
             row = cur.fetchone()
-        conn.commit()
+        if connection is None:
+            conn.commit()
         return row
 
 
@@ -504,8 +506,9 @@ def save_hero_generation_history(
     source_image_url=None,
     status="completed",
     error=None,
+    connection=None,
 ):
-    with get_connection() as conn:
+    with (nullcontext(connection) if connection is not None else get_connection()) as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
@@ -534,7 +537,8 @@ def save_hero_generation_history(
                 ),
             )
             row = cur.fetchone()
-        conn.commit()
+        if connection is None:
+            conn.commit()
         return row
 
 
@@ -2168,6 +2172,7 @@ def health():
 @auth_required
 def forge():
     charged = False
+    persisted = False
     user = current_user()
     try:
         data = request.json or {}
@@ -2213,31 +2218,39 @@ def forge():
         # through the second text-model call again.
         image_url = f"data:image/png;base64,{image_part['data']}"
         saved_source = {**p2_input, "image_url": image_url}
-        generation_row = save_hero_generation_history(
-            user,
-            saved_source,
-            {"p1": p1_data, "p2": p2_data},
-            final_hero,
-            template=p2_data.get("template"),
-            bp_requested=int(p2_data.get("BP") or p1_data.get("BP") or final_hero.get("BP") or 0),
-            bp_final=int(final_hero.get("BP") or 0),
-            model_name=LLM_MODEL_NAME,
-            prompt_version="p2_v2",
-            source_image_hash=hashlib.sha256(base64.b64decode(image_part["data"])).hexdigest(),
-            source_image_url=image_url,
-            status="completed",
-        )
-        saved_hero = save_hero_history(user, saved_source, final_hero)
+        with get_connection() as conn:
+            generation_row = save_hero_generation_history(
+                user,
+                saved_source,
+                {"p1": p1_data, "p2": p2_data},
+                final_hero,
+                template=p2_data.get("template"),
+                bp_requested=int(p2_data.get("BP") or p1_data.get("BP") or final_hero.get("BP") or 0),
+                bp_final=int(final_hero.get("BP") or 0),
+                model_name=LLM_MODEL_NAME,
+                prompt_version="p2_v2",
+                source_image_hash=hashlib.sha256(base64.b64decode(image_part["data"])).hexdigest(),
+                source_image_url=image_url,
+                status="completed",
+                connection=conn,
+            )
+            saved_hero = save_hero_history(user, saved_source, final_hero, connection=conn)
+            conn.commit()
+        persisted = True
         _safe_record_daily_task_progress(user["id"], "forge_one_card")
 
         response = dict(final_hero)
         response["generation_id"] = str(generation_row["id"]) if generation_row else None
         response["hero_id"] = str(saved_hero["id"]) if saved_hero else None
-        response["economy"] = economy_snapshot(user)
+        try:
+            response["economy"] = economy_snapshot(user)
+        except Exception:
+            # The card is committed: a failed optional read must not undo its charge.
+            logging.exception("Forged hero saved; wallet snapshot refresh failed")
         return jsonify(response)
 
     except Exception as e:
-        if charged:
+        if charged and not persisted:
             try:
                 adjust_dust_balance(
                     user["id"],
