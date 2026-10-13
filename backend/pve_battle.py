@@ -14,7 +14,7 @@ def _tuple_tree(value):
 
 
 class LabyrinthBattle(BattleSession):
-    def __init__(self, encounter, party, resources, seed, boon=False):
+    def __init__(self, encounter, party, resources, seed, boon=False, prepare=False):
         self.encounter = copy.deepcopy(encounter)
         self.npc_phases = {}
         self.pending_marks = {}
@@ -43,12 +43,17 @@ class LabyrinthBattle(BattleSession):
                 self.team_a_units = arranged
             else:
                 self.team_b_units = arranged
-        self.require_confirmation = False
-        self.status = "awaiting_action"
         self.board_history = []
         self._append_board_history()
+        if not prepare:
+            self.require_confirmation = False
+            self.status = "awaiting_action"
+            with logic.use_battle_random(self.rng):
+                self._begin_round(time.time())
+
+    def confirm_preparation(self, side, positions):
         with logic.use_battle_random(self.rng):
-            self._begin_round(time.time())
+            return super().confirm_preparation(side, positions)
 
     def _begin_round(self, now):
         if self.round > 30:

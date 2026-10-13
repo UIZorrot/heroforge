@@ -61,7 +61,7 @@ class PostgresContainer:
             "POSTGRES_DB=hf_test",
             "-p",
             f"127.0.0.1:{self.port}:5432",
-            "postgres:16-alpine",
+            os.getenv("HF_TEST_POSTGRES_IMAGE", "postgres:16-alpine"),
         ]
         result = subprocess.run(command, capture_output=True, text=True, check=True)
         self.container_id = result.stdout.strip()

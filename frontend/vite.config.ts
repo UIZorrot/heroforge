@@ -13,6 +13,11 @@ export default defineConfig(({ mode }) => {
       port: 4488,
       strictPort: true,
       proxy: {
+        '/api/pve-preview': {
+          target: 'http://127.0.0.1:5545',
+          changeOrigin: true,
+          rewrite: (path) => path.replace('/api/pve-preview', '/api/pve'),
+        },
         '/api/ollama': {
           target: env.VITE_OLLAMA_PROXY_TARGET || 'http://127.0.0.1:11434',
           changeOrigin: true,

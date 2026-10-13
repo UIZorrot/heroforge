@@ -1,5 +1,7 @@
 import type { EconomySnapshot, RelicDefinition, SavedHero } from '../types';
 import type { CharacterData, Skill } from './gameLogic';
+import { normalizeCharacterData } from './gameLogic';
+import { starterBalance } from './starterBalance';
 
 type MockHeroSkill = Skill;
 
@@ -108,6 +110,7 @@ export const mockRelicInventory: EconomySnapshot['relics'] = mockRelicCatalog.ma
 }));
 
 function character(spec: MockHeroSpec): CharacterData {
+  if (starterBalance[spec.name]) return normalizeCharacterData(structuredClone(starterBalance[spec.name]));
   return {
     name: spec.name,
     description: spec.description,
@@ -387,4 +390,9 @@ export function createMockEconomy(): EconomySnapshot {
 
 export function createMockHeroes(): SavedHero[] {
   return JSON.parse(JSON.stringify(mockHeroes)) as SavedHero[];
+}
+
+export function rebalanceMockStarters(heroes: SavedHero[]): SavedHero[] {
+  const starters = new Map(mockHeroes.map(hero => [hero.id, hero.character]));
+  return heroes.map(hero => starters.has(hero.id) ? { ...hero, character: structuredClone(starters.get(hero.id)!) } : hero);
 }

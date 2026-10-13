@@ -7,16 +7,16 @@ import pytest
 import battle_logic
 from battle_sessions import BattleSessionError
 from pve_battle import LabyrinthBattle
-from pve_content import CONTENT, encounter_for, enemy_hero
-from pve_runs import new_run, transition
+from pve_content import CONTENT, TIERS, encounter_for, enemy_hero
+from pve_runs import new_run, transition, public_run, party_with_relics
 from test_battle_sessions_program import _hero
 
 
-def party(powerful=False):
+def party(powerful=False, team_bp=1000):
     heroes = []
     for index in range(4):
         character = _hero(f'Explorer {index}', 200)
-        character['BP'] = '250'
+        character['BP'] = str(team_bp // 4)
         character['state'].update(HP='100000' if powerful else '1000', ATK='100000' if powerful else '12', TYPE='Ranged')
         heroes.append({'id': f'hero-{index}', 'slot': index, 'character': character})
     return heroes
@@ -235,20 +235,94 @@ def test_camp_checkpoint_revival_and_single_use():
 
 @pytest.mark.parametrize('tier', ['threshold', 'reflection', 'heart'])
 def test_complete_ten_node_route_and_resource_carry(tier):
-    run = new_run(tier, party(powerful=True), 123)
+    run = new_run(tier, party(powerful=True, team_bp=TIERS[tier]['recommended_team_bp']), 123)
     while run['status'] == 'active':
         if run.get('battle') and run['battle']['status'] != 'resolved':
             snapshot = LabyrinthBattle.restore(run['battle']).public_snapshot()
-            if snapshot['actionOptions']:
+            if snapshot['status'] == 'preparing':
+                transition(run, 'confirm', {'positions': {unit['tag']: unit['slot'] for unit in snapshot['board']['bottom'] if unit}})
+            elif snapshot['actionOptions']:
                 option = snapshot['actionOptions'][0]
                 transition(run, 'action', {'action': {'actorTag': snapshot['activeActorTag'], 'kind': 'attack',
                            'targetTag': option['targets'][0], 'expectedEventCount': len(snapshot['events'])}})
             else:
                 transition(run, 'advance', {})
+        elif run.get('pendingReward'):
+            transition(run, 'reward', {'choice': 'edge'})
+        elif run['node'] == 3:
+            transition(run, 'event', {'choice': 'study'})
+        elif run['node'] == 7:
+            transition(run, 'shop', {'choice': 'ward'})
         elif run['node'] in {4, 9}:
             transition(run, 'camp', {'choice': 'boon'})
         else:
             transition(run, 'enter', {'branch': 'A' if run['node'] in {2, 6} else 'default'})
     assert run['status'] == 'completed' and run['node'] == 11
     assert run['clearedNodes'] == list(range(1, 11))
-    assert run['totalRounds'] >= 8
+    assert run['totalRounds'] >= 6
+    assert len([item for item in run['rewardHistory'] if item['kind'] == 'reward']) == 5
+    assert run['relics'] == {'edge': 5, 'ward': 1}
+
+
+@pytest.mark.parametrize('bp,valid', [(949, False), (950, True), (1000, True), (1050, True), (1051, False)])
+def test_single_companion_entry_enforces_inclusive_five_percent_band(bp, valid):
+    hero = party()[0]
+    hero['character']['BP'] = str(bp)
+    if valid:
+        run = new_run('threshold', [hero], 7)
+        assert public_run(run, 'one')['honorEligible']
+    else:
+        with pytest.raises(ValueError, match='±5%'):
+            new_run('threshold', [hero], 7)
+
+
+def test_each_encounter_waits_for_board_confirmation_without_resource_cost():
+    run = new_run('threshold', party(powerful=True), 4)
+    transition(run, 'enter', {})
+    snapshot = public_run(run, 'test')['battleSession']
+    assert snapshot['status'] == 'preparing' and snapshot['activeActorTag'] is None and not snapshot['events']
+    resources = copy.deepcopy(run['resources'])
+    with pytest.raises(ValueError, match='confirm'):
+        transition(run, 'advance', {})
+    with pytest.raises(BattleSessionError):
+        transition(run, 'confirm', {'positions': {'A1': 5, 'A2': 5, 'A3': 2, 'A4': 3}})
+    transition(run, 'confirm', {'positions': {'A1': 5, 'A2': 0, 'A3': 1, 'A4': 2}})
+    assert [hero['slot'] for hero in run['party']] == [5, 0, 1, 2]
+    assert run['resources'] == resources
+    assert public_run(run, 'test')['battleSession']['status'] != 'preparing'
+
+
+def test_rewards_apply_to_actual_battle_stats_and_cannot_be_claimed_twice():
+    run = new_run('threshold', party(), 10)
+    run['pendingReward'] = {'floor': 1, 'lumens': 12, 'choices': []}
+    before = int(run['party'][0]['character']['state']['ATK'])
+    with pytest.raises(ValueError, match='reward'):
+        transition(run, 'enter', {})
+    transition(run, 'reward', {'choice': 'edge'})
+    assert int(party_with_relics(run)[0]['character']['state']['ATK']) == round(before * 1.05)
+    with pytest.raises(ValueError, match='unclaimed'):
+        transition(run, 'reward', {'choice': 'edge'})
+    transition(run, 'enter', {})
+    assert LabyrinthBattle.restore(run['battle']).team_a_units[0].atk == round(before * 1.05)
+
+
+def test_events_trades_and_checkpoint_restore_do_not_farm_rewards():
+    run = new_run('threshold', party(), 5)
+    run['node'] = 3
+    transition(run, 'event', {'choice': 'study'})
+    assert run['lumens'] == 20 and run['node'] == 4
+    transition(run, 'camp', {'choice': 'rest'})
+    checkpoint = copy.deepcopy(run['checkpoint'])
+    run['node'] = 7
+    with pytest.raises(ValueError, match='Lumens'):
+        transition(run, 'shop', {'choice': 'ward'})
+    assert run['lumens'] == 20
+    run['lumens'] = 40
+    transition(run, 'shop', {'choice': 'ward'})
+    assert run['lumens'] == 0 and run['relics'] == {'ward': 1}
+    assert run['resources']['hero-0']['hp'] == 1080
+    run['status'] = 'failed'
+    transition(run, 'retry', {})
+    assert run['lumens'] == checkpoint['lumens'] == 20
+    assert run['relics'] == {} and run['node'] == 5
+    assert run['rewardHistory'] == checkpoint['rewardHistory']

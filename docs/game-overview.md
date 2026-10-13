@@ -61,16 +61,18 @@ The formal PvP mode.
 
 First campaign design: [Void Labyrinth](pve-void-labyrinth-v1.md), with a [playable campaign prototype](pve-void-labyrinth-prototype.md); authored art, calibrated difficulty and economy rewards remain pending.
 
-- Three fixed challenges for deployed team BP totals of 1000, 5000 and 10000; shared theme, different enemy compositions and boss mechanics. Enemy budgets do not rescale with the entering team.
-- Ten visited nodes: six normal encounters, two camps, one elite and one boss; two branch choices reconnect. Draft data defines 30 encounters across the three tiers.
-- The prototype has free entry/retries, carried HP/MP, durable checkpoints and unique first-clear records. Dust entry fees and uncalibrated reward payouts are deferred; no ranked stakes or permanent card death.
-- The campaign supports up to four players and six enemies, fixed NPC scripts, intent UI, camps and PostgreSQL persistence. Mock mode only previews formation; actual combat requires the live service. Formal art, offline/automatic player control and reward cosmetics remain pending.
+- Three fixed challenges target team BP totals of 1000, 5000 and 10000. New parties must have 1–4 heroes and total BP within ±5%. Eight starter heroes each have 1000 BP and a matching actual stat budget; one starter can enter the first depth. Enemy budgets stay fixed.
+- The current ten-floor climb includes four normal battles, one elite, one boss, two camps, a tablet event and a lantern trader. Each battle starts with an editable board and a server-validated formation confirmation. See [climb rules](pve-void-labyrinth-climb.md).
+- Non-final battle clears offer one of three actual climb-only rewards. Lumens fund a one-time purchase during the climb; they do not enter the account economy. Checkpoints restore resources, formations, rewards and Lumens together. First clears award 75 / 150 / 250 Dust once per account/depth, with the wallet update and unique clear record in one transaction. PostgreSQL integration verification is currently blocked by the local Docker launch rejection.
+- The campaign supports up to four players and six enemies, fixed NPC scripts, intent UI and persistent saves. Development mock clients can play the same Python rules through a separate loopback-only test service; test rewards never change a live wallet. Production mock remains a preview. Player automation, reward cosmetics and extensive balance/playtesting remain pending.
 
 ## Economy
 
 The game has two user resources:
 
 - Dust: the universal spendable currency
+  - new wallets receive 500 once by default: four 100-Dust forges plus 100 spare; configuration always funds at least four forges
+  - existing wallets are not refilled on login, and failed forge requests refund their charge
   - forge cost
   - repair cost
   - PvE entry cost (deferred; phase-one campaign draft is free)

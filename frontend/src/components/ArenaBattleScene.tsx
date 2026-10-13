@@ -502,6 +502,8 @@ function SlotCell({
   onDragUnitEnd,
   onDragUnitHover,
   onDropUnit,
+  placementTag,
+  onSelectPlacement,
 }: {
   unit: BattleBoardUnit | null;
   slot: SlotSpec;
@@ -514,11 +516,13 @@ function SlotCell({
   onDragUnitEnd?: () => void;
   onDragUnitHover?: (slot: number | null) => void;
   onDropUnit?: (unitTag: string, slot: number) => void;
+  placementTag?: string | null;
+  onSelectPlacement?: (unitTag: string | null) => void;
 }) {
   const draggable = Boolean(editUnitSlots && unit && onDragUnitStart && onDropUnit);
   const canAcceptDrop = Boolean(editUnitSlots && activeDragUnitTag && activeDragUnitTag !== unit?.tag && onDropUnit);
 
-  function handleDragStart(event: ReactDragEvent<HTMLDivElement>) {
+  function handleDragStart(event: ReactDragEvent<HTMLElement>) {
     if (!unit || !draggable) return;
     event.dataTransfer.effectAllowed = 'move';
     event.dataTransfer.setData('text/plain', unit.tag);
@@ -578,6 +582,14 @@ function SlotCell({
       >
         <ArenaUnitCard unit={unit} slot={slot} side={side} currentEvent={currentEvent} />
       </div>
+      {editUnitSlots && <button type="button" className="battle-slot__placement-control"
+        aria-label={placementTag && placementTag !== unit?.tag ? `Move ${placementTag} to ${['front left', 'front center', 'front right', 'back left', 'back center', 'back right'][slot.slot]}` : unit ? `Select ${unit.name} to reposition` : `Empty ${['front left', 'front center', 'front right', 'back left', 'back center', 'back right'][slot.slot]} position`}
+        aria-pressed={Boolean(unit && placementTag === unit.tag)} disabled={!unit && !placementTag}
+        draggable={draggable} onDragStart={handleDragStart} onDragEnd={handleDragEnd}
+        onClick={() => {
+          if (placementTag && placementTag !== unit?.tag) onDropUnit?.(placementTag, slot.slot);
+          else if (unit) onSelectPlacement?.(placementTag === unit.tag ? null : unit.tag);
+        }} />}
     </div>
   );
 }
@@ -600,6 +612,7 @@ function FormationGrid({
 }) {
   const [activeDragUnitTag, setActiveDragUnitTag] = useState<string | null>(null);
   const [hoverSlot, setHoverSlot] = useState<number | null>(null);
+  const [placementTag, setPlacementTag] = useState<string | null>(null);
   const slots = side === 'forger' ? forgerSlots : rivalSlots;
 
   function clearDragState() {
@@ -625,9 +638,12 @@ function FormationGrid({
               onDragUnitStart={setActiveDragUnitTag}
               onDragUnitEnd={clearDragState}
               onDragUnitHover={setHoverSlot}
+              placementTag={placementTag}
+              onSelectPlacement={setPlacementTag}
               onDropUnit={(unitTag, nextSlot) => {
                 onUnitSlotChange?.(unitTag, nextSlot);
                 clearDragState();
+                setPlacementTag(null);
               }}
             />
           );

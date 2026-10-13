@@ -5,8 +5,10 @@ import type { BattleResult, BattleBoardState } from './battleTypes';
 export type PveTier = 'threshold' | 'reflection' | 'heart';
 export type PveCreature = { id: string; name: string; role: string; lore: string; tactic: string };
 export type PveIntent = { actorTag: string; name: string; action: string; targetTags: string[]; targetCount?: number; damageMultiplier?: number; curse?: boolean; interruptible: boolean };
+export type PveRewardChoice = { id: string; name: string; description: string };
 export type PveCatalog = { name: string; theme: string; contentVersion: string; prototype: boolean; entryCost: number; rewardPolicy: string;
   bestiary: PveCreature[];
+  rewards?: PveRewardChoice[]; firstClearDust?: Record<string, number>;
   tiers: Array<{ id: string; name: string; recommended_team_bp: number; honor_bp_band: number[]; ratios?: number[] }>;
   nodes: Array<{ id: string; name: string; kind: string; variants?: string[]; next: string[] }>;
   encounters?: Array<{ tier: string; node: string; variant: string; enemyTotalBp: number; enemies: Array<{ name: string; role: string; slot: number }> }> };
@@ -15,9 +17,16 @@ export type PveRun = { id: string; tier: PveTier; teamBp: number; revision: numb
   retries: number; totalRounds: number; boon: boolean; resources: Record<string, { hp: number; mp: number }>;
   party: Array<{ id: string; slot: number; character: CharacterData; image?: string | null }>;
   reward: { firstClear: boolean; dust: number; message: string } | null;
+  lumens?: number; relics?: Record<string, number>; pendingReward?: { floor: number; lumens: number; choices: PveRewardChoice[] } | null;
+  rewardHistory?: Array<{ floor: number; kind: string; name: string }>; legacy?: boolean;
   battleSession: (BattleSessionSnapshot & { intents: PveIntent[]; npcRoles?: Record<string, string> }) | null };
-export type PveOperation = 'enter' | 'camp' | 'retry' | 'abandon' | 'action' | 'advance';
-export type PveInput = { branch?: string; choice?: 'rest' | 'boon'; reviveHeroId?: string; action?: BattleSessionAction };
+export type PveOperation = 'enter' | 'confirm' | 'camp' | 'retry' | 'abandon' | 'action' | 'advance' | 'reward' | 'event' | 'shop';
+export type PveInput = { branch?: string; choice?: string; reviveHeroId?: string; action?: BattleSessionAction; positions?: Record<string, number> };
+
+export function pveBpEligibility(teamBp: number, target: number, count: number) {
+  const lower = Math.ceil(target * .95), upper = Math.floor(target * 1.05);
+  return { lower, upper, eligible: count >= 1 && count <= 4 && teamBp >= lower && teamBp <= upper };
+}
 
 export function pveBattleResult(run: PveRun, creatures: PveCreature[] = []): BattleResult | null {
   const room = run.battleSession;

@@ -95,6 +95,7 @@ export function resolveRarity(source: { rarity?: unknown } | Rarity | null | und
 
 /** @deprecated Use resolveRarity — rarity is independent of BP. */
 export function calculateRarity(_bp: number): Rarity {
+  void _bp; // Keep the legacy signature; rarity no longer derives from BP.
   return 'common';
 }
 
@@ -252,7 +253,7 @@ export function calculateActualBP(state: CharacterState): number {
   const PI = toNumber(state.PI);
   const EV = toNumber(state.EV);
   const AC = toNumber(state.AC);
-  return Math.floor(HP * 0.5 + MP * 0.5 + ATK * 5 + DEF * 5 + SPEED * 4 + CC * 3 + CA * 3 + PI * 3 + EV * 3 + AC * 3);
+  return Math.floor(HP + MP + ATK * 4 + DEF * 8 + SPEED * 10 + CC * 4 + CA * 4 + PI * 8 + EV * 6 + AC * 4);
 }
 
 export function adjustBasedOnBP(characterJson: Record<string, unknown>): CharacterData {

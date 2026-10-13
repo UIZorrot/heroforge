@@ -3,7 +3,7 @@ import type { PveCatalog } from './pveTypes';
 export const pvePreviewCatalog: PveCatalog = {
   "theme": "void_labyrinth",
   "name": "Void Labyrinth",
-  "contentVersion": "void-labyrinth-v1-prototype-1",
+  "contentVersion": "void-labyrinth-v2-climb-1",
   "prototype": true,
   "tiers": [
     {
@@ -11,8 +11,8 @@ export const pvePreviewCatalog: PveCatalog = {
       "name": "The Fading Lantern",
       "recommended_team_bp": 1000,
       "honor_bp_band": [
-        900,
-        1100
+        950,
+        1050
       ],
       "ratios": [
         72,
@@ -30,8 +30,8 @@ export const pvePreviewCatalog: PveCatalog = {
       "name": "Hall of Reflections",
       "recommended_team_bp": 5000,
       "honor_bp_band": [
-        4500,
-        5500
+        4750,
+        5250
       ],
       "ratios": [
         82,
@@ -49,8 +49,8 @@ export const pvePreviewCatalog: PveCatalog = {
       "name": "The Lightless Heart",
       "recommended_team_bp": 10000,
       "honor_bp_band": [
-        9000,
-        11000
+        9500,
+        10500
       ],
       "ratios": [
         92,
@@ -88,7 +88,7 @@ export const pvePreviewCatalog: PveCatalog = {
     {
       "id": "N3",
       "name": "Forgotten Tablets",
-      "kind": "battle",
+      "kind": "event",
       "next": [
         "N4"
       ]
@@ -124,7 +124,7 @@ export const pvePreviewCatalog: PveCatalog = {
     {
       "id": "N7",
       "name": "Lost Chamber",
-      "kind": "battle",
+      "kind": "shop",
       "next": [
         "N8"
       ]
@@ -173,7 +173,7 @@ export const pvePreviewCatalog: PveCatalog = {
       "name": "Mirror Stalker",
       "role": "Ranged hunter",
       "lore": "A six-limbed predator of smoked glass. Its own ribs bend into a bow, strung with stolen light.",
-      "tactic": "Its charged shot deals 1.2\u00d7 ATK and prioritizes the highest-ATK legal target."
+      "tactic": "Its charged shot deals 1.2× ATK and prioritizes the highest-ATK legal target."
     },
     {
       "id": "scribe",
@@ -194,7 +194,7 @@ export const pvePreviewCatalog: PveCatalog = {
       "name": "Rift Hound",
       "role": "Executioner",
       "lore": "A lean, eyeless hound prowls between broken corridors. Its split jaw opens directly into the void.",
-      "tactic": "Its lunge deals 1.2\u00d7 ATK and prioritizes the legal target with the lowest HP ratio."
+      "tactic": "Its lunge deals 1.2× ATK and prioritizes the legal target with the lowest HP ratio."
     },
     {
       "id": "warden",
@@ -218,7 +218,29 @@ export const pvePreviewCatalog: PveCatalog = {
       "tactic": "Never attacks or regenerates by waiting. Destroy anchors to change the Boss ritual's displayed range and effects."
     }
   ],
-  "rewardPolicy": "First clears are recorded. Dust and cosmetic rewards are not available in this version.",
+  "rewardPolicy": "Choose a climb-only reward after each non-final battle. First clears award 75 / 150 / 250 Dust once per depth.",
+  "rewards": [
+    {
+      "id": "edge",
+      "name": "Ember Edge",
+      "description": "+5% base ATK for the rest of this climb."
+    },
+    {
+      "id": "ward",
+      "name": "Stone Memory",
+      "description": "+8% base maximum HP for the rest of this climb."
+    },
+    {
+      "id": "renewal",
+      "name": "Lantern Draught",
+      "description": "Recover 25% maximum HP and MP for living companions."
+    }
+  ],
+  "firstClearDust": {
+    "threshold": 75,
+    "reflection": 150,
+    "heart": 250
+  },
   "encounters": [
     {
       "tier": "threshold",

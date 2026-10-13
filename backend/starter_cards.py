@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, Dict, List
 
 from db import get_connection, serialize_json
+from game_logic import STAT_COSTS
 
 
 STARTER_SOURCE = "starter_deck_v1"
@@ -81,14 +82,25 @@ def _card(
     s2: Dict[str, Any],
     description: str,
 ) -> Dict[str, Any]:
+    # Fund actual stats from the same 1000-point budget as a forged common hero.
+    budget = sum(int(state[key]) * cost for key, cost in STAT_COSTS.items())
+    ratio = 1000 / budget
+    balanced = dict(state)
+    for key in STAT_COSTS:
+        balanced[key] = int(int(state[key]) * ratio)
+    balanced['HP'] += 1000 - sum(balanced[key] * cost for key, cost in STAT_COSTS.items())
+    for skill in (s1, s2):
+        for key in ('DMG', 'MP_COST', 'BUFF_HP', 'BUFF_MP', 'BUFF_DMG', 'BUFF_DEF'):
+            value = int(skill[key])
+            skill[key] = str(max(1, round(value * ratio)) if value else 0)
     return {
         "name": name,
         "description": description,
         "extra": "Starter card. Balanced for early Arena, Vault, and Chronicle onboarding.",
-        "BP": str(bp),
+        "BP": "1000",
         "rarity": "common",
         "template": template,
-        "state": {key: str(value) for key, value in state.items()},
+        "state": {key: str(value) for key, value in balanced.items()},
         "skill": {"s1": s1, "s2": s2},
     }
 
@@ -175,6 +187,7 @@ def seed_starter_cards(user_id) -> int:
             cur.execute("SELECT id FROM users WHERE id = %s FOR UPDATE", (user_id,))
             cur.execute("SELECT count(*) AS count FROM heroes WHERE user_id = %s", (user_id,))
             if int(cur.fetchone()["count"]) > 0:
+                _rebalance_starters(cur, user_id)
                 conn.commit()
                 return 0
 
@@ -191,6 +204,7 @@ def seed_starter_cards(user_id) -> int:
                                 "source": STARTER_SOURCE,
                                 "starter_index": index,
                                 "image_url": STARTER_IMAGE_URLS[index],
+                                "starter_balance_version": 2,
                             }
                         ),
                         serialize_json(card),
@@ -198,3 +212,21 @@ def seed_starter_cards(user_id) -> int:
                 )
         conn.commit()
     return len(STARTER_CARDS)
+
+
+def _rebalance_starters(cur, user_id):
+    cur.execute("SELECT id, source_payload FROM heroes WHERE user_id=%s AND source_payload->>'source'=%s FOR UPDATE", (user_id, STARTER_SOURCE))
+    for row in cur.fetchall():
+        source = row['source_payload']
+        index = source.get('starter_index')
+        if source.get('starter_balance_version') == 2 or type(index) is not int or not 0 <= index < len(STARTER_CARDS):
+            continue
+        source = {**source, 'starter_balance_version': 2}
+        cur.execute('UPDATE heroes SET hero_payload=%s::jsonb, source_payload=%s::jsonb WHERE id=%s',
+                    (serialize_json(STARTER_CARDS[index]), serialize_json(source), row['id']))
+
+
+def rebalance_starter_cards(user_id):
+    with get_connection() as conn, conn.cursor() as cur:
+        _rebalance_starters(cur, user_id)
+        conn.commit()

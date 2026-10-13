@@ -240,6 +240,32 @@ def test_auth_login_and_initial_economy(harness):
 
 
 @pytest.mark.integration
+def test_new_user_can_forge_four_cards_without_login_refills(harness):
+    email = "integration-four-starter-forges@example.com"
+    headers = harness.login(email)
+    assert harness.economy(headers)["wallet"]["dust_balance"] == 500
+    roster_before = harness.client.get("/api/me/heroes", headers=headers).get_json()["data"]
+    harness.set_forge_sequence([
+        _hero_pair(f"Welcome Hero {i}", "knight", 1000, "weapon", "Cut", "Guard")
+        for i in range(4)
+    ])
+    for i in range(4):
+        harness.forge(headers, _sample_image_base64(), materials={})
+        assert harness.economy(headers)["wallet"]["dust_balance"] == 500 - (i + 1) * 100
+    headers = harness.login(email)
+    assert harness.economy(headers)["wallet"]["dust_balance"] == 100
+    roster_after = harness.client.get("/api/me/heroes", headers=headers).get_json()["data"]
+    assert len(roster_after) == len(roster_before) + 4
+
+    # Exhausted model stubs cause a failed forge after the entry charge; it must refund.
+    failed = harness.client.post("/api/forge", headers=headers,
+                                 json={"image": _sample_image_base64(), "materials": {}})
+    assert failed.status_code == 500
+    assert harness.economy(headers)["wallet"]["dust_balance"] == 100
+    assert len(harness.client.get("/api/me/heroes", headers=headers).get_json()["data"]) == len(roster_after)
+
+
+@pytest.mark.integration
 def test_agent_key_can_read_roster_and_is_revocable(harness):
     session_headers = harness.login("integration-agent-key@example.com")
 

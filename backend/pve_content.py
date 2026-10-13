@@ -10,6 +10,17 @@ THEME = "void_labyrinth"
 VERSION = CONTENT["content_version"]
 TIERS = {t["id"]: t for t in CONTENT["tiers"]}
 NODES = {n["id"]: n for n in CONTENT["nodes"]}
+FIRST_CLEAR_DUST = {'threshold': 75, 'reflection': 150, 'heart': 250}
+RELICS = {
+    'edge': {'id': 'edge', 'name': 'Ember Edge', 'description': '+5% base ATK for the rest of this climb.'},
+    'ward': {'id': 'ward', 'name': 'Stone Memory', 'description': '+8% base maximum HP for the rest of this climb.'},
+    'renewal': {'id': 'renewal', 'name': 'Lantern Draught', 'description': 'Recover 25% maximum HP and MP for living companions.'},
+}
+
+
+def bp_band(tier):
+    target = TIERS[tier]['recommended_team_bp']
+    return (target * 95 // 100, target * 105 // 100)
 
 
 def encounter_for(tier, node, variant="default"):
@@ -67,7 +78,8 @@ def catalog():
     return {"theme": THEME, "name": "Void Labyrinth", "contentVersion": VERSION, "prototype": True,
             "tiers": list(TIERS.values()), "nodes": list(NODES.values()), "entryCost": 0,
             "bestiary": [{"id": role, **{key: creature[key] for key in ("name", "role", "lore", "tactic")}} for role, creature in CONTENT["archetypes"].items()],
-            "rewardPolicy": "First clears are recorded. Dust and cosmetic rewards are not available in this version.",
+            "rewardPolicy": "Choose a climb-only reward after each non-final battle. First clears award 75 / 150 / 250 Dust once per depth.",
+            "rewards": list(RELICS.values()), "firstClearDust": FIRST_CLEAR_DUST,
             "encounters": [{"tier": e["tier"], "node": e["node"], "variant": e["variant"],
                             "enemyTotalBp": e["enemy_total_bp"],
                             "enemies": [{"name": CONTENT["archetypes"][unit["role"]]["name"], "slot": unit["slot"], "role": unit["role"]} for unit in e["enemies"]]}

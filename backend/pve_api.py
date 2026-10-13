@@ -8,7 +8,7 @@ from uuid import UUID
 from flask import jsonify, request
 from battle_sessions import BattleSessionError
 from db import get_connection, serialize_json
-from pve_content import THEME, catalog
+from pve_content import THEME, VERSION, FIRST_CLEAR_DUST, catalog
 from pve_runs import new_run, public_run, transition
 
 
@@ -103,7 +103,7 @@ def register_pve_routes(app, auth_required, current_user):
     @app.route('/api/pve/runs/<run_id>/<operation>', methods=['POST'])
     @auth_required
     def pve_mutate(run_id, operation):
-        if operation not in {'enter', 'action', 'advance', 'camp', 'retry', 'abandon'}:
+        if operation not in {'enter', 'confirm', 'action', 'advance', 'camp', 'retry', 'abandon', 'reward', 'event', 'shop'}:
             return jsonify({'error': 'Action not found.'}), 404
         try:
             run_id = str(UUID(run_id))
@@ -134,7 +134,15 @@ def register_pve_routes(app, auth_required, current_user):
                     cur.execute('INSERT INTO pve_first_clears (user_id,theme_key,tier,run_id,content_version) VALUES (%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING RETURNING run_id',
                                 (user_id, THEME, run['tier'], run_id, run['contentVersion']))
                     awarded = cur.fetchone() is not None
-                    run['reward'] = {'firstClear': awarded, 'dust': 0, 'message': 'First clear recorded. Dust and cosmetic rewards are not available yet.' if awarded else 'Your first clear at this depth is already recorded. This challenge result has been updated.'}
+                    dust = FIRST_CLEAR_DUST[run['tier']] if awarded and run['contentVersion'] == VERSION else 0
+                    if dust:
+                        cur.execute('UPDATE user_wallets SET dust_balance=dust_balance+%s,updated_at=now() WHERE user_id=%s RETURNING dust_balance', (dust, user_id))
+                        wallet = cur.fetchone()
+                        if not wallet:
+                            raise ValueError('Reward wallet is unavailable. Retry after signing in.')
+                        cur.execute("INSERT INTO resource_transactions (user_id,resource_type,delta,balance_after,reason,ref_type,ref_id,metadata) VALUES (%s,'dust',%s,%s,'void_labyrinth_first_clear','pve_run',%s,%s::jsonb)",
+                                    (user_id, dust, wallet['dust_balance'], run_id, serialize_json({'tier': run['tier'], 'contentVersion': run['contentVersion']})))
+                    run['reward'] = {'firstClear': awarded, 'dust': dust, 'message': f'First clear · {dust} Dust added to your wallet.' if dust else 'Clear recorded. The one-time reward for this depth has already been claimed.'}
                 cur.execute('UPDATE pve_runs SET status=%s,current_floor=%s,max_floor_reached=%s,run_payload=%s::jsonb,ended_at=CASE WHEN %s IN (\'completed\',\'abandoned\') THEN now() ELSE NULL END WHERE id=%s',
                             (run['status'], run['node'], run['furthestNode'], serialize_json(run), run['status'], run_id))
                 conn.commit()

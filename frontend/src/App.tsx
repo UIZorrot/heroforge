@@ -34,7 +34,7 @@ import {
   washCardEnchant,
 } from './lib/api';
 import { normalizeCharacterData, type CharacterData, type Rarity } from './lib/gameLogic';
-import { createMockEconomy, createMockHeroes, mockEconomy, mockHeroes, mockRelicCatalog } from './lib/mockContent';
+import { createMockEconomy, createMockHeroes, mockEconomy, mockHeroes, mockRelicCatalog, rebalanceMockStarters } from './lib/mockContent';
 import { IS_MOCK_MODE, MOCK_STORAGE_KEYS } from './lib/runtimeMode';
 import type { AuthUser, BattleHistoryRecord, EconomySnapshot, HeroHistoryRecord, LadderSnapshot, SavedHero } from './types';
 
@@ -61,7 +61,7 @@ function readMockSandbox(): MockSandbox | null {
     const baseline = createMockEconomy();
     const storedRelics = new Map(parsed.economy.relics.map((relic) => [relic.relic_type, relic]));
     return {
-      heroes: parsed.heroes,
+      heroes: rebalanceMockStarters(parsed.heroes),
       economy: {
         ...baseline,
         ...parsed.economy,
@@ -1032,7 +1032,7 @@ const App: React.FC = () => {
     }
 
     if (activeSection === 'chronicle') {
-      return <PvePage heroes={savedHeroes} token={session?.token ?? getStoredToken()} demoMode={demoMode} />;
+      return <PvePage heroes={savedHeroes} token={session?.token ?? getStoredToken()} demoMode={demoMode} onRewardClaimed={() => reloadCollections()} />;
     }
 
     return (

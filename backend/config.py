@@ -130,6 +130,9 @@ def get_settings() -> Settings:
         database_url = _normalize_database_url(database_url)
     else:
         database_url = _build_supabase_database_url()
+    forge_cost = max(0, _get_int_env("DUST_COST_FORGE", 100))
+    # A new wallet must fund four successful forges, even with an undersized override.
+    starter_dust = max(0, _get_int_env("STARTER_DUST_BALANCE", 500), 4 * forge_cost)
     return Settings(
         openai_api_key=os.getenv("OPENAI_API_KEY", "").strip(),
         openai_base_url=os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1").strip()
@@ -148,8 +151,8 @@ def get_settings() -> Settings:
         email_from=os.getenv("EMAIL_FROM", "no-reply@txzy.net").strip(),
         app_url=os.getenv("APP_URL", "http://localhost:5173").strip(),
         cors_origins=os.getenv("CORS_ORIGINS", "*").strip(),
-        starter_dust_balance=_get_int_env("STARTER_DUST_BALANCE", 500),
-        dust_cost_forge=_get_int_env("DUST_COST_FORGE", 100),
+        starter_dust_balance=starter_dust,
+        dust_cost_forge=forge_cost,
         dust_cost_repair=_get_int_env("DUST_COST_REPAIR", 60),
         dust_cost_pve_entry=_get_int_env("DUST_COST_PVE_ENTRY", 40),
         dust_cost_pvp_entry=_get_int_env("DUST_COST_PVP_ENTRY", 30),

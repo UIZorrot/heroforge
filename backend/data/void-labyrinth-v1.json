@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "content_version": "void-labyrinth-v1-prototype-1",
-  "status": "playable_prototype",
+  "content_version": "void-labyrinth-v2-climb-1",
+  "status": "playable_climb",
   "recommended_party_size": 4,
   "allowed_party_size": {
     "min": 1,
@@ -31,8 +31,8 @@
       "name": "The Fading Lantern",
       "recommended_team_bp": 1000,
       "honor_bp_band": [
-        900,
-        1100
+        950,
+        1050
       ],
       "ratios": [
         72,
@@ -50,8 +50,8 @@
       "name": "Hall of Reflections",
       "recommended_team_bp": 5000,
       "honor_bp_band": [
-        4500,
-        5500
+        4750,
+        5250
       ],
       "ratios": [
         82,
@@ -69,8 +69,8 @@
       "name": "The Lightless Heart",
       "recommended_team_bp": 10000,
       "honor_bp_band": [
-        9000,
-        11000
+        9500,
+        10500
       ],
       "ratios": [
         92,
@@ -108,7 +108,7 @@
     {
       "id": "N3",
       "name": "Forgotten Tablets",
-      "kind": "battle",
+      "kind": "event",
       "next": [
         "N4"
       ]
@@ -144,7 +144,7 @@
     {
       "id": "N7",
       "name": "Lost Chamber",
-      "kind": "battle",
+      "kind": "shop",
       "next": [
         "N8"
       ]
@@ -1677,5 +1677,6 @@
     "pve_victory_timeout_rules",
     "run_resource_carry_and_camps",
     "durable_run_battle_rng_and_idempotent_rewards"
-  ]
+  ],
+  "entry_bp_tolerance_percent": 5
 }

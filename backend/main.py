@@ -4032,6 +4032,8 @@ def wash_card_enchant(card_id):
 @auth_required
 def list_my_heroes():
     user = current_user()
+    from starter_cards import rebalance_starter_cards
+    rebalance_starter_cards(user['id'])
     rows = fetch_all(
         """
         SELECT id, source_payload, hero_payload, equipped_relic_type, enchantment,

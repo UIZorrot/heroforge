@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { pveBattleResult, type PveRun } from './pveTypes';
+import { pveBattleResult, pveBpEligibility, type PveRun } from './pveTypes';
+import { createMockHeroes, rebalanceMockStarters } from './mockContent';
+import { calculateActualBP } from './gameLogic';
 import { isBattleSupportEvent } from './battleVfxCatalog';
 import type { BattleBoardState, BattleBoardUnit } from './battleTypes';
 
@@ -14,6 +16,32 @@ function fixture() {
 }
 
 describe('campaign presentation', () => {
+  it('accepts one to four heroes only inside the inclusive 5% BP band', () => {
+    expect(pveBpEligibility(950, 1000, 1).eligible).toBe(true);
+    expect(pveBpEligibility(1050, 1000, 1).eligible).toBe(true);
+    expect(pveBpEligibility(1000, 1000, 4).eligible).toBe(true);
+    expect(pveBpEligibility(949, 1000, 1).eligible).toBe(false);
+    expect(pveBpEligibility(1051, 1000, 1).eligible).toBe(false);
+    expect(pveBpEligibility(1000, 1000, 0).eligible).toBe(false);
+    expect(pveBpEligibility(1000, 1000, 5).eligible).toBe(false);
+  });
+  it('rebalances persisted mock starters and preserves forged cards and collection metadata', () => {
+    const heroes = createMockHeroes();
+    expect(heroes).toHaveLength(8);
+    for (const hero of heroes) {
+      expect(hero.character.BP).toBe('1000');
+      expect(calculateActualBP(hero.character.state)).toBe(1000);
+    }
+    const forged = { ...structuredClone(heroes[0]), id: 'my-forged-card' };
+    heroes[0].character.BP = '4300';
+    heroes[0].character.state.ATK = '10000';
+    heroes[0].equippedRelicId = 'my-relic';
+    const repaired = rebalanceMockStarters([...heroes, forged]);
+    expect(repaired[0].character.BP).toBe('1000');
+    expect(calculateActualBP(repaired[0].character.state)).toBe(1000);
+    expect(repaired[0].equippedRelicId).toBe('my-relic');
+    expect(repaired.at(-1)).toBe(forged);
+  });
   it('preserves uploaded portraits at their actual slot and does not mutate saved snapshots', () => {
     const run = fixture();
     const original = JSON.stringify(run);
