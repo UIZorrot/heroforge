@@ -160,3 +160,7 @@ Recommended environment-backed economy defaults:
 - `PVP_MATCH_TOLERANCE_PCT=5`
 - `PVP_LOW_TIER_RELIC_DROP_PCT=3`
 - `PVP_QUEUE_TTL_MINUTES=10`
+
+## Void Labyrinth prototype
+
+The free campaign uses `/api/pve/catalog` and `/api/pve/runs` (not the legacy paid `/api/pve/start` tower stub). It loads fixed 1000/5000/10000-tier encounters and persists complete combat/checkpoint/RNG state in `pve_runs`, with unique first-clear records in `pve_first_clears`. Frontend live mode uses the run action endpoints; no additional model calls or Dust payouts occur. See [prototype scope, routes and verification](../docs/pve-void-labyrinth-prototype.md).

@@ -226,6 +226,16 @@ CREATE TABLE IF NOT EXISTS pve_run_stages (
 
 CREATE INDEX IF NOT EXISTS idx_pve_run_stages_run_id ON pve_run_stages(run_id);
 
+CREATE TABLE IF NOT EXISTS pve_first_clears (
+    user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    theme_key text NOT NULL,
+    tier text NOT NULL,
+    run_id uuid NOT NULL REFERENCES pve_runs(id),
+    content_version text NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (user_id, theme_key, tier)
+);
+
 CREATE TABLE IF NOT EXISTS audit_logs (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id uuid REFERENCES users(id) ON DELETE SET NULL,

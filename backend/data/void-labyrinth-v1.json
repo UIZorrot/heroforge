@@ -1,0 +1,1681 @@
+{
+  "schema_version": 1,
+  "content_version": "void-labyrinth-v1-prototype-1",
+  "status": "playable_prototype",
+  "recommended_party_size": 4,
+  "allowed_party_size": {
+    "min": 1,
+    "max": 4
+  },
+  "battle_mode": "pve_4v6",
+  "enemy_scaling": "fixed_per_tier_not_player_scaled",
+  "npc_rarity": "common",
+  "stat_costs": {
+    "HP": 1,
+    "MP": 1,
+    "ATK": 4,
+    "DEF": 8,
+    "SPEED": 10
+  },
+  "stat_allocation": "floor_budget_share_divided_by_cost_then_cap_DEF_and_return_all_unspent_budget_to_HP",
+  "other_base_stats": {
+    "CC": 0,
+    "CA": 0,
+    "PI": 0,
+    "EV": 0,
+    "AC": 0
+  },
+  "tiers": [
+    {
+      "id": "threshold",
+      "name": "The Fading Lantern",
+      "recommended_team_bp": 1000,
+      "honor_bp_band": [
+        900,
+        1100
+      ],
+      "ratios": [
+        72,
+        78,
+        82,
+        84,
+        88,
+        92,
+        100,
+        105
+      ]
+    },
+    {
+      "id": "reflection",
+      "name": "Hall of Reflections",
+      "recommended_team_bp": 5000,
+      "honor_bp_band": [
+        4500,
+        5500
+      ],
+      "ratios": [
+        82,
+        90,
+        94,
+        96,
+        100,
+        104,
+        112,
+        120
+      ]
+    },
+    {
+      "id": "heart",
+      "name": "The Lightless Heart",
+      "recommended_team_bp": 10000,
+      "honor_bp_band": [
+        9000,
+        11000
+      ],
+      "ratios": [
+        92,
+        100,
+        104,
+        108,
+        112,
+        116,
+        122,
+        130
+      ]
+    }
+  ],
+  "nodes": [
+    {
+      "id": "N1",
+      "name": "Gate of Lost Names",
+      "kind": "battle",
+      "next": [
+        "N2"
+      ]
+    },
+    {
+      "id": "N2",
+      "name": "Mirror Fork",
+      "kind": "battle",
+      "variants": [
+        "A",
+        "B"
+      ],
+      "next": [
+        "N3"
+      ]
+    },
+    {
+      "id": "N3",
+      "name": "Forgotten Tablets",
+      "kind": "battle",
+      "next": [
+        "N4"
+      ]
+    },
+    {
+      "id": "N4",
+      "name": "Lantern Rest",
+      "kind": "camp",
+      "next": [
+        "N5"
+      ]
+    },
+    {
+      "id": "N5",
+      "name": "Twin Archive",
+      "kind": "battle",
+      "next": [
+        "N6"
+      ]
+    },
+    {
+      "id": "N6",
+      "name": "Broken Causeway",
+      "kind": "battle",
+      "variants": [
+        "A",
+        "B"
+      ],
+      "next": [
+        "N7"
+      ]
+    },
+    {
+      "id": "N7",
+      "name": "Lost Chamber",
+      "kind": "battle",
+      "next": [
+        "N8"
+      ]
+    },
+    {
+      "id": "N8",
+      "name": "Oathbound Gate",
+      "kind": "elite",
+      "next": [
+        "N9"
+      ]
+    },
+    {
+      "id": "N9",
+      "name": "Silent Refuge",
+      "kind": "camp",
+      "next": [
+        "N10"
+      ]
+    },
+    {
+      "id": "N10",
+      "name": "Rift Core",
+      "kind": "boss",
+      "next": []
+    }
+  ],
+  "archetypes": {
+    "sentinel": {
+      "name": "Basalt Maw",
+      "type": "Melee",
+      "controller": "sentinel_cycle",
+      "budget_shares": {
+        "HP": 56,
+        "MP": 6,
+        "ATK": 18,
+        "DEF": 12,
+        "SPEED": 8
+      },
+      "def_cap": 24,
+      "role": "Frontline guardian",
+      "lore": "A forgotten gate learned to hunger. Gold seals bind the stone around its enormous mouth.",
+      "tactic": "Its carapace raises DEF by 3 for two rounds. Remove it to expose the creature behind it."
+    },
+    "leech": {
+      "name": "Mnemonic Leech",
+      "type": "Ranged",
+      "controller": "leech_cycle",
+      "budget_shares": {
+        "HP": 40,
+        "MP": 12,
+        "ATK": 24,
+        "DEF": 8,
+        "SPEED": 16
+      },
+      "def_cap": 18,
+      "role": "Poison parasite",
+      "lore": "Names drift inside its translucent body. Every new segment contains a memory stolen from a traveller.",
+      "tactic": "Its bite applies poison for two rounds. Manage damage over time before the next encounter."
+    },
+    "archer": {
+      "name": "Mirror Stalker",
+      "type": "Ranged",
+      "controller": "archer_cycle",
+      "budget_shares": {
+        "HP": 34,
+        "MP": 10,
+        "ATK": 28,
+        "DEF": 6,
+        "SPEED": 22
+      },
+      "def_cap": 16,
+      "role": "Ranged hunter",
+      "lore": "A six-limbed predator of smoked glass. Its own ribs bend into a bow, strung with stolen light.",
+      "tactic": "Its charged shot deals 1.2× ATK and prioritizes the highest-ATK legal target."
+    },
+    "scribe": {
+      "name": "Palimpsest Oracle",
+      "type": "Ranged",
+      "controller": "scribe_cycle",
+      "budget_shares": {
+        "HP": 38,
+        "MP": 20,
+        "ATK": 14,
+        "DEF": 8,
+        "SPEED": 20
+      },
+      "def_cap": 18,
+      "role": "Healer",
+      "lore": "A moth of vellum and bone folds the names of the dead into an endless, broken book.",
+      "tactic": "Heals its living ally with the lowest HP ratio. It cannot resurrect; eliminate it before attrition wins."
+    },
+    "weaver": {
+      "name": "Whisper Brood",
+      "type": "Ranged",
+      "controller": "weaver_cycle",
+      "budget_shares": {
+        "HP": 34,
+        "MP": 20,
+        "ATK": 16,
+        "DEF": 6,
+        "SPEED": 24
+      },
+      "def_cap": 16,
+      "role": "Curse caster",
+      "lore": "Blank stone faces hang from its silk. Behind them, a ring of eyes watches names unravel.",
+      "tactic": "Its curse reduces a target's ATK for two rounds. Watch the intent display and focus it down."
+    },
+    "harrier": {
+      "name": "Rift Hound",
+      "type": "Melee",
+      "controller": "harrier_cycle",
+      "budget_shares": {
+        "HP": 32,
+        "MP": 8,
+        "ATK": 30,
+        "DEF": 6,
+        "SPEED": 24
+      },
+      "def_cap": 16,
+      "role": "Executioner",
+      "lore": "A lean, eyeless hound prowls between broken corridors. Its split jaw opens directly into the void.",
+      "tactic": "Its lunge deals 1.2× ATK and prioritizes the legal target with the lowest HP ratio."
+    },
+    "warden": {
+      "name": "Oathbound Colossus",
+      "type": "Melee",
+      "controller": "warden_cycle",
+      "budget_shares": {
+        "HP": 52,
+        "MP": 8,
+        "ATK": 24,
+        "DEF": 10,
+        "SPEED": 6
+      },
+      "def_cap": 28,
+      "role": "Elite gatekeeper",
+      "lore": "The last oath of the temple survives inside a stone beast. A chained cathedral door seals its chest.",
+      "tactic": "Charges, releases, then recovers. Stun during the charge; its tier-specific targets and damage are visible."
+    },
+    "boss": {
+      "name": "Nameless Weaver",
+      "type": "Ranged",
+      "controller": "boss_ritual_cycle",
+      "budget_shares": {
+        "HP": 58,
+        "MP": 10,
+        "ATK": 24,
+        "DEF": 6,
+        "SPEED": 2
+      },
+      "def_cap": 22,
+      "role": "Labyrinth sovereign",
+      "lore": "An immense crown floats around a hollow face. Beneath it, tendrils slowly unpick the names that hold the world together.",
+      "tactic": "Stun its wind-up or destroy its anchors. Marked targets stay locked; the ritual spends MP once, then enters recovery."
+    },
+    "anchor": {
+      "name": "Void Anchor",
+      "type": "Ranged",
+      "controller": "inert_no_recovery",
+      "budget_shares": {
+        "HP": 85,
+        "MP": 0,
+        "ATK": 0,
+        "DEF": 15,
+        "SPEED": 0
+      },
+      "def_cap": 20,
+      "role": "Ritual mechanism",
+      "lore": "Black stone ribs surround an absence. Broken gold rings keep the missing piece of the world in place.",
+      "tactic": "Never attacks or regenerates by waiting. Destroy anchors to change the Boss ritual's displayed range and effects."
+    }
+  },
+  "encounters": [
+    {
+      "id": "void_v1_threshold_N1_default",
+      "tier": "threshold",
+      "node": "N1",
+      "variant": "default",
+      "enemy_budget_percent": 72,
+      "enemy_total_bp": 720,
+      "enemies": [
+        {
+          "tag": "N1_default_0",
+          "role": "sentinel",
+          "slot": 0,
+          "budget_weight": 15,
+          "bp": 400
+        },
+        {
+          "tag": "N1_default_2",
+          "role": "harrier",
+          "slot": 2,
+          "budget_weight": 12,
+          "bp": 320
+        }
+      ],
+      "win_condition": "all_enemies_defeated",
+      "round_limit": 30,
+      "timeout_result": "not_cleared"
+    },
+    {
+      "id": "void_v1_threshold_N2_A",
+      "tier": "threshold",
+      "node": "N2",
+      "variant": "A",
+      "enemy_budget_percent": 78,
+      "enemy_total_bp": 780,
+      "enemies": [
+        {
+          "tag": "N2_A_0",
+          "role": "sentinel",
+          "slot": 0,
+          "budget_weight": 15,
+          "bp": 272
+        },
+        {
+          "tag": "N2_A_2",
+          "role": "sentinel",
+          "slot": 2,
+          "budget_weight": 15,
+          "bp": 272
+        },
+        {
+          "tag": "N2_A_3",
+          "role": "archer",
+          "slot": 3,
+          "budget_weight": 13,
+          "bp": 236
+        }
+      ],
+      "win_condition": "all_enemies_defeated",
+      "round_limit": 30,
+      "timeout_result": "not_cleared"
+    },
+    {
+      "id": "void_v1_threshold_N2_B",
+      "tier": "threshold",
+      "node": "N2",
+      "variant": "B",
+      "enemy_budget_percent": 78,
+      "enemy_total_bp": 780,
+      "enemies": [
+        {
+          "tag": "N2_B_0",
+          "role": "harrier",
+          "slot": 0,
+          "budget_weight": 12,
+          "bp": 260
+        },
+        {
+          "tag": "N2_B_1",
+          "role": "harrier",
+          "slot": 1,
+          "budget_weight": 12,
+          "bp": 260
+        },
+        {
+          "tag": "N2_B_2",
+          "role": "harrier",
+          "slot": 2,
+          "budget_weight": 12,
+          "bp": 260
+        }
+      ],
+      "win_condition": "all_enemies_defeated",
+      "round_limit": 30,
+      "timeout_result": "not_cleared"
+    },
+    {
+      "id": "void_v1_threshold_N3_default",
+      "tier": "threshold",
+      "node": "N3",
+      "variant": "default",
+      "enemy_budget_percent": 82,
+      "enemy_total_bp": 820,
+      "enemies": [
+        {
+          "tag": "N3_default_1",
+          "role": "sentinel",
+          "slot": 1,
+          "budget_weight": 15,
+          "bp": 308
+        },
+        {
+          "tag": "N3_default_3",
+          "role": "leech",
+          "slot": 3,
+          "budget_weight": 13,
+          "bp": 266
+        },
+        {
+          "tag": "N3_default_5",
+          "role": "weaver",
+          "slot": 5,
+          "budget_weight": 12,
+          "bp": 246
+        }
+      ],
+      "win_condition": "all_enemies_defeated",
+      "round_limit": 30,
+      "timeout_result": "not_cleared"
+    },
+    {
+      "id": "void_v1_threshold_N5_default",
+      "tier": "threshold",
+      "node": "N5",
+      "variant": "default",
+      "enemy_budget_percent": 84,
+      "enemy_total_bp": 840,
+      "enemies": [
+        {
+          "tag": "N5_default_0",
+          "role": "sentinel",
+          "slot": 0,
+          "budget_weight": 15,
+          "bp": 315
+        },
+        {
+          "tag": "N5_default_3",
+          "role": "scribe",
+          "slot": 3,
+          "budget_weight": 12,
+          "bp": 252
+        },
+        {
+          "tag": "N5_default_5",
+          "role": "archer",
+          "slot": 5,
+          "budget_weight": 13,
+          "bp": 273
+        }
+      ],
+      "win_condition": "all_enemies_defeated",
+      "round_limit": 30,
+      "timeout_result": "not_cleared"
+    },
+    {
+      "id": "void_v1_threshold_N6_A",
+      "tier": "threshold",
+      "node": "N6",
+      "variant": "A",
+      "enemy_budget_percent": 88,
+      "enemy_total_bp": 880,
+      "enemies": [
+        {
+          "tag": "N6_A_1",
+          "role": "sentinel",
+          "slot": 1,
+          "budget_weight": 15,
+          "bp": 330
+        },
+        {
+          "tag": "N6_A_3",
+          "role": "weaver",
+          "slot": 3,
+          "budget_weight": 12,
+          "bp": 264
+        },
+        {
+          "tag": "N6_A_5",
+          "role": "leech",
+          "slot": 5,
+          "budget_weight": 13,
+          "bp": 286
+        }
+      ],
+      "win_condition": "all_enemies_defeated",
+      "round_limit": 30,
+      "timeout_result": "not_cleared"
+    },
+    {
+      "id": "void_v1_threshold_N6_B",
+      "tier": "threshold",
+      "node": "N6",
+      "variant": "B",
+      "enemy_budget_percent": 88,
+      "enemy_total_bp": 880,
+      "enemies": [
+        {
+          "tag": "N6_B_0",
+          "role": "harrier",
+          "slot": 0,
+          "budget_weight": 12,
+          "bp": 294
+        },
+        {
+          "tag": "N6_B_1",
+          "role": "harrier",
+          "slot": 1,
+          "budget_weight": 12,
+          "bp": 293
+        },
+        {
+          "tag": "N6_B_2",
+          "role": "harrier",
+          "slot": 2,
+          "budget_weight": 12,
+          "bp": 293
+        }
+      ],
+      "win_condition": "all_enemies_defeated",
+      "round_limit": 30,
+      "timeout_result": "not_cleared"
+    },
+    {
+      "id": "void_v1_threshold_N7_default",
+      "tier": "threshold",
+      "node": "N7",
+      "variant": "default",
+      "enemy_budget_percent": 92,
+      "enemy_total_bp": 920,
+      "enemies": [
+        {
+          "tag": "N7_default_1",
+          "role": "sentinel",
+          "slot": 1,
+          "budget_weight": 15,
+          "bp": 336
+        },
+        {
+          "tag": "N7_default_3",
+          "role": "leech",
+          "slot": 3,
+          "budget_weight": 13,
+          "bp": 292
+        },
+        {
+          "tag": "N7_default_5",
+          "role": "archer",
+          "slot": 5,
+          "budget_weight": 13,
+          "bp": 292
+        }
+      ],
+      "win_condition": "all_enemies_defeated",
+      "round_limit": 30,
+      "timeout_result": "not_cleared"
+    },
+    {
+      "id": "void_v1_threshold_N8_default",
+      "tier": "threshold",
+      "node": "N8",
+      "variant": "default",
+      "enemy_budget_percent": 100,
+      "enemy_total_bp": 1000,
+      "enemies": [
+        {
+          "tag": "N8_default_1",
+          "role": "warden",
+          "slot": 1,
+          "budget_weight": 33,
+          "bp": 733
+        },
+        {
+          "tag": "N8_default_4",
+          "role": "scribe",
+          "slot": 4,
+          "budget_weight": 12,
+          "bp": 267
+        }
+      ],
+      "win_condition": "all_enemies_defeated",
+      "round_limit": 30,
+      "timeout_result": "not_cleared"
+    },
+    {
+      "id": "void_v1_threshold_N10_default",
+      "tier": "threshold",
+      "node": "N10",
+      "variant": "default",
+      "enemy_budget_percent": 105,
+      "enemy_total_bp": 1050,
+      "enemies": [
+        {
+          "tag": "N10_default_1",
+          "role": "boss",
+          "slot": 1,
+          "budget_weight": 75,
+          "bp": 788
+        },
+        {
+          "tag": "N10_default_3",
+          "role": "anchor",
+          "slot": 3,
+          "budget_weight": 25,
+          "bp": 262
+        }
+      ],
+      "win_condition": "all_enemies_defeated",
+      "round_limit": 30,
+      "timeout_result": "not_cleared",
+      "boss": {
+        "cycle": [
+          "basic_attack",
+          "windup",
+          "release",
+          "recovery"
+        ],
+        "base_target_count": 1,
+        "damage_multiplier": 1.4,
+        "left_anchor": "damage_bonus",
+        "right_anchor": null,
+        "mark_policy": "lock_live_targets_at_windup_no_replacements",
+        "stun_policy": "cancel_pending_release_then_recovery",
+        "curse_atk_fraction": 0,
+        "curse_duration_rounds": 0,
+        "anchors_collapse_on_boss_death": true
+      }
+    },
+    {
+      "id": "void_v1_reflection_N1_default",
+      "tier": "reflection",
+      "node": "N1",
+      "variant": "default",
+      "enemy_budget_percent": 82,
+      "enemy_total_bp": 4100,
+      "enemies": [
+        {
+          "tag": "N1_default_0",
+          "role": "sentinel",
+          "slot": 0,
+          "budget_weight": 15,
+          "bp": 1118
+        },
+        {
+          "tag": "N1_default_2",
+          "role": "sentinel",
+          "slot": 2,
+          "budget_weight": 15,
+          "bp": 1118
+        },
+        {
+          "tag": "N1_default_1",
+          "role": "harrier",
+          "slot": 1,
+          "budget_weight": 12,
+          "bp": 895
+        },
+        {
+          "tag": "N1_default_3",
+          "role": "archer",
+          "slot": 3,
+          "budget_weight": 13,
+          "bp": 969
+        }
+      ],
+      "win_condition": "all_enemies_defeated",
+      "round_limit": 30,
+      "timeout_result": "not_cleared"
+    },
+    {
+      "id": "void_v1_reflection_N2_A",
+      "tier": "reflection",
+      "node": "N2",
+      "variant": "A",
+      "enemy_budget_percent": 90,
+      "enemy_total_bp": 4500,
+      "enemies": [
+        {
+          "tag": "N2_A_0",
+          "role": "sentinel",
+          "slot": 0,
+          "budget_weight": 15,
+          "bp": 1205
+        },
+        {
+          "tag": "N2_A_2",
+          "role": "sentinel",
+          "slot": 2,
+          "budget_weight": 15,
+          "bp": 1205
+        },
+        {
+          "tag": "N2_A_3",
+          "role": "archer",
+          "slot": 3,
+          "budget_weight": 13,
+          "bp": 1045
+        },
+        {
+          "tag": "N2_A_5",
+          "role": "archer",
+          "slot": 5,
+          "budget_weight": 13,
+          "bp": 1045
+        }
+      ],
+      "win_condition": "all_enemies_defeated",
+      "round_limit": 30,
+      "timeout_result": "not_cleared"
+    },
+    {
+      "id": "void_v1_reflection_N2_B",
+      "tier": "reflection",
+      "node": "N2",
+      "variant": "B",
+      "enemy_budget_percent": 90,
+      "enemy_total_bp": 4500,
+      "enemies": [
+        {
+          "tag": "N2_B_0",
+          "role": "harrier",
+          "slot": 0,
+          "budget_weight": 12,
+          "bp": 871
+        },
+        {
+          "tag": "N2_B_1",
+          "role": "harrier",
+          "slot": 1,
+          "budget_weight": 12,
+          "bp": 871
+        },
+        {
+          "tag": "N2_B_2",
+          "role": "harrier",
+          "slot": 2,
+          "budget_weight": 12,
+          "bp": 871
+        },
+        {
+          "tag": "N2_B_3",
+          "role": "leech",
+          "slot": 3,
+          "budget_weight": 13,
+          "bp": 944
+        },
+        {
+          "tag": "N2_B_5",
+          "role": "archer",
+          "slot": 5,
+          "budget_weight": 13,
+          "bp": 943
+        }
+      ],
+      "win_condition": "all_enemies_defeated",
+      "round_limit": 30,
+      "timeout_result": "not_cleared"
+    },
+    {
+      "id": "void_v1_reflection_N3_default",
+      "tier": "reflection",
+      "node": "N3",
+      "variant": "default",
+      "enemy_budget_percent": 94,
+      "enemy_total_bp": 4700,
+      "enemies": [
+        {
+          "tag": "N3_default_1",
+          "role": "sentinel",
+          "slot": 1,
+          "budget_weight": 15,
+          "bp": 1330
+        },
+        {
+          "tag": "N3_default_3",
+          "role": "leech",
+          "slot": 3,
+          "budget_weight": 13,
+          "bp": 1153
+        },
+        {
+          "tag": "N3_default_4",
+          "role": "leech",
+          "slot": 4,
+          "budget_weight": 13,
+          "bp": 1153
+        },
+        {
+          "tag": "N3_default_5",
+          "role": "weaver",
+          "slot": 5,
+          "budget_weight": 12,
+          "bp": 1064
+        }
+      ],
+      "win_condition": "all_enemies_defeated",
+      "round_limit": 30,
+      "timeout_result": "not_cleared"
+    },
+    {
+      "id": "void_v1_reflection_N5_default",
+      "tier": "reflection",
+      "node": "N5",
+      "variant": "default",
+      "enemy_budget_percent": 96,
+      "enemy_total_bp": 4800,
+      "enemies": [
+        {
+          "tag": "N5_default_0",
+          "role": "sentinel",
+          "slot": 0,
+          "budget_weight": 15,
+          "bp": 1075
+        },
+        {
+          "tag": "N5_default_2",
+          "role": "sentinel",
+          "slot": 2,
+          "budget_weight": 15,
+          "bp": 1074
+        },
+        {
+          "tag": "N5_default_1",
+          "role": "harrier",
+          "slot": 1,
+          "budget_weight": 12,
+          "bp": 860
+        },
+        {
+          "tag": "N5_default_3",
+          "role": "scribe",
+          "slot": 3,
+          "budget_weight": 12,
+          "bp": 860
+        },
+        {
+          "tag": "N5_default_5",
+          "role": "archer",
+          "slot": 5,
+          "budget_weight": 13,
+          "bp": 931
+        }
+      ],
+      "win_condition": "all_enemies_defeated",
+      "round_limit": 30,
+      "timeout_result": "not_cleared"
+    },
+    {
+      "id": "void_v1_reflection_N6_A",
+      "tier": "reflection",
+      "node": "N6",
+      "variant": "A",
+      "enemy_budget_percent": 100,
+      "enemy_total_bp": 5000,
+      "enemies": [
+        {
+          "tag": "N6_A_1",
+          "role": "sentinel",
+          "slot": 1,
+          "budget_weight": 15,
+          "bp": 1442
+        },
+        {
+          "tag": "N6_A_3",
+          "role": "weaver",
+          "slot": 3,
+          "budget_weight": 12,
+          "bp": 1154
+        },
+        {
+          "tag": "N6_A_5",
+          "role": "weaver",
+          "slot": 5,
+          "budget_weight": 12,
+          "bp": 1154
+        },
+        {
+          "tag": "N6_A_4",
+          "role": "leech",
+          "slot": 4,
+          "budget_weight": 13,
+          "bp": 1250
+        }
+      ],
+      "win_condition": "all_enemies_defeated",
+      "round_limit": 30,
+      "timeout_result": "not_cleared"
+    },
+    {
+      "id": "void_v1_reflection_N6_B",
+      "tier": "reflection",
+      "node": "N6",
+      "variant": "B",
+      "enemy_budget_percent": 100,
+      "enemy_total_bp": 5000,
+      "enemies": [
+        {
+          "tag": "N6_B_0",
+          "role": "harrier",
+          "slot": 0,
+          "budget_weight": 12,
+          "bp": 968
+        },
+        {
+          "tag": "N6_B_1",
+          "role": "harrier",
+          "slot": 1,
+          "budget_weight": 12,
+          "bp": 968
+        },
+        {
+          "tag": "N6_B_2",
+          "role": "harrier",
+          "slot": 2,
+          "budget_weight": 12,
+          "bp": 968
+        },
+        {
+          "tag": "N6_B_3",
+          "role": "archer",
+          "slot": 3,
+          "budget_weight": 13,
+          "bp": 1048
+        },
+        {
+          "tag": "N6_B_5",
+          "role": "leech",
+          "slot": 5,
+          "budget_weight": 13,
+          "bp": 1048
+        }
+      ],
+      "win_condition": "all_enemies_defeated",
+      "round_limit": 30,
+      "timeout_result": "not_cleared"
+    },
+    {
+      "id": "void_v1_reflection_N7_default",
+      "tier": "reflection",
+      "node": "N7",
+      "variant": "default",
+      "enemy_budget_percent": 104,
+      "enemy_total_bp": 5200,
+      "enemies": [
+        {
+          "tag": "N7_default_1",
+          "role": "sentinel",
+          "slot": 1,
+          "budget_weight": 15,
+          "bp": 1200
+        },
+        {
+          "tag": "N7_default_3",
+          "role": "leech",
+          "slot": 3,
+          "budget_weight": 13,
+          "bp": 1040
+        },
+        {
+          "tag": "N7_default_4",
+          "role": "scribe",
+          "slot": 4,
+          "budget_weight": 12,
+          "bp": 960
+        },
+        {
+          "tag": "N7_default_5",
+          "role": "weaver",
+          "slot": 5,
+          "budget_weight": 12,
+          "bp": 960
+        },
+        {
+          "tag": "N7_default_0",
+          "role": "archer",
+          "slot": 0,
+          "budget_weight": 13,
+          "bp": 1040
+        }
+      ],
+      "win_condition": "all_enemies_defeated",
+      "round_limit": 30,
+      "timeout_result": "not_cleared"
+    },
+    {
+      "id": "void_v1_reflection_N8_default",
+      "tier": "reflection",
+      "node": "N8",
+      "variant": "default",
+      "enemy_budget_percent": 112,
+      "enemy_total_bp": 5600,
+      "enemies": [
+        {
+          "tag": "N8_default_1",
+          "role": "warden",
+          "slot": 1,
+          "budget_weight": 33,
+          "bp": 2567
+        },
+        {
+          "tag": "N8_default_2",
+          "role": "sentinel",
+          "slot": 2,
+          "budget_weight": 15,
+          "bp": 1167
+        },
+        {
+          "tag": "N8_default_3",
+          "role": "scribe",
+          "slot": 3,
+          "budget_weight": 12,
+          "bp": 933
+        },
+        {
+          "tag": "N8_default_5",
+          "role": "weaver",
+          "slot": 5,
+          "budget_weight": 12,
+          "bp": 933
+        }
+      ],
+      "win_condition": "all_enemies_defeated",
+      "round_limit": 30,
+      "timeout_result": "not_cleared"
+    },
+    {
+      "id": "void_v1_reflection_N10_default",
+      "tier": "reflection",
+      "node": "N10",
+      "variant": "default",
+      "enemy_budget_percent": 120,
+      "enemy_total_bp": 6000,
+      "enemies": [
+        {
+          "tag": "N10_default_1",
+          "role": "boss",
+          "slot": 1,
+          "budget_weight": 55,
+          "bp": 3300
+        },
+        {
+          "tag": "N10_default_2",
+          "role": "sentinel",
+          "slot": 2,
+          "budget_weight": 25,
+          "bp": 1500
+        },
+        {
+          "tag": "N10_default_3",
+          "role": "anchor",
+          "slot": 3,
+          "budget_weight": 10,
+          "bp": 600
+        },
+        {
+          "tag": "N10_default_5",
+          "role": "anchor",
+          "slot": 5,
+          "budget_weight": 10,
+          "bp": 600
+        }
+      ],
+      "win_condition": "all_enemies_defeated",
+      "round_limit": 30,
+      "timeout_result": "not_cleared",
+      "boss": {
+        "cycle": [
+          "basic_attack",
+          "windup",
+          "release",
+          "recovery"
+        ],
+        "base_target_count": 2,
+        "damage_multiplier": 1.35,
+        "left_anchor": "target_count",
+        "right_anchor": "curse",
+        "mark_policy": "lock_live_targets_at_windup_no_replacements",
+        "stun_policy": "cancel_pending_release_then_recovery",
+        "curse_atk_fraction": 0.1,
+        "curse_duration_rounds": 1,
+        "anchors_collapse_on_boss_death": true
+      }
+    },
+    {
+      "id": "void_v1_heart_N1_default",
+      "tier": "heart",
+      "node": "N1",
+      "variant": "default",
+      "enemy_budget_percent": 92,
+      "enemy_total_bp": 9200,
+      "enemies": [
+        {
+          "tag": "N1_default_0",
+          "role": "sentinel",
+          "slot": 0,
+          "budget_weight": 15,
+          "bp": 2029
+        },
+        {
+          "tag": "N1_default_2",
+          "role": "sentinel",
+          "slot": 2,
+          "budget_weight": 15,
+          "bp": 2029
+        },
+        {
+          "tag": "N1_default_1",
+          "role": "harrier",
+          "slot": 1,
+          "budget_weight": 12,
+          "bp": 1624
+        },
+        {
+          "tag": "N1_default_3",
+          "role": "archer",
+          "slot": 3,
+          "budget_weight": 13,
+          "bp": 1759
+        },
+        {
+          "tag": "N1_default_5",
+          "role": "archer",
+          "slot": 5,
+          "budget_weight": 13,
+          "bp": 1759
+        }
+      ],
+      "win_condition": "all_enemies_defeated",
+      "round_limit": 30,
+      "timeout_result": "not_cleared"
+    },
+    {
+      "id": "void_v1_heart_N2_A",
+      "tier": "heart",
+      "node": "N2",
+      "variant": "A",
+      "enemy_budget_percent": 100,
+      "enemy_total_bp": 10000,
+      "enemies": [
+        {
+          "tag": "N2_A_0",
+          "role": "sentinel",
+          "slot": 0,
+          "budget_weight": 15,
+          "bp": 1807
+        },
+        {
+          "tag": "N2_A_1",
+          "role": "sentinel",
+          "slot": 1,
+          "budget_weight": 15,
+          "bp": 1807
+        },
+        {
+          "tag": "N2_A_2",
+          "role": "sentinel",
+          "slot": 2,
+          "budget_weight": 15,
+          "bp": 1807
+        },
+        {
+          "tag": "N2_A_3",
+          "role": "archer",
+          "slot": 3,
+          "budget_weight": 13,
+          "bp": 1567
+        },
+        {
+          "tag": "N2_A_5",
+          "role": "archer",
+          "slot": 5,
+          "budget_weight": 13,
+          "bp": 1566
+        },
+        {
+          "tag": "N2_A_4",
+          "role": "weaver",
+          "slot": 4,
+          "budget_weight": 12,
+          "bp": 1446
+        }
+      ],
+      "win_condition": "all_enemies_defeated",
+      "round_limit": 30,
+      "timeout_result": "not_cleared"
+    },
+    {
+      "id": "void_v1_heart_N2_B",
+      "tier": "heart",
+      "node": "N2",
+      "variant": "B",
+      "enemy_budget_percent": 100,
+      "enemy_total_bp": 10000,
+      "enemies": [
+        {
+          "tag": "N2_B_0",
+          "role": "harrier",
+          "slot": 0,
+          "budget_weight": 12,
+          "bp": 1600
+        },
+        {
+          "tag": "N2_B_1",
+          "role": "harrier",
+          "slot": 1,
+          "budget_weight": 12,
+          "bp": 1600
+        },
+        {
+          "tag": "N2_B_2",
+          "role": "harrier",
+          "slot": 2,
+          "budget_weight": 12,
+          "bp": 1600
+        },
+        {
+          "tag": "N2_B_3",
+          "role": "leech",
+          "slot": 3,
+          "budget_weight": 13,
+          "bp": 1734
+        },
+        {
+          "tag": "N2_B_4",
+          "role": "leech",
+          "slot": 4,
+          "budget_weight": 13,
+          "bp": 1733
+        },
+        {
+          "tag": "N2_B_5",
+          "role": "archer",
+          "slot": 5,
+          "budget_weight": 13,
+          "bp": 1733
+        }
+      ],
+      "win_condition": "all_enemies_defeated",
+      "round_limit": 30,
+      "timeout_result": "not_cleared"
+    },
+    {
+      "id": "void_v1_heart_N3_default",
+      "tier": "heart",
+      "node": "N3",
+      "variant": "default",
+      "enemy_budget_percent": 104,
+      "enemy_total_bp": 10400,
+      "enemies": [
+        {
+          "tag": "N3_default_0",
+          "role": "sentinel",
+          "slot": 0,
+          "budget_weight": 15,
+          "bp": 1926
+        },
+        {
+          "tag": "N3_default_2",
+          "role": "sentinel",
+          "slot": 2,
+          "budget_weight": 15,
+          "bp": 1926
+        },
+        {
+          "tag": "N3_default_3",
+          "role": "leech",
+          "slot": 3,
+          "budget_weight": 13,
+          "bp": 1669
+        },
+        {
+          "tag": "N3_default_5",
+          "role": "leech",
+          "slot": 5,
+          "budget_weight": 13,
+          "bp": 1669
+        },
+        {
+          "tag": "N3_default_4",
+          "role": "weaver",
+          "slot": 4,
+          "budget_weight": 12,
+          "bp": 1541
+        },
+        {
+          "tag": "N3_default_1",
+          "role": "archer",
+          "slot": 1,
+          "budget_weight": 13,
+          "bp": 1669
+        }
+      ],
+      "win_condition": "all_enemies_defeated",
+      "round_limit": 30,
+      "timeout_result": "not_cleared"
+    },
+    {
+      "id": "void_v1_heart_N5_default",
+      "tier": "heart",
+      "node": "N5",
+      "variant": "default",
+      "enemy_budget_percent": 108,
+      "enemy_total_bp": 10800,
+      "enemies": [
+        {
+          "tag": "N5_default_0",
+          "role": "sentinel",
+          "slot": 0,
+          "budget_weight": 15,
+          "bp": 2051
+        },
+        {
+          "tag": "N5_default_2",
+          "role": "sentinel",
+          "slot": 2,
+          "budget_weight": 15,
+          "bp": 2051
+        },
+        {
+          "tag": "N5_default_1",
+          "role": "harrier",
+          "slot": 1,
+          "budget_weight": 12,
+          "bp": 1641
+        },
+        {
+          "tag": "N5_default_3",
+          "role": "scribe",
+          "slot": 3,
+          "budget_weight": 12,
+          "bp": 1640
+        },
+        {
+          "tag": "N5_default_5",
+          "role": "scribe",
+          "slot": 5,
+          "budget_weight": 12,
+          "bp": 1640
+        },
+        {
+          "tag": "N5_default_4",
+          "role": "archer",
+          "slot": 4,
+          "budget_weight": 13,
+          "bp": 1777
+        }
+      ],
+      "win_condition": "all_enemies_defeated",
+      "round_limit": 30,
+      "timeout_result": "not_cleared"
+    },
+    {
+      "id": "void_v1_heart_N6_A",
+      "tier": "heart",
+      "node": "N6",
+      "variant": "A",
+      "enemy_budget_percent": 112,
+      "enemy_total_bp": 11200,
+      "enemies": [
+        {
+          "tag": "N6_A_0",
+          "role": "sentinel",
+          "slot": 0,
+          "budget_weight": 15,
+          "bp": 2100
+        },
+        {
+          "tag": "N6_A_2",
+          "role": "sentinel",
+          "slot": 2,
+          "budget_weight": 15,
+          "bp": 2100
+        },
+        {
+          "tag": "N6_A_3",
+          "role": "weaver",
+          "slot": 3,
+          "budget_weight": 12,
+          "bp": 1680
+        },
+        {
+          "tag": "N6_A_5",
+          "role": "weaver",
+          "slot": 5,
+          "budget_weight": 12,
+          "bp": 1680
+        },
+        {
+          "tag": "N6_A_4",
+          "role": "leech",
+          "slot": 4,
+          "budget_weight": 13,
+          "bp": 1820
+        },
+        {
+          "tag": "N6_A_1",
+          "role": "archer",
+          "slot": 1,
+          "budget_weight": 13,
+          "bp": 1820
+        }
+      ],
+      "win_condition": "all_enemies_defeated",
+      "round_limit": 30,
+      "timeout_result": "not_cleared"
+    },
+    {
+      "id": "void_v1_heart_N6_B",
+      "tier": "heart",
+      "node": "N6",
+      "variant": "B",
+      "enemy_budget_percent": 112,
+      "enemy_total_bp": 11200,
+      "enemies": [
+        {
+          "tag": "N6_B_0",
+          "role": "harrier",
+          "slot": 0,
+          "budget_weight": 12,
+          "bp": 1792
+        },
+        {
+          "tag": "N6_B_1",
+          "role": "harrier",
+          "slot": 1,
+          "budget_weight": 12,
+          "bp": 1792
+        },
+        {
+          "tag": "N6_B_2",
+          "role": "harrier",
+          "slot": 2,
+          "budget_weight": 12,
+          "bp": 1792
+        },
+        {
+          "tag": "N6_B_3",
+          "role": "archer",
+          "slot": 3,
+          "budget_weight": 13,
+          "bp": 1942
+        },
+        {
+          "tag": "N6_B_5",
+          "role": "archer",
+          "slot": 5,
+          "budget_weight": 13,
+          "bp": 1941
+        },
+        {
+          "tag": "N6_B_4",
+          "role": "leech",
+          "slot": 4,
+          "budget_weight": 13,
+          "bp": 1941
+        }
+      ],
+      "win_condition": "all_enemies_defeated",
+      "round_limit": 30,
+      "timeout_result": "not_cleared"
+    },
+    {
+      "id": "void_v1_heart_N7_default",
+      "tier": "heart",
+      "node": "N7",
+      "variant": "default",
+      "enemy_budget_percent": 116,
+      "enemy_total_bp": 11600,
+      "enemies": [
+        {
+          "tag": "N7_default_0",
+          "role": "sentinel",
+          "slot": 0,
+          "budget_weight": 15,
+          "bp": 2175
+        },
+        {
+          "tag": "N7_default_2",
+          "role": "sentinel",
+          "slot": 2,
+          "budget_weight": 15,
+          "bp": 2175
+        },
+        {
+          "tag": "N7_default_3",
+          "role": "leech",
+          "slot": 3,
+          "budget_weight": 13,
+          "bp": 1885
+        },
+        {
+          "tag": "N7_default_4",
+          "role": "scribe",
+          "slot": 4,
+          "budget_weight": 12,
+          "bp": 1740
+        },
+        {
+          "tag": "N7_default_5",
+          "role": "weaver",
+          "slot": 5,
+          "budget_weight": 12,
+          "bp": 1740
+        },
+        {
+          "tag": "N7_default_1",
+          "role": "archer",
+          "slot": 1,
+          "budget_weight": 13,
+          "bp": 1885
+        }
+      ],
+      "win_condition": "all_enemies_defeated",
+      "round_limit": 30,
+      "timeout_result": "not_cleared"
+    },
+    {
+      "id": "void_v1_heart_N8_default",
+      "tier": "heart",
+      "node": "N8",
+      "variant": "default",
+      "enemy_budget_percent": 122,
+      "enemy_total_bp": 12200,
+      "enemies": [
+        {
+          "tag": "N8_default_1",
+          "role": "warden",
+          "slot": 1,
+          "budget_weight": 33,
+          "bp": 4026
+        },
+        {
+          "tag": "N8_default_0",
+          "role": "sentinel",
+          "slot": 0,
+          "budget_weight": 15,
+          "bp": 1830
+        },
+        {
+          "tag": "N8_default_2",
+          "role": "sentinel",
+          "slot": 2,
+          "budget_weight": 15,
+          "bp": 1830
+        },
+        {
+          "tag": "N8_default_3",
+          "role": "scribe",
+          "slot": 3,
+          "budget_weight": 12,
+          "bp": 1464
+        },
+        {
+          "tag": "N8_default_4",
+          "role": "weaver",
+          "slot": 4,
+          "budget_weight": 12,
+          "bp": 1464
+        },
+        {
+          "tag": "N8_default_5",
+          "role": "archer",
+          "slot": 5,
+          "budget_weight": 13,
+          "bp": 1586
+        }
+      ],
+      "win_condition": "all_enemies_defeated",
+      "round_limit": 30,
+      "timeout_result": "not_cleared"
+    },
+    {
+      "id": "void_v1_heart_N10_default",
+      "tier": "heart",
+      "node": "N10",
+      "variant": "default",
+      "enemy_budget_percent": 130,
+      "enemy_total_bp": 13000,
+      "enemies": [
+        {
+          "tag": "N10_default_1",
+          "role": "boss",
+          "slot": 1,
+          "budget_weight": 45,
+          "bp": 5850
+        },
+        {
+          "tag": "N10_default_0",
+          "role": "sentinel",
+          "slot": 0,
+          "budget_weight": 16,
+          "bp": 2080
+        },
+        {
+          "tag": "N10_default_2",
+          "role": "sentinel",
+          "slot": 2,
+          "budget_weight": 16,
+          "bp": 2080
+        },
+        {
+          "tag": "N10_default_3",
+          "role": "anchor",
+          "slot": 3,
+          "budget_weight": 8,
+          "bp": 1040
+        },
+        {
+          "tag": "N10_default_5",
+          "role": "anchor",
+          "slot": 5,
+          "budget_weight": 8,
+          "bp": 1040
+        },
+        {
+          "tag": "N10_default_4",
+          "role": "scribe",
+          "slot": 4,
+          "budget_weight": 7,
+          "bp": 910
+        }
+      ],
+      "win_condition": "all_enemies_defeated",
+      "round_limit": 30,
+      "timeout_result": "not_cleared",
+      "boss": {
+        "cycle": [
+          "basic_attack",
+          "windup",
+          "release",
+          "recovery"
+        ],
+        "base_target_count": 4,
+        "damage_multiplier": 1.2,
+        "left_anchor": "target_count",
+        "right_anchor": "curse",
+        "mark_policy": "lock_live_targets_at_windup_no_replacements",
+        "stun_policy": "cancel_pending_release_then_recovery",
+        "curse_atk_fraction": 0.1,
+        "curse_duration_rounds": 1,
+        "anchors_collapse_on_boss_death": true
+      }
+    }
+  ],
+  "runtime_dependencies": [
+    "column_front_back_targeting",
+    "scripted_npc_intents",
+    "pve_victory_timeout_rules",
+    "run_resource_carry_and_camps",
+    "durable_run_battle_rng_and_idempotent_rewards"
+  ]
+}

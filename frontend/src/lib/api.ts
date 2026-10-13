@@ -554,3 +554,33 @@ export function stableHeroKey(hero: CharacterData) {
 export function sanitizeJsonValue(value: JsonValue): JsonValue {
   return value;
 }
+
+
+export async function fetchPveCatalog(token?: string | null) {
+  const response = await requestJson<{ data: import('./pveTypes').PveCatalog }>('/api/pve/catalog', {}, token);
+  return response.data;
+}
+
+export async function fetchActivePveRun(token?: string | null) {
+  const response = await requestJson<{ data: import('./pveTypes').PveRun | null }>('/api/pve/runs/active', {}, token);
+  return response.data;
+}
+
+export async function fetchPveRun(id: string, token?: string | null) {
+  const response = await requestJson<{ data: import('./pveTypes').PveRun }>(`/api/pve/runs/${encodeURIComponent(id)}`, {}, token);
+  return response.data;
+}
+
+export async function createPveRun(tier: import('./pveTypes').PveTier, heroIds: string[], slots: number[], token?: string | null) {
+  const response = await requestJson<{ data: import('./pveTypes').PveRun }>('/api/pve/runs', {
+    method: 'POST', body: JSON.stringify({ tier, heroIds, slots, requestId: crypto.randomUUID() }),
+  }, token);
+  return response.data;
+}
+
+export async function mutatePveRun(run: import('./pveTypes').PveRun, operation: import('./pveTypes').PveOperation, input: import('./pveTypes').PveInput = {}, token?: string | null) {
+  const response = await requestJson<{ data: import('./pveTypes').PveRun }>(`/api/pve/runs/${encodeURIComponent(run.id)}/${operation}`, {
+    method: 'POST', body: JSON.stringify({ ...input, revision: run.revision, requestId: crypto.randomUUID() }),
+  }, token);
+  return response.data;
+}

@@ -59,12 +59,12 @@ The formal PvP mode.
 
 ### PvE
 
-First campaign design: [Void Labyrinth](pve-void-labyrinth-v1.md), currently planned, not playable as a campaign.
+First campaign design: [Void Labyrinth](pve-void-labyrinth-v1.md), with a [playable campaign prototype](pve-void-labyrinth-prototype.md); authored art, calibrated difficulty and economy rewards remain pending.
 
 - Three fixed challenges for deployed team BP totals of 1000, 5000 and 10000; shared theme, different enemy compositions and boss mechanics. Enemy budgets do not rescale with the entering team.
 - Ten visited nodes: six normal encounters, two camps, one elite and one boss; two branch choices reconnect. Draft data defines 30 encounters across the three tiers.
-- Phase one proposes free entry/retries, carried HP/MP, durable checkpoints and finite first-clear rewards. Dust entry fees are deferred; no ranked stakes or permanent card death.
-- Existing pve_4v6 battle/session support handles up to four players and six enemies. Campaign progression, NPC scripts, intent UI, persistence and rewards still require implementation.
+- The prototype has free entry/retries, carried HP/MP, durable checkpoints and unique first-clear records. Dust entry fees and uncalibrated reward payouts are deferred; no ranked stakes or permanent card death.
+- The campaign supports up to four players and six enemies, fixed NPC scripts, intent UI, camps and PostgreSQL persistence. Mock mode only previews formation; actual combat requires the live service. Formal art, offline/automatic player control and reward cosmetics remain pending.
 
 ## Economy
 

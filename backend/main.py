@@ -2481,6 +2481,10 @@ def advance_battle_session_route(session_id):
         return jsonify({"error": str(e)}), 500
 
 
+from pve_api import register_pve_routes
+register_pve_routes(app, auth_required, current_user)
+
+
 @app.route("/api/pve/start", methods=["POST"])
 @auth_required
 def pve_start():
@@ -2490,6 +2494,9 @@ def pve_start():
         data = request.json or {}
         theme_key = (data.get("themeKey") or data.get("theme_key") or "tower").strip()
         hero_ids = data.get("heroIds") or data.get("hero_ids") or []
+
+        if theme_key == 'void_labyrinth':
+            return jsonify({'error': 'Void Labyrinth uses the free /api/pve/runs endpoint.'}), 400
 
         if not theme_key:
             return jsonify({"error": "themeKey is required"}), 400

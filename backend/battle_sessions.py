@@ -312,7 +312,7 @@ class BattleSession:
             return
 
         turn_order = [unit for unit in self.team_a_units + self.team_b_units if unit and unit.hp > 0]
-        random.shuffle(turn_order)
+        battle_logic.battle_random().shuffle(turn_order)
         turn_order.sort(key=lambda unit: unit.spd, reverse=True)
         self.turn_order = turn_order
         self.turn_index = 0
@@ -426,7 +426,7 @@ class BattleSession:
         own_team = self.team_a_units if actor.tag.startswith("A") else self.team_b_units
         enemy_team = self.team_b_units if actor.tag.startswith("A") else self.team_a_units
         targets = (self._manual_targets(actor, chosen_skill) if self.control_mode == "manual"
-                   else battle_logic._ordered_board_targets(actor, own_team, enemy_team, chosen_skill))
+                   else self._target_candidates(actor, chosen_skill, own_team, enemy_team))
 
         target = None
         target_tag = normalized.get("targetTag")
@@ -525,7 +525,7 @@ class BattleSession:
             skills = actor.character.get("skill", {})
             if isinstance(skills, dict):
                 chosen_skill = skills.get(action.skill_slot)
-        legal_targets = battle_logic._ordered_board_targets(actor, own_team, enemy_team, chosen_skill)
+        legal_targets = self._target_candidates(actor, chosen_skill, own_team, enemy_team)
         legal_target_tags = {unit.tag for unit in legal_targets}
         target_tag = action.target_tag if action.target_tag in legal_target_tags else None
         payload: Dict[str, Any] = {"kind": action.kind, "actorTag": actor.tag}
@@ -546,12 +546,15 @@ class BattleSession:
         if self.status != "resolved":
             raise BattleSessionError("program battle did not resolve within the step limit")
 
+    def _target_candidates(self, actor, skill, own, enemies):
+        return battle_logic._ordered_board_targets(actor, own, enemies, skill)
+
     def _manual_targets(self, actor, skill):
         own = self.team_a_units if actor.tag.startswith("A") else self.team_b_units
         enemies = self.team_b_units if actor.tag.startswith("A") else self.team_a_units
         # TARGET_NUM limits affected units, not the player's choice of primary target.
         candidate_skill = dict(skill or {}) | {"TARGET_NUM": len(own) + len(enemies)}
-        return battle_logic._ordered_board_targets(actor, own, enemies, candidate_skill)
+        return self._target_candidates(actor, candidate_skill, own, enemies)
 
     def _human_actor(self, actor):
         return actor.tag[0] in self.participant_ids if self.participant_ids else actor.tag.startswith("A")

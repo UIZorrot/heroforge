@@ -20,7 +20,7 @@ export interface BattleEvent {
   defender: string;
   attackerSlot?: number | null;
   defenderSlot?: number | null;
-  actionType: 'attack' | 'skill' | 'stunned' | 'dot_damage' | 'heal';
+  actionType: 'attack' | 'skill' | 'stunned' | 'dot_damage' | 'heal' | 'ritual' | 'mechanism';
   skillName?: string;
   attackType?: string | null;
   buffName?: string | null;

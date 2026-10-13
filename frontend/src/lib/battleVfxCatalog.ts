@@ -376,6 +376,7 @@ export function isBattleSupportEvent(event: BattleVfxEventInput = {}) {
   const damage = Number(event.damage ?? 0);
 
   return (
+    event.actionType === 'ritual' || event.actionType === 'mechanism' ||
     event.actionType === 'heal' ||
     (heal > 0 && damage <= 0) ||
     SUPPORT_SKILL_ROLES.has(role) ||

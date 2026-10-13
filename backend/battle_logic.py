@@ -1,4 +1,6 @@
 import random
+from contextvars import ContextVar
+from contextlib import contextmanager
 import time
 from dataclasses import dataclass
 from typing import Any, Dict, List, Literal, Protocol
@@ -107,6 +109,22 @@ def _state_snapshot(unit: "Battler") -> Dict[str, Any]:
         "type_catalog": visual["type_catalog"],
         "type_effect": visual["type_effect"],
     }
+
+
+_BATTLE_RANDOM = ContextVar("battle_random", default=random)
+
+
+def battle_random():
+    return _BATTLE_RANDOM.get()
+
+
+@contextmanager
+def use_battle_random(generator):
+    token = _BATTLE_RANDOM.set(generator)
+    try:
+        yield
+    finally:
+        _BATTLE_RANDOM.reset(token)
 
 
 class Battler:
@@ -492,7 +510,7 @@ class ProgramBattleController:
         elif support_skills:
             skill_bias = 0.9
 
-        if random.random() > skill_bias:
+        if battle_random().random() > skill_bias:
             return BattleAction(kind="attack", target_tag=self._pick_target_tag(observation, {"TARGET": "Enemy", "RANGE": "enemy"}))
 
         chosen_slot, chosen_skill, _ = max(
@@ -507,8 +525,8 @@ class ProgramBattleController:
             ),
         )
 
-        if random.random() > 0.75 and len(available_skills) > 1:
-            chosen_slot = random.choice([slot for slot, _, _, _ in available_skills])
+        if battle_random().random() > 0.75 and len(available_skills) > 1:
+            chosen_slot = battle_random().choice([slot for slot, _, _, _ in available_skills])
             chosen_skill = skills.get(chosen_slot) or chosen_skill
 
         target_tag = next((target for slot, skill, _, target in available_skills if slot == chosen_slot), None)
@@ -646,11 +664,11 @@ def _resolve_skill_hit(actor: Battler, target: Battler, skill, round_num, push_e
     is_crit, damage = False, 0
     if not _is_support_skill(skill):
         hit_chance = max(0.2, min(1.5, 1 + (actor.ac - target.ev) / 100.0))
-        if random.random() > hit_chance:
+        if battle_random().random() > hit_chance:
             push_event(round_num, actor.tag, "skill" if skill else "attack", 0, False, True, False,
                        skill.get("name") if skill else None, mp_cost, **event_args)
             return
-        is_crit = random.random() < actor.cc / 100.0
+        is_crit = battle_random().random() < actor.cc / 100.0
         mitigation = min(0.8, max(0.0, (target.def_val - actor.pi * 0.5) / 100.0))
         damage = max(1, int((actor.atk + skill_damage) * (1 + actor.ca / 100.0 if is_crit else 1) * (1 - mitigation)))
         target.hp = max(0, target.hp - damage)
@@ -909,7 +927,7 @@ def _run_board_duel(
             break
 
         turn_order = [unit for unit in team_a_units + team_b_units if unit and unit.hp > 0]
-        random.shuffle(turn_order)
+        battle_random().shuffle(turn_order)
         turn_order.sort(key=lambda unit: unit.spd, reverse=True)
 
         for actor in turn_order:
@@ -1146,7 +1164,7 @@ def run_auto_duel(
         if p_b.hp <= 0:
             break
 
-        first_a = random.random() > 0.5 if p_a.spd == p_b.spd else p_a.spd > p_b.spd
+        first_a = battle_random().random() > 0.5 if p_a.spd == p_b.spd else p_a.spd > p_b.spd
         if first_a:
             perform_attack(p_a, p_b, round_num)
             if p_b.hp > 0:

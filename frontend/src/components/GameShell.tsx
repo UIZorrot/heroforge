@@ -76,8 +76,7 @@ const sideItemsBySection: Record<GameSectionKey, SideItem[]> = {
     { label: 'Impact', icon: <Swords size={20} /> },
   ],
   chronicle: [
-    { label: 'Runs', icon: <Landmark size={20} />, active: true },
-    { label: 'Bosses', icon: <Shield size={20} /> },
+    { label: 'Void Labyrinth', icon: <Landmark size={20} />, active: true },
   ],
   market: [
     { label: 'Market', icon: <Gem size={20} />, active: true },
@@ -135,7 +134,7 @@ export function GameShell({
       : sideItemsBySection[activeSection];
 
   return (
-    <div className="min-h-screen bg-[#070707] text-stone-200">
+    <div className="min-h-screen bg-[#070707] text-stone-200" data-game-section={activeSection}>
       <div className="fixed inset-0 -z-10 bg-[radial-gradient(circle_at_28%_12%,rgba(180,150,100,0.11),transparent_28%),radial-gradient(circle_at_72%_18%,rgba(40,45,55,0.18),transparent_24%),linear-gradient(180deg,#080808_0%,#050505_100%)]" />
       <header className="fixed left-0 right-0 top-0 z-40 h-[74px] border-b border-white/8 bg-[#080808]/92 backdrop-blur-xl">
         <div className="grid h-full grid-cols-[88px_1fr_auto] items-center">

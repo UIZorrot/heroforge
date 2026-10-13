@@ -1,0 +1,17 @@
+{
+  "tool": "built-in image_gen",
+  "assets": [
+    {
+      "key": "boss",
+      "prompt": "Use case: stylized-concept. Asset type: production enemy portrait for a dark fantasy tactical card game, tall 2:3 aspect ratio. Premium cinematic hand-painted game illustration with believable anatomy, dimensional materials, strong readable silhouette. Soot-black basalt, worn antique gold, pale parchment, restrained cold gray-violet highlights. Low ambient light, warm sidelight, distant smoky stone ruin. Subject dominates center, full creature form visible, no clipping. No text, no typography, no UI, no frames, no logos, no neon, no cute cartoon. These are original creatures of a maze that erases names, not generic human soldiers. Subject: THE NAMELESS WEAVER, an enormous levitating eldritch cephalopod sovereign. Hollow black spherical absence where its face should be, broken tarnished golden crown suspended around that void, long asymmetrical gold bone spindles forming a ceremonial ribcage, dark membranous tendrils descending like cathedral roots. Ancient gravitas, surreal nonhuman anatomy, imposing radial silhouette. Fine eroded engravings whose words have vanished. Entire form isolated by darkness; narrow warm highlights define its anatomy. Not a humanoid wizard, not a spider, no glowing purple eyes."
+    },
+    {
+      "key": "sentinel",
+      "prompt": "Use case: stylized-concept. Asset type: production enemy portrait for a dark fantasy tactical card game, tall 2:3 aspect ratio. Premium cinematic hand-painted game illustration with believable anatomy, dimensional materials, strong readable silhouette. Soot-black basalt, worn antique gold, pale parchment, restrained cold gray-violet highlights. Low ambient light, warm sidelight, distant smoky stone ruin. Subject dominates center, full creature form visible, no clipping. No text, no typography, no UI, no frames, no logos, no neon, no cute cartoon. These are original creatures of a maze that erases names, not generic human soldiers. Subject: BASALT MAW, a low broad six-legged living-stone guardian, quadrupedal weight with two smaller supporting limbs. Giant empty vertical maw split through its armored chest, blunt tusk-like basalt ridges, massive layered stone shoulder plates held by eroded bronze name seals. Deep hollow face with two small chalk-white eyes. Heavy grounded defensive stance, chips and moss and fine worn mineral grain, distinctive squat blocky silhouette. Not a humanoid knight, no held shield or weapon."
+    },
+    {
+      "key": "environment",
+      "prompt": "Use case: stylized-concept. Asset type: wide 16:9 immersive game environment plate for a real-time 3D Void Labyrinth scene. Premium cinematic dark fantasy architecture, realistic worn black stone, aged brass and amber lanterns. Ancient archive temple at immense scale: three recessed monumental portals beyond a low broken stair, staggered stone ribs, black slate floor with faint engraved route lines, erased-name tablets, far central doorway opening into fog and a tiny chalk-white absence. Center architecture readable in low light; upper left quiet deep darkness leaves room for game title; bottom foreground textured stone with no objects blocking UI. Strong parallax-ready layered depth, warm volumetric beams from small candles, restrained gray-violet cold distance. No characters, no UI, no letters, no readable writing, no logos, no futuristic neon, no oversaturated purple. The architecture should feel unsettling and inhabitable, not a menu illustration or app background."
+    }
+  ]
+}

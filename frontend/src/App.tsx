@@ -5,6 +5,7 @@ import { GameShell, type ArenaSideKey, type ForgeSideKey, type GameSectionKey, t
 import { VaultPage } from './components/VaultPage';
 import { ForgePage } from './components/ForgePage';
 import { ArenaPage } from './components/ArenaPage';
+import { PvePage } from './components/PvePage';
 import { VfxTestPage } from './components/VfxTestPage';
 import { MarketPage } from './components/MarketPage';
 import { SettingsPage } from './components/SettingsPage';
@@ -436,24 +437,6 @@ function AccessRequired({ onOpenAuth }: { onOpenAuth: () => void }) {
           </button>
         </div>
       </div>
-    </div>
-  );
-}
-
-function PlaceholderPage({ title, eyebrow, description }: { title: string; eyebrow: string; description: string }) {
-  return (
-    <div className="mx-auto flex min-h-[calc(100vh-74px)] max-w-[1540px] items-center justify-center px-8 py-10">
-      <section className="w-full max-w-3xl border border-white/8 bg-black/25 p-10 text-center">
-        <div className="text-[10px] uppercase tracking-[0.32em] text-[#b49664]">{eyebrow}</div>
-        <h1 className="mt-4 font-display text-5xl font-light uppercase tracking-[0.2em] text-stone-100">{title}</h1>
-        <p className="mx-auto mt-5 max-w-xl text-sm leading-7 text-stone-500">{description}</p>
-        <button
-          type="button"
-          className="mt-8 cursor-not-allowed border border-white/10 px-7 py-3 text-[11px] uppercase tracking-[0.24em] text-stone-500"
-        >
-          Initializing
-        </button>
-      </section>
     </div>
   );
 }
@@ -1040,13 +1023,7 @@ const App: React.FC = () => {
     }
 
     if (activeSection === 'chronicle') {
-      return (
-        <PlaceholderPage
-          eyebrow="Chronicle"
-          title="Chronicle"
-          description="Chronicle is reserved for the future PvE campaign branch. It is intentionally not part of the first MVP release, so the current live loop stays focused on Forge, Vault, Train, Arena, Daily rewards, and the relic market."
-        />
-      );
+      return <PvePage heroes={savedHeroes} token={session?.token ?? getStoredToken()} demoMode={demoMode} />;
     }
 
     return (

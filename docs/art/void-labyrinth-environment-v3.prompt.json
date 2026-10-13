@@ -1,0 +1,12 @@
+{
+  "tool": "built-in image_gen",
+  "assets": [
+    {
+      "key": "environment-v3",
+      "prompt": "Create an original wide 16:9 dark-fantasy environment matte painting for a premium tactical card game, THE VOID LABYRINTH. This image is a distant background behind a real 3D foreground, not a UI mockup. HIGH-CONCEPT ART DIRECTION: a sanctuary suspended above an immeasurable abyss where the center of the world has been erased. Near the upper right, an immense perfectly black eclipsed sphere blocks a thin dirty-ivory corona; suspended broken cathedral rings and distant torn basalt towers frame it. Long thin architectural fragments hang in impossible gravity in the distant fog, restrained antique-gold mineral seams, cold charcoal atmosphere. Extremely low-key cinematic lighting: nearly-black blue-gray stone, only narrow pale rim light behind objects and a few remote tiny amber lights; rich nuanced dark values, carved worn material detail, no broad daylight or bright sky. Leave the upper-left quarter quiet and almost black for a title overlay. Leave the lower central half empty dark fog and abyss for real foreground geometry: NO large foreground gateways, NO foreground stairway, NO characters or monsters, NO solid continuous floor, NO UI, NO text, NO logos. Asymmetric monumental composition, oppressive scale, silence, painterly film concept art with realistic weathering and physically believable light. Avoid neon purple/cyan, lasers, glowing candy colors, clean science-fiction geometry, generic game-menu iconography. Let negative space and the eclipse do the storytelling.",
+      "source": "C:\\Users\\uizor\\.codex\\generated_images\\01a11a8f-018a-7270-bf6d-0256f221ac06\\exec-ad83c904-673a-4fe1-b02f-9388f76e473b.png",
+      "original": "../../frontend/public/art/void-labyrinth/environment-v3.png",
+      "runtime": "/art/void-labyrinth/environment-v3.webp"
+    }
+  ]
+}

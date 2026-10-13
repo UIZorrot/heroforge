@@ -1,0 +1,85 @@
+{
+  "generation": "Built-in image_gen; one original generation per asset; no input image or CLI fallback.",
+  "encoding": "Original PNG retained in project; WebP quality 88 encoding for runtime delivery, without composition changes.",
+  "assets": [
+    {
+      "id": "environment",
+      "source": "C:\\Users\\uizor\\.codex\\generated_images\\01a11a8f-018a-7270-bf6d-0256f221ac06\\exec-1868026d-dfab-4440-847a-6a59dc5185c4.png",
+      "original": "../../frontend/public/art/void-labyrinth/environment-v2.png",
+      "runtime": "/art/void-labyrinth/environment-v2.webp",
+      "promptFile": "void-labyrinth-image-prompts-1.json"
+    },
+    {
+      "id": "sentinel",
+      "source": "C:\\Users\\uizor\\.codex\\generated_images\\01a11a8f-018a-7270-bf6d-0256f221ac06\\exec-08b7de85-1530-4f5b-93bc-88f04540728b.png",
+      "original": "../../frontend/public/art/void-labyrinth/sentinel-v2.png",
+      "runtime": "/art/void-labyrinth/sentinel-v2.webp",
+      "promptFile": "void-labyrinth-image-prompts-1.json"
+    },
+    {
+      "id": "leech",
+      "source": "C:\\Users\\uizor\\.codex\\generated_images\\01a11a8f-018a-7270-bf6d-0256f221ac06\\exec-2f744cac-65a8-43e8-b9d2-bebaa8cffd9b.png",
+      "original": "../../frontend/public/art/void-labyrinth/leech-v2.png",
+      "runtime": "/art/void-labyrinth/leech-v2.webp",
+      "promptFile": "void-labyrinth-image-prompts-2.json"
+    },
+    {
+      "id": "archer",
+      "source": "C:\\Users\\uizor\\.codex\\generated_images\\01a11a8f-018a-7270-bf6d-0256f221ac06\\exec-f9e5a1ac-82ca-4ee9-ae83-84df9da86f51.png",
+      "original": "../../frontend/public/art/void-labyrinth/archer-v2.png",
+      "runtime": "/art/void-labyrinth/archer-v2.webp",
+      "promptFile": "void-labyrinth-image-prompts-2.json"
+    },
+    {
+      "id": "scribe",
+      "source": "C:\\Users\\uizor\\.codex\\generated_images\\01a11a8f-018a-7270-bf6d-0256f221ac06\\exec-00c5bbbc-1b63-4e13-8ac1-688debf0707d.png",
+      "original": "../../frontend/public/art/void-labyrinth/scribe-v2.png",
+      "runtime": "/art/void-labyrinth/scribe-v2.webp",
+      "promptFile": "void-labyrinth-image-prompts-2.json"
+    },
+    {
+      "id": "weaver",
+      "source": "C:\\Users\\uizor\\.codex\\generated_images\\01a11a8f-018a-7270-bf6d-0256f221ac06\\exec-8ebdbb24-8072-4a0f-a8d9-e8e6095e6f6a.png",
+      "original": "../../frontend/public/art/void-labyrinth/weaver-v2.png",
+      "runtime": "/art/void-labyrinth/weaver-v2.webp",
+      "promptFile": "void-labyrinth-image-prompts-2.json"
+    },
+    {
+      "id": "harrier",
+      "source": "C:\\Users\\uizor\\.codex\\generated_images\\01a11a8f-018a-7270-bf6d-0256f221ac06\\exec-f1ec80c6-3b52-4a79-b7c5-94145dc1bc61.png",
+      "original": "../../frontend/public/art/void-labyrinth/harrier-v2.png",
+      "runtime": "/art/void-labyrinth/harrier-v2.webp",
+      "promptFile": "void-labyrinth-image-prompts-2.json"
+    },
+    {
+      "id": "warden",
+      "source": "C:\\Users\\uizor\\.codex\\generated_images\\01a11a8f-018a-7270-bf6d-0256f221ac06\\exec-cac89d59-a95d-41db-b7de-3a1f103860b2.png",
+      "original": "../../frontend/public/art/void-labyrinth/warden-v2.png",
+      "runtime": "/art/void-labyrinth/warden-v2.webp",
+      "promptFile": "void-labyrinth-image-prompts-2.json"
+    },
+    {
+      "id": "anchor",
+      "source": "C:\\Users\\uizor\\.codex\\generated_images\\01a11a8f-018a-7270-bf6d-0256f221ac06\\exec-f21de6de-eb39-407d-ba8a-85ac71cdac8c.png",
+      "original": "../../frontend/public/art/void-labyrinth/anchor-v2.png",
+      "runtime": "/art/void-labyrinth/anchor-v2.webp",
+      "promptFile": "void-labyrinth-image-prompts-2.json"
+    },
+    {
+      "id": "boss",
+      "source": "C:\\Users\\uizor\\.codex\\generated_images\\01a11a8f-018a-7270-bf6d-0256f221ac06\\exec-0becca86-b974-4ba4-8535-62d30ab2fdfb.png",
+      "original": "../../frontend/public/art/void-labyrinth/boss-v2.png",
+      "runtime": "/art/void-labyrinth/boss-v2.webp",
+      "promptFile": "void-labyrinth-image-prompts-1.json"
+    },
+    {
+      "id": "environment-v3",
+      "source": "C:\\Users\\uizor\\.codex\\generated_images\\01a11a8f-018a-7270-bf6d-0256f221ac06\\exec-ad83c904-673a-4fe1-b02f-9388f76e473b.png",
+      "original": "../../frontend/public/art/void-labyrinth/environment-v3.png",
+      "runtime": "/art/void-labyrinth/environment-v3.webp",
+      "promptFile": "void-labyrinth-environment-v3.prompt.json"
+    }
+  ],
+  "activeEnvironment": "procedural-dark-sky",
+  "fallbackEnvironment": "environment-v3"
+}
