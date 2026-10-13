@@ -5,6 +5,7 @@ markupsafe
 requests
 pillow
 python-dotenv
+openai
 google-genai
 psycopg[binary]
 resend

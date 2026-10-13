@@ -6,6 +6,8 @@ All gameplay and player-facing changes are recorded here. This log starts on 202
 
 ### Fixed
 
+- Declared the OpenAI SDK used by the forge service in the backend install requirements, so a clean server/test environment can import the API rather than depending on an SDK left over in an existing virtual environment. The SDK is already used for OpenAI-compatible providers; this does not change provider selection or credentials.
+
 - Removed a hardcoded API credential from an unused legacy helper and all reachable Git history before publication. The user confirmed revocation of the old credential, and the original repository is now public with commit dates and implementation history retained. A scan of 961 reachable blobs found no copies of the old credential; Python syntax compilation and whitespace checks pass. History cleanup changes commit identifiers, so existing clones must reconcile the rewritten history before pushing.
 
 - Restored the existing Chronicle navigation name and matching sign-in copy. PvE describes the campaign's play mode; it does not replace the section name. Void Labyrinth remains the chapter title. Navigation keys and campaign progress are unchanged; targeted TypeScript/lint and whitespace checks validate the copy correction.
