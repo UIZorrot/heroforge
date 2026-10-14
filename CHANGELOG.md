@@ -4,6 +4,10 @@ All gameplay and player-facing changes are recorded here. This log starts on 202
 
 ## Unreleased
 
+### Fixed
+
+- Expanded credential exclusions to cover environment variants, signing keys, keystores and private credential files while keeping empty environment examples trackable. Repository history remediation removes committed runtime environment files and replaces identified hardcoded credentials across local branches and remote history; commit IDs change, so existing clones need the sanitized history before pushing. Credential revocation and production configuration rotation remain the owner's responsibility. Validation and server synchronization are recorded in the private incident report.
+
 ## 2026-10-14 — deployment 18b3f66
 
 - [Deployment verification and remaining blockers](docs/monad-release-readiness-2026-10-14.md): the live frontend and compatible backend are deployed, with 500 starting Dust, eight heroes at actual 1000-point budgets and repaired artwork URLs. Public JS/CSS/3D chunk and all 18 game images pass HTTP/type/file-signature checks; the original Monad entry and collection remain available. Actual AI forging is blocked by the existing third-party gateway's invalid key; a real failed request refunded the charge and created no card. Video link permissions and real email/browser checks remain separate acceptance items. No old materials or secrets were republished.
