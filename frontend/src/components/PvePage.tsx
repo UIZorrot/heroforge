@@ -159,7 +159,7 @@ export function PvePage({ heroes, token, demoMode = false, onRewardClaimed }: { 
       <ol className="void-map" aria-label="Journey route">{catalog.nodes.map((node, index) => <li key={node.id} data-current={shownFloor === index + 1} data-cleared={run.clearedNodes.includes(index + 1)} aria-current={shownFloor === index + 1 ? 'step' : undefined}>
         <span className="void-map__glyph">{node.kind === 'camp' ? <Flame size={19} /> : node.kind === 'event' ? <ScrollText size={19} /> : node.kind === 'shop' ? <Coins size={19} /> : node.kind === 'boss' ? <Skull size={19} /> : node.kind === 'elite' ? <Shield size={19} /> : <Swords size={17} />}</span><span><small>FLOOR {String(index + 1).padStart(2, '0')} · {node.kind}</small>{node.name}</span>
       </li>)}</ol>
-      <p className="void-route__reward">First clear<br /><strong>{catalog.firstClearDust?.[run.tier] ?? 0} Dust</strong><br />Once per depth{preview ? ' · test rewards only' : ''}</p></aside><div className="void-climb-main">
+      <p className="void-route__reward">First clear<br /><strong>{catalog.firstClearDust?.[run.tier] ?? 0} Dust</strong><br />{run.tier === 'adaptive' ? 'Once per account' : 'Once per depth'}{preview ? ' · test rewards only' : ''}</p></aside><div className="void-climb-main">
       <section className="void-party-section" aria-label="Companion resources">
         <p className="void-eyebrow">YOUR EXPEDITION <span>{run.party.length} / 4 COMPANIONS</span></p>
         <div className="void-party">{run.party.map(hero => {
