@@ -7,6 +7,7 @@ import { pveBattleResult, pveBpEligibility, type PveCatalog, type PveInput, type
 import { applyPreparationPositions, formationPositions, movePreparationCard } from '../lib/battlePreparation';
 import { CAN_PLAY_PVE_PREVIEW, createPreviewPveRun, fetchActivePreviewPveRun, fetchPreviewPveRun, mutatePreviewPveRun } from '../lib/pvePreviewApi';
 import { IS_MOCK_MODE, STORAGE_NAMESPACE } from '../lib/runtimeMode';
+import { gameArtUrl } from '../lib/artAssets';
 import type { SavedHero } from '../types';
 import { VoidLabyrinthScene } from './VoidLabyrinthScene';
 import { VoidBestiary } from './VoidBestiary';
@@ -20,6 +21,7 @@ export function PvePage({ heroes, token, demoMode = false, onRewardClaimed }: { 
   const preview = demoMode || IS_MOCK_MODE;
   const [catalog, setCatalog] = useState<PveCatalog>(pvePreviewCatalog);
   const [run, setRun] = useState<PveRun | null>(null);
+  const [expeditionOpen, setExpeditionOpen] = useState(false);
   const [tier, setTier] = useState<PveTier>('threshold');
   const [selection, setSelection] = useState<string[]>([]);
   const [formationDraft, setFormationDraft] = useState<{ id: string; positions: Record<string, number> } | null>(null);
@@ -119,18 +121,23 @@ export function PvePage({ heroes, token, demoMode = false, onRewardClaimed }: { 
     setFormationDraft({ id: room.sessionId, positions: formationPositions(moved, 'A') });
   }
 
-  return <section className="void-campaign" data-climbing={Boolean(run)} aria-label="Void Labyrinth">
+  return <section className="void-campaign" data-climbing={Boolean(run)} data-scene-only={!expeditionOpen} aria-label="Void Labyrinth">
     <div className="void-gateway">
       <VoidLabyrinthScene tier={run?.tier ?? tier} node={shownFloor} />
-      <header className="void-campaign__opening">
+      {expeditionOpen && <header className="void-campaign__opening">
         <p className="void-eyebrow">CHAPTER I / THE FORGOTTEN REALM</p><h1>The Void<br /><em>Labyrinth</em></h1>
         <p className="void-lede">The walls are forgetting your name.<br />Keep the lantern burning.</p>
-      </header>
-      {!run ? <div className="void-tier-list" role="group" aria-label="Choose a labyrinth depth">{catalog.tiers.map((item, index) => <button key={item.id} type="button" aria-pressed={tier === item.id} onClick={() => setTier(item.id as PveTier)}>
+      </header>}
+      {!expeditionOpen ? <div className="void-realm-entry">
+        <p className="void-eyebrow">CHAPTER I / THE VOID LABYRINTH</p>
+        <button className="void-primary" type="button" onClick={() => setExpeditionOpen(true)}>{run ? 'Continue expedition' : 'Prepare expedition'}<ChevronRight size={16} /></button>
+        {preview && <small>TEST REALM · LOCAL PROGRESS</small>}
+      </div> : !run ? <div className="void-tier-list" role="group" aria-label="Choose a labyrinth depth">{catalog.tiers.map((item, index) => <button key={item.id} type="button" aria-pressed={tier === item.id} onClick={() => setTier(item.id as PveTier)}>
         <span className="void-tier-list__number">DEPTH 0{index + 1}</span><strong>{item.name}</strong><span className="void-tier-list__bp">{item.recommended_team_bp.toLocaleString()}<small>TEAM BP</small></span><small className="void-tier-list__challenge">{challenges[index]}</small>
       </button>)}</div> : <div className="void-world-caption"><span>{catalog.tiers.find(item => item.id === run.tier)?.name}</span><strong>{shownNode?.name ?? 'The journey ends'}</strong></div>}
     </div>
-    <div className="void-content">
+    {expeditionOpen && <div className="void-content">
+    <button className="void-return-to-realm" type="button" onClick={() => setExpeditionOpen(false)}>Return to the realm</button>
     <p className="void-campaign__promise">10 floors <span>◆</span> Battles, events & lantern trades <span>◆</span> Choose rewards as you climb <span>◆</span> Free entry & retries</p>
     {error && <div className="void-error" role="alert">{error}<button type="button" onClick={() => setError('')}>Dismiss</button></div>}
     {loading && <p role="status">Searching for your lantern…</p>}
@@ -156,7 +163,19 @@ export function PvePage({ heroes, token, demoMode = false, onRewardClaimed }: { 
         <span className="void-map__glyph">{node.kind === 'camp' ? <Flame size={19} /> : node.kind === 'event' ? <ScrollText size={19} /> : node.kind === 'shop' ? <Coins size={19} /> : node.kind === 'boss' ? <Skull size={19} /> : node.kind === 'elite' ? <Shield size={19} /> : <Swords size={17} />}</span><span><small>FLOOR {String(index + 1).padStart(2, '0')} · {node.kind}</small>{node.name}</span>
       </li>)}</ol>
       <p className="void-route__reward">First clear<br /><strong>{catalog.firstClearDust?.[run.tier] ?? 0} Dust</strong><br />Once per depth{preview ? ' · test rewards only' : ''}</p></aside><div className="void-climb-main">
-      <div className="void-party" aria-label="Companion resources">{run.party.map(hero => <div key={hero.id}><strong>{hero.character.name}</strong><span>{slotNames[hero.slot]}</span><p>{run.resources[hero.id].hp <= 0 ? 'Fallen this expedition' : `${run.resources[hero.id].hp} / ${hero.character.state.HP} HP`} · {run.resources[hero.id].mp} MP</p></div>)}</div>
+      <section className="void-party-section" aria-label="Companion resources">
+        <p className="void-eyebrow">YOUR EXPEDITION <span>{run.party.length} / 4 COMPANIONS</span></p>
+        <div className="void-party">{run.party.map(hero => {
+          const resources = run.resources[hero.id];
+          return <article className="void-companion" key={hero.id} data-fallen={resources.hp <= 0}>
+            <div className="void-companion__portrait">{hero.image ? <img src={gameArtUrl(hero.image)} alt="" /> : <Shield size={24} />}</div>
+            <div className="void-companion__info"><strong>{hero.character.name}</strong><span>{slotNames[hero.slot]}</span>
+              <div className="void-companion__health" aria-hidden="true"><i style={{ width: `${Math.max(0, Math.min(100, resources.hp / Math.max(1, Number(hero.character.state.HP)) * 100))}%` }} /></div>
+              <p>{resources.hp <= 0 ? 'Fallen' : `${resources.hp} / ${hero.character.state.HP} HP`}<span>{resources.mp} MP</span></p>
+            </div>
+          </article>;
+        })}</div>
+      </section>
       {Object.entries(run.relics ?? {}).length > 0 && <div className="void-climb-relics" aria-label="Climb rewards">{Object.entries(run.relics ?? {}).map(([id, count]) => <span key={id}>{catalog.rewards?.find(item => item.id === id)?.name ?? id} ×{count}</span>)}</div>}
       {run.pendingReward && <div className="void-reward-room"><p className="void-eyebrow">FLOOR {run.pendingReward.floor} CLEARED / +{run.pendingReward.lumens} LUMENS</p><h3>The dark leaves a gift.</h3><p>Choose one reward before ascending. These effects last for this climb.</p><div className="void-choice-grid">{run.pendingReward.choices.map(choice => <button key={choice.id} type="button" disabled={busy} onClick={() => void perform('reward', { choice: choice.id })}><strong>{choice.name}</strong><span>{choice.description}</span><small>CLAIM & ASCEND <ChevronRight size={14} /></small></button>)}</div></div>}
 
@@ -181,9 +200,12 @@ export function PvePage({ heroes, token, demoMode = false, onRewardClaimed }: { 
         {currentNode.kind === 'camp' ? <><h3>Shelter by the lantern</h3><p>Rest: living companions recover 35% of maximum HP and MP; revive one fallen hero at 30% HP and 20% MP. Lantern vow: gain ATK worth 2% of the stat budget for the first two rounds of the next battle.</p>
           {deadHeroes.length > 0 && <label>Revive a companion<select aria-label="Revive a companion" value={revive} onChange={event => setRevive(event.target.value)}><option value="">Choose one fallen hero</option>{deadHeroes.map(hero => <option key={hero.id} value={hero.id}>{hero.character.name}</option>)}</select></label>}
           <div className="void-action-row"><button className="void-primary" type="button" disabled={busy || deadHeroes.length > 0 && !deadHeroes.some(hero => hero.id === revive)} onClick={() => void perform('camp', { choice: 'rest', ...(deadHeroes.length ? { reviveHeroId: revive } : {}) })}>Rest</button><button type="button" disabled={busy} onClick={() => void perform('camp', { choice: 'boon' })}>Lantern vow · gain ATK</button></div>
-        </> : currentNode.kind === 'event' ? <><p className="void-eyebrow">DISCOVERY / FORGOTTEN TABLETS</p><h3>The stone remembers.</h3><p>Not every floor asks for a fight. Read the surviving names, or sacrifice blood to awaken a weapon.</p><div className="void-choice-grid"><button type="button" disabled={busy} onClick={() => void perform('event', { choice: 'study' })}><strong>Study the tablets</strong><span>Gain 20 Lumens. Living companions recover 15% maximum MP.</span></button><button type="button" disabled={busy} onClick={() => void perform('event', { choice: 'blood' })}><strong>Write a blood inscription</strong><span>Lose 10% maximum HP, leaving at least 1 HP. Gain Ember Edge for this climb.</span></button></div></> : currentNode.kind === 'shop' ? <><p className="void-eyebrow">LANTERN TRADE / {run.lumens ?? 0} LUMENS</p><h3>A traveller waits in the dark.</h3><p>Trade the Lumens earned during this climb. Choose one purchase, or continue without spending.</p><div className="void-choice-grid">{catalog.rewards?.map(choice => { const price = ({ edge: 45, ward: 40, renewal: 30 } as Record<string, number>)[choice.id] ?? 0; return <button type="button" key={choice.id} disabled={busy || (run.lumens ?? 0) < price} onClick={() => void perform('shop', { choice: choice.id })}><strong>{choice.name}</strong><span>{choice.description}</span><small>{price} LUMENS</small></button>; })}</div><button type="button" className="void-primary" disabled={busy} onClick={() => void perform('shop', { choice: 'leave' })}>Leave & ascend<ChevronRight size={16} /></button></> : <><h3>Next encounter · {currentNode.name}</h3>{currentNode.variants && <fieldset><legend>Choose a passage. Retrying preserves your chosen route.</legend>{currentNode.variants.map(value => <label key={value}><input type="radio" name="void-branch" value={value} checked={(run.branches[currentNode.id] ?? branch) === value} disabled={Boolean(run.branches[currentNode.id]) || busy} onChange={() => setBranch(value)} />{value === 'A' ? currentNode.id === 'N2' ? 'Stone passage · slow, fortified guardians' : 'Whisper bridge · curses and damage over time' : 'Mirror passage · swift hunters, vulnerable to area damage'}</label>)}</fieldset>}
-          {previewEncounter && <details className="void-encounter-preview" open><summary>Scouting · {previewEncounter.enemies.length} enemies · {previewEncounter.enemyTotalBp.toLocaleString()} BP</summary><ul>{previewEncounter.enemies.map((enemy, index) => <li key={`${enemy.slot}-${index}`}>{enemy.name} · {slotNames[enemy.slot]}</li>)}</ul></details>}
-          <button className="void-primary" type="button" disabled={busy} onClick={() => void perform('enter', { branch: currentNode.variants ? run.branches[currentNode.id] ?? branch : 'default' })}>Scout & arrange formation<ChevronRight size={16} /></button></>}
+        </> : currentNode.kind === 'event' ? <><p className="void-eyebrow">DISCOVERY / FORGOTTEN TABLETS</p><h3>The stone remembers.</h3><p>Not every floor asks for a fight. Read the surviving names, or sacrifice blood to awaken a weapon.</p><div className="void-choice-grid"><button type="button" disabled={busy} onClick={() => void perform('event', { choice: 'study' })}><strong>Study the tablets</strong><span>Gain 20 Lumens. Living companions recover 15% maximum MP.</span></button><button type="button" disabled={busy} onClick={() => void perform('event', { choice: 'blood' })}><strong>Write a blood inscription</strong><span>Lose 10% maximum HP, leaving at least 1 HP. Gain Ember Edge for this climb.</span></button></div></> : currentNode.kind === 'shop' ? <><p className="void-eyebrow">LANTERN TRADE / {run.lumens ?? 0} LUMENS</p><h3>A traveller waits in the dark.</h3><p>Trade the Lumens earned during this climb. Choose one purchase, or continue without spending.</p><div className="void-choice-grid">{catalog.rewards?.map(choice => { const price = ({ edge: 45, ward: 40, renewal: 30 } as Record<string, number>)[choice.id] ?? 0; return <button type="button" key={choice.id} disabled={busy || (run.lumens ?? 0) < price} onClick={() => void perform('shop', { choice: choice.id })}><strong>{choice.name}</strong><span>{choice.description}</span><small>{price} LUMENS</small></button>; })}</div><button type="button" className="void-primary" disabled={busy} onClick={() => void perform('shop', { choice: 'leave' })}>Leave & ascend<ChevronRight size={16} /></button></> : <div className="void-encounter"><header className="void-encounter__heading"><p className="void-eyebrow">NEXT ENCOUNTER</p><h3>The chamber ahead</h3></header>{currentNode.variants && <fieldset><legend>Choose a passage. Retrying preserves your chosen route.</legend>{currentNode.variants.map(value => <label key={value}><input type="radio" name="void-branch" value={value} checked={(run.branches[currentNode.id] ?? branch) === value} disabled={Boolean(run.branches[currentNode.id]) || busy} onChange={() => setBranch(value)} />{value === 'A' ? currentNode.id === 'N2' ? 'Stone passage · slow, fortified guardians' : 'Whisper bridge · curses and damage over time' : 'Mirror passage · swift hunters, vulnerable to area damage'}</label>)}</fieldset>}
+          {previewEncounter && <details className="void-encounter-preview" open><summary><span>Scouting report</span><span>{previewEncounter.enemies.length} enemies <b>·</b> {previewEncounter.enemyTotalBp.toLocaleString()} BP</span></summary><ul>{previewEncounter.enemies.map((enemy, index) => {
+            const creature = catalog.bestiary.find(item => item.id === enemy.role || item.name === enemy.name);
+            return <li key={`${enemy.slot}-${index}`}><div className="void-enemy-portrait">{creature ? <img src={gameArtUrl(`/art/void-labyrinth/${creature.id}-v2.webp`)} alt="" /> : <Swords size={24} />}</div><div><strong>{enemy.name}</strong><span>{slotNames[enemy.slot]}</span>{creature && <small>{creature.role}</small>}</div></li>;
+          })}</ul></details>}
+          <div className="void-encounter__entry"><p className="void-eyebrow">BEFORE THE BATTLE</p><p>Inspect the enemy, then place your companions on the battlefield. You decide when combat begins.</p><button className="void-primary" type="button" disabled={busy} onClick={() => void perform('enter', { branch: currentNode.variants ? run.branches[currentNode.id] ?? branch : 'default' })}>Arrange formation<ChevronRight size={16} /></button><small>HP and MP carry between chambers.</small></div></div>}
       </div>}
       {run.status === 'completed' && <div className="void-completion"><p className="void-eyebrow">TEN FLOORS / CLIMB COMPLETE</p><h3>The labyrinth is cleared</h3><p>{run.reward?.message ?? 'Your climb has been recorded.'}</p><p>{run.totalRounds} combat rounds · {run.rewardHistory?.length ?? 0} rewards & choices · {run.lumens ?? 0} Lumens remaining</p><button type="button" onClick={() => { setRun(null); localStorage.removeItem(RUN_KEY); }}>Gather another party</button></div>}
       {!!run.rewardHistory?.length && <details className="void-reward-history"><summary>Rewards & choices this climb</summary><ul>{run.rewardHistory.map((item, index) => <li key={`${item.floor}-${index}`}>Floor {item.floor} · {item.name}</li>)}</ul></details>}
@@ -191,6 +213,6 @@ export function PvePage({ heroes, token, demoMode = false, onRewardClaimed }: { 
       {['active', 'failed'].includes(run.status) && <footer className="void-run-footer"><p>Your journey is saved when you leave. Ending the expedition abandons its unfinished progress.</p>{ending ? <div className="void-action-row"><button type="button" disabled={busy} onClick={() => void perform('abandon')}>Confirm end expedition</button><button type="button" onClick={() => setEnding(false)}>Keep exploring</button></div> : <button type="button" disabled={busy} onClick={() => setEnding(true)}>End expedition</button>}</footer>}
     </>}
     <VoidBestiary creatures={catalog.bestiary} />
-    </div>
+    </div>}
   </section>;
 }

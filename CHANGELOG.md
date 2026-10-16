@@ -4,7 +4,13 @@ All gameplay and player-facing changes are recorded here. This log starts on 202
 
 ## Unreleased
 
+### Changed
+
+- Chronicle opens directly into the Void Labyrinth 3D realm, with expedition preparation and saved-run controls revealed through a single entry action. Players can return to the realm view without abandoning their saved climb; the same entry flow is shared by live and local test modes. The illustrated fallback remains available when WebGL fails. TypeScript compilation and local browser checks pass; the 16:9 test-mode capture verifies the rendered 3D entry, formation placement and real combat turns. This does not verify production AI forging or a completed ten-floor climb.
+
 ### Fixed
+
+- Void Labyrinth expedition screens now group companions into portrait-and-resource strips, show enemy artwork, roles and positions in a spaced scouting report, and separate formation preparation from the report. The compact route starts at floor one so the current first encounter is immediately visible; narrow screens use a horizontally scrollable route and stack the encounter controls. Battle entry still opens positioning before combat confirmation; BP, rewards and saved-run formats are unchanged. TypeScript, 17 campaign/artwork checks and a production build pass; local browser checks cover four companions at desktop, tablet and phone widths.
 
 - Expanded credential exclusions to cover environment variants, signing keys, keystores and private credential files while keeping empty environment examples trackable. Repository history remediation removes committed runtime environment files and replaces identified hardcoded credentials across local branches and remote history; commit IDs change, so existing clones need the sanitized history before pushing. Credential revocation and production configuration rotation remain the owner's responsibility. Validation and server synchronization are recorded in the private incident report.
 
