@@ -7,7 +7,7 @@ import pytest
 import battle_logic
 from battle_sessions import BattleSessionError
 from pve_battle import LabyrinthBattle
-from pve_content import CONTENT, TIERS, encounter_for, enemy_hero
+from pve_content import CONTENT, TIERS, VERSION, catalog, encounter_for, enemy_hero
 from pve_runs import new_run, transition, public_run, party_with_relics
 from test_battle_sessions_program import _hero
 
@@ -178,9 +178,10 @@ def test_campaign_rng_does_not_change_other_battles_random_source():
 def test_mock_preview_catalog_matches_runtime_map_and_tiers():
     path = Path(__file__).resolve().parents[2] / 'frontend/src/lib/pvePreviewCatalog.ts'
     preview = json.loads(path.read_text(encoding='utf-8').split('= ', 1)[1].strip().removesuffix(';'))
-    assert preview['tiers'] == CONTENT['tiers']
+    assert preview['tiers'] == catalog()['tiers']
+    assert preview['legacyTiers'] == CONTENT['tiers']
     assert preview['nodes'] == CONTENT['nodes']
-    assert preview['contentVersion'] == CONTENT['content_version']
+    assert preview['contentVersion'] == VERSION
     assert {creature['id'] for creature in preview['bestiary']} == set(CONTENT['archetypes'])
     assets = path.parents[2] / 'public/art/void-labyrinth'
     for creature in preview['bestiary']:

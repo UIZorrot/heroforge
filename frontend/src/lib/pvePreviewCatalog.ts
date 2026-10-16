@@ -3,9 +3,21 @@ import type { PveCatalog } from './pveTypes';
 export const pvePreviewCatalog: PveCatalog = {
   "theme": "void_labyrinth",
   "name": "Void Labyrinth",
-  "contentVersion": "void-labyrinth-v2-climb-1",
+  "contentVersion": "void-labyrinth-v3-adaptive-1",
   "prototype": true,
   "tiers": [
+    {
+      "id": "adaptive",
+      "name": "The Void Labyrinth",
+      "minimum_team_bp": 1000,
+      "recommended_team_bp": 1000,
+      "honor_bp_band": [
+        1000
+      ],
+      "scaling": "entry_stat_budget"
+    }
+  ],
+  "legacyTiers": [
     {
       "id": "threshold",
       "name": "The Fading Lantern",
@@ -64,6 +76,7 @@ export const pvePreviewCatalog: PveCatalog = {
       ]
     }
   ],
+  "minimumTeamBp": 1000,
   "nodes": [
     {
       "id": "N1",
@@ -218,7 +231,7 @@ export const pvePreviewCatalog: PveCatalog = {
       "tactic": "Never attacks or regenerates by waiting. Destroy anchors to change the Boss ritual's displayed range and effects."
     }
   ],
-  "rewardPolicy": "Choose a climb-only reward after each non-final battle. First clears award 75 / 150 / 250 Dust once per depth.",
+  "rewardPolicy": "Enemy strength is locked to your entry stat budget. Choose climb rewards; the first adaptive clear awards 150 Dust once.",
   "rewards": [
     {
       "id": "edge",
@@ -237,6 +250,7 @@ export const pvePreviewCatalog: PveCatalog = {
     }
   ],
   "firstClearDust": {
+    "adaptive": 150,
     "threshold": 75,
     "reflection": 150,
     "heart": 250

@@ -306,7 +306,7 @@ export function createVoidWorld(host: HTMLElement, onContextLost: () => void): V
   resize();
   return{
     select(tier,nextNode){
-      selected=['threshold','reflection','heart'].indexOf(tier);node=nextNode;
+      selected=tier==='adaptive'?1:['threshold','reflection','heart'].indexOf(tier);node=nextNode;
       portals.forEach((portal,i)=>{portal.spot.intensity=i===selected?320:65;portal.shaft.uniforms.uStrength.value=i===selected?.18:.055;});
       route.forEach((rune,i)=>{rune.emissiveIntensity=i+1===node?1.5:i<node?.5:.1;});
       resume();

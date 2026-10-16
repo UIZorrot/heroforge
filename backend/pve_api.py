@@ -8,7 +8,7 @@ from uuid import UUID
 from flask import jsonify, request
 from battle_sessions import BattleSessionError
 from db import get_connection, serialize_json
-from pve_content import THEME, VERSION, FIRST_CLEAR_DUST, catalog
+from pve_content import THEME, CLIMB_VERSIONS, TIERS, FIRST_CLEAR_DUST, catalog
 from pve_runs import new_run, public_run, transition
 
 
@@ -79,7 +79,9 @@ def register_pve_routes(app, auth_required, current_user):
                         raise ValueError('A locked or dismantled companion cannot enter the labyrinth.')
                     party.append({'id': hero_id, 'slot': slot, 'character': copy.deepcopy(row['hero_payload']),
                                   'image': row['source_payload'].get('image_url')})
-                run = new_run(data.get('tier'), party, secrets.randbits(31))
+                if data.get('tier', 'adaptive') not in {*TIERS, 'adaptive'}:
+                    raise ValueError('Choose the Void Labyrinth expedition.')
+                run = new_run('adaptive', party, secrets.randbits(31))
                 run.update(creationKey=key, creationFingerprint=fingerprint)
                 cur.execute("INSERT INTO pve_runs (user_id,theme_key,seed,run_payload) VALUES (%s,%s,%s,%s::jsonb) RETURNING id", (user_id, THEME, run['seed'], serialize_json(run)))
                 run_id = cur.fetchone()['id']
@@ -134,7 +136,7 @@ def register_pve_routes(app, auth_required, current_user):
                     cur.execute('INSERT INTO pve_first_clears (user_id,theme_key,tier,run_id,content_version) VALUES (%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING RETURNING run_id',
                                 (user_id, THEME, run['tier'], run_id, run['contentVersion']))
                     awarded = cur.fetchone() is not None
-                    dust = FIRST_CLEAR_DUST[run['tier']] if awarded and run['contentVersion'] == VERSION else 0
+                    dust = FIRST_CLEAR_DUST[run['tier']] if awarded and run['contentVersion'] in CLIMB_VERSIONS else 0
                     if dust:
                         cur.execute('UPDATE user_wallets SET dust_balance=dust_balance+%s,updated_at=now() WHERE user_id=%s RETURNING dust_balance', (dust, user_id))
                         wallet = cur.fetchone()

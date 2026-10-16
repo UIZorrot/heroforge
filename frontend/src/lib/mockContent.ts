@@ -389,6 +389,22 @@ export function createMockEconomy(): EconomySnapshot {
   };
 }
 
+export function createForgedMockHero(image: string, now = Date.now()): SavedHero {
+  const variants = [
+    { id: 'mock-kharos', name: 'Cinder Warden' },
+    { id: 'mock-odran', name: 'Veil Seeker' },
+    { id: 'mock-myrr', name: 'Storm Cantor' },
+    { id: 'mock-garran', name: 'Oathbreaker' },
+  ];
+  const variant = variants[now % variants.length];
+  const base = createMockHeroes().find(hero => hero.id === variant.id)!;
+  return { ...base, id: `mock-forged-${now}-${Math.floor(Math.random() * 10000)}`, createdAt: now, image,
+    character: { ...structuredClone(base.character), name: `${variant.name} ${String(now).slice(-3)}`,
+      description: 'A simulated 1000 BP hero using a balanced local test template. This preview does not evaluate the uploaded image with AI.',
+      extra: 'Simulation only. Live forging evaluates image identity and lore separately.' },
+    equippedRelicId: null, enchantment: null };
+}
+
 export function createMockHeroes(): SavedHero[] {
   return JSON.parse(JSON.stringify(mockHeroes)) as SavedHero[];
 }

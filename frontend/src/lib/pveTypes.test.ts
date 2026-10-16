@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { pveBattleResult, pveBpEligibility, type PveRun } from './pveTypes';
-import { createMockHeroes, rebalanceMockStarters } from './mockContent';
+import { createForgedMockHero, createMockHeroes, rebalanceMockStarters } from './mockContent';
 import { calculateActualBP } from './gameLogic';
 import { isBattleSupportEvent } from './battleVfxCatalog';
 import type { BattleBoardState, BattleBoardUnit } from './battleTypes';
@@ -16,14 +16,24 @@ function fixture() {
 }
 
 describe('campaign presentation', () => {
-  it('accepts one to four heroes only inside the inclusive 5% BP band', () => {
-    expect(pveBpEligibility(950, 1000, 1).eligible).toBe(true);
-    expect(pveBpEligibility(1050, 1000, 1).eligible).toBe(true);
-    expect(pveBpEligibility(1000, 1000, 4).eligible).toBe(true);
-    expect(pveBpEligibility(949, 1000, 1).eligible).toBe(false);
-    expect(pveBpEligibility(1051, 1000, 1).eligible).toBe(false);
-    expect(pveBpEligibility(1000, 1000, 0).eligible).toBe(false);
-    expect(pveBpEligibility(1000, 1000, 5).eligible).toBe(false);
+  it('creates mock forged cards from a real 1000 point stat budget rather than inflated fixed samples', () => {
+    for (let variant = 0; variant < 4; variant++) {
+      const card = createForgedMockHero('data:image/png;base64,test', variant);
+      expect(card.character.BP).toBe('1000');
+      expect(calculateActualBP(card.character.state)).toBe(1000);
+      expect(card.character.description).toContain('simulated');
+      expect(card.image).toBe('data:image/png;base64,test');
+      expect(card.character.skill.s1).toBeDefined();
+    }
+  });
+  it('accepts one to four heroes at any team BP of at least 1000', () => {
+    for (const bp of [1000, 1051, 4800, 5640, 17460, 50000]) {
+      expect(pveBpEligibility(bp, 1).eligible).toBe(true);
+      expect(pveBpEligibility(bp, 4).eligible).toBe(true);
+    }
+    for (const bp of [999, 0, -1000, NaN, Infinity, 1000.5]) expect(pveBpEligibility(bp, 1).eligible).toBe(false);
+    expect(pveBpEligibility(1000, 0).eligible).toBe(false);
+    expect(pveBpEligibility(1000, 5).eligible).toBe(false);
   });
   it('rebalances persisted mock starters and preserves forged cards and collection metadata', () => {
     const heroes = createMockHeroes();

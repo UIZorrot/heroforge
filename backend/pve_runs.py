@@ -2,29 +2,36 @@
 import copy
 
 from pve_battle import LabyrinthBattle
-from pve_content import VERSION, THEME, TIERS, NODES, RELICS, bp_band, encounter_for
+from pve_content import VERSION, FIXED_CLIMB_VERSION, CLIMB_VERSIONS, MIN_TEAM_BP, THEME, TIERS, NODES, RELICS, bp_band, encounter_for, encounter_preview
+from game_logic import STAT_COSTS
 
 
 def new_run(tier, party, seed):
-    if tier not in TIERS:
+    if tier not in {*TIERS, 'adaptive'}:
         raise ValueError("Choose a valid labyrinth depth.")
     if not 1 <= len(party) <= 4 or len({hero['id'] for hero in party}) != len(party):
         raise ValueError("Choose one to four different companions.")
     if len({hero['slot'] for hero in party}) != len(party) or any(type(hero['slot']) is not int or not 0 <= hero['slot'] < 6 for hero in party):
         raise ValueError("Positions must be unique and between 0 and 5.")
     team_bp = sum(int(hero['character']['BP']) for hero in party)
-    lower, upper = bp_band(tier)
-    if not lower <= team_bp <= upper:
+    lower, upper = bp_band(tier) if tier != 'adaptive' else (MIN_TEAM_BP, None)
+    if team_bp < lower or upper is not None and team_bp > upper:
+        if tier == 'adaptive':
+            raise ValueError('Your team needs at least 1000 BP. Choose one to four companions.')
         raise ValueError(f'Team BP must be {lower}–{upper} for this depth (±5%). Choose one to four companions.')
     resources = {hero['id']: {'hp': int(hero['character']['state']['HP']), 'mp': int(hero['character']['state']['MP'])} for hero in party}
     if any(value['hp'] <= 0 or value['mp'] < 0 for value in resources.values()):
         raise ValueError("A companion has invalid base resources.")
-    run = {'theme': THEME, 'contentVersion': VERSION, 'tier': tier, 'party': copy.deepcopy(party),
+    run = {'theme': THEME, 'contentVersion': VERSION if tier == 'adaptive' else FIXED_CLIMB_VERSION, 'tier': tier, 'party': copy.deepcopy(party),
            'teamBp': team_bp, 'seed': seed, 'revision': 0,
            'status': 'active', 'node': 1, 'furthestNode': 1, 'clearedNodes': [], 'branches': {},
            'resources': resources, 'boon': False, 'battle': None, 'retries': 0, 'totalRounds': 0,
            'receipts': {}, 'receiptOrder': [], 'reward': None, 'lumens': 0, 'relics': {},
            'pendingReward': None, 'rewardHistory': []}
+    if tier == 'adaptive':
+        actual = sum(sum(max(0, int(hero['character']['state'].get(key, 0))) * cost for key, cost in STAT_COSTS.items()) for hero in party)
+        run['entryPowerBp'] = max(team_bp, actual)
+        run['entryPartySize'] = len(party)
     run['checkpoint'] = checkpoint(run)
     return run
 
@@ -78,7 +85,7 @@ def finish_floor(run):
 def node_for(run):
     node = copy.deepcopy(NODES[f"N{run['node']}"])
     # Existing expeditions keep their eight-combat route and saved snapshots.
-    if run['contentVersion'] != VERSION and node['kind'] in {'event', 'shop'}:
+    if run['contentVersion'] not in CLIMB_VERSIONS and node['kind'] in {'event', 'shop'}:
         node['kind'] = 'battle'
     return node
 
@@ -94,7 +101,7 @@ def _settle(run, room):
             run['resources'][hero['id']] = {'hp': min(unit.hp, unit.max_hp), 'mp': min(unit.mp, unit.max_mp)}
     if room.result['cleared']:
         floor = run['node']
-        if run['contentVersion'] == VERSION:
+        if run['contentVersion'] in CLIMB_VERSIONS:
             amount = 40 if floor == 10 else 24 if floor == 8 else 12
             run['lumens'] = run.get('lumens', 0) + amount
             if floor != 10:
@@ -217,7 +224,7 @@ def transition(run, operation, data):
         return
     if operation != 'enter' or node['kind'] not in {'battle', 'elite', 'boss'}:
         raise ValueError('This action is not available in this chamber.')
-    if run['contentVersion'] not in {VERSION, 'void-labyrinth-v1-prototype-1'}:
+    if run['contentVersion'] not in {*CLIMB_VERSIONS, 'void-labyrinth-v1-prototype-1'}:
         raise ValueError('The content version required by this expedition is unavailable.')
     variant = data.get('branch', 'default')
     if 'variants' in node:
@@ -227,10 +234,15 @@ def transition(run, operation, data):
         if variant not in node['variants']:
             raise ValueError('Choose passage A or B.')
         run['branches'][node['id']] = variant
-    encounter = encounter_for(run['tier'], node['id'], variant)
+    encounter = run_encounter(run, node, variant)
     room = LabyrinthBattle(encounter, party_with_relics(run), run['resources'], run['seed'] + run['node'] * 31 + (1 if variant == 'B' else 0), run['boon'], prepare=True)
     run['boon'] = False
     _settle(run, room)
+
+
+def run_encounter(run, node, variant='default'):
+    return encounter_for(run['tier'], node['id'], variant,
+                         **({'power_bp': run['entryPowerBp'], 'party_size': run['entryPartySize']} if run['tier'] == 'adaptive' else {}))
 
 
 def public_run(run, run_id):
@@ -238,10 +250,15 @@ def public_run(run, run_id):
                'clearedNodes', 'branches', 'resources', 'party', 'boon', 'retries', 'totalRounds', 'reward')}
     result['id'] = str(run_id)
     result['checkpointNode'] = run['checkpoint']['node']
-    lower, upper = bp_band(run['tier'])
-    result['honorEligible'] = lower <= run['teamBp'] <= upper
+    result['honorEligible'] = run['teamBp'] >= MIN_TEAM_BP if run['tier'] == 'adaptive' else bp_band(run['tier'])[0] <= run['teamBp'] <= bp_band(run['tier'])[1]
     result['party'] = party_with_relics(run)
     result.update(lumens=run.get('lumens', 0), relics=run.get('relics', {}), pendingReward=copy.deepcopy(run.get('pendingReward')),
-                  rewardHistory=copy.deepcopy(run.get('rewardHistory', [])), legacy=run['contentVersion'] != VERSION)
+                  rewardHistory=copy.deepcopy(run.get('rewardHistory', [])), legacy=run['contentVersion'] not in CLIMB_VERSIONS,
+                  entryPowerBp=run.get('entryPowerBp'), entryPartySize=run.get('entryPartySize'))
+    node = NODES.get(f"N{run['node']}")
+    if run['status'] == 'active' and node and node['kind'] in {'battle', 'elite', 'boss'}:
+        result['nextEncounter'] = encounter_preview(run_encounter(run, node, run['branches'].get(node['id'], 'A' if node.get('variants') else 'default')))
+        if node.get('variants'):
+            result['encounterChoices'] = {variant: encounter_preview(run_encounter(run, node, variant)) for variant in node['variants']}
     result['battleSession'] = LabyrinthBattle.restore(run['battle']).public_snapshot() if run.get('battle') else None
     return result

@@ -34,7 +34,7 @@ import {
   washCardEnchant,
 } from './lib/api';
 import { normalizeCharacterData, type CharacterData, type Rarity } from './lib/gameLogic';
-import { createMockEconomy, createMockHeroes, mockEconomy, mockHeroes, mockRelicCatalog, rebalanceMockStarters } from './lib/mockContent';
+import { createForgedMockHero, createMockEconomy, createMockHeroes, mockEconomy, mockHeroes, mockRelicCatalog, rebalanceMockStarters } from './lib/mockContent';
 import { IS_MOCK_MODE, MOCK_STORAGE_KEYS } from './lib/runtimeMode';
 import { gameArtUrl } from './lib/artAssets';
 import type { AuthUser, BattleHistoryRecord, EconomySnapshot, HeroHistoryRecord, LadderSnapshot, SavedHero } from './types';
@@ -80,45 +80,6 @@ function readMockSandbox(): MockSandbox | null {
   } catch {
     return null;
   }
-}
-
-function createForgedMockHero(image: string): SavedHero {
-  const index = Date.now() % 4;
-  const variants = [
-    { name: 'Cinder Warden', type: 'fire guardian', bp: 5420, hp: 2860, mp: 620, atk: 342, def: 62, speed: 76, effect: 'fire', skill: 'Cinder Verdict' },
-    { name: 'Veil Seeker', type: 'void assassin', bp: 5180, hp: 2110, mp: 780, atk: 368, def: 34, speed: 122, effect: 'void', skill: 'Nightfall Needle' },
-    { name: 'Storm Cantor', type: 'storm mage', bp: 4960, hp: 1940, mp: 980, atk: 326, def: 30, speed: 108, effect: 'storm', skill: 'Choir of Thunder' },
-    { name: 'Oathbreaker', type: 'steel warrior', bp: 5640, hp: 3140, mp: 540, atk: 354, def: 68, speed: 70, effect: 'weapon', skill: 'Iron Eclipse' },
-  ] as const;
-  const variant = variants[index];
-  const now = Date.now();
-  const character: CharacterData = {
-    name: `${variant.name} ${String(now).slice(-3)}`,
-    description: 'A locally forged sandbox card. Its actions, skills, enchantments, and Arena behavior can be tested without a live service.',
-    BP: String(variant.bp),
-    rarity: 'rare',
-    template: variant.type,
-    state: {
-      HP: String(variant.hp), MP: String(variant.mp), ATK: String(variant.atk), DEF: String(variant.def),
-      CC: '18', SPEED: String(variant.speed), CA: '14', PI: '12', EV: '10', AC: '12', TYPE: variant.type,
-      type_catalog: 'instant', type_effect: variant.effect,
-    },
-    skill: {
-      s1: { name: variant.skill, description: 'A primary sandbox combat skill.', TYPE: variant.effect, TARGET: 'Enemy', TARGET_NUM: '1', RANGE: 'enemy', ROLE: 'attack', type_catalog: 'instant', type_effect: variant.effect, DMG: '108', MP_COST: '28' },
-      s2: { name: 'Forge Resonance', description: 'A self-protecting secondary sandbox skill.', TYPE: 'buff', TARGET: 'Self', TARGET_NUM: '1', RANGE: 'self', ROLE: 'buff', type_catalog: 'instant', type_effect: variant.effect, BUFF_NAME: 'guard', BUFF_TIME: '2', BUFF_DEF: '18', MP_COST: '22' },
-    },
-  };
-  return {
-    id: `mock-forged-${now}-${Math.floor(Math.random() * 10000)}`,
-    createdAt: now,
-    image,
-    character,
-    equippedRelicId: null,
-    enchantment: null,
-    pvpLifeState: 'active',
-    pveLifeState: 'active',
-    cardStatus: 'active',
-  };
 }
 
 function dustBalance(economy: EconomySnapshot | null) {

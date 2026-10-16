@@ -103,7 +103,7 @@ class SequentialModel:
         self.label = label
         self.calls: List[Any] = []
 
-    def generate_content(self, payload: Any):
+    def generate_content(self, payload: Any, **_kwargs):
         self.calls.append(payload)
         if not self._responses:
             raise AssertionError(f"{self.label} stub exhausted")

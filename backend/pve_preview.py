@@ -14,7 +14,7 @@ from uuid import uuid4
 
 from flask import Flask, jsonify, request
 from battle_sessions import BattleSessionError
-from pve_content import VERSION, FIRST_CLEAR_DUST, catalog
+from pve_content import CLIMB_VERSIONS, TIERS, FIRST_CLEAR_DUST, catalog
 from pve_runs import new_run, public_run, transition
 
 app = Flask(__name__)
@@ -73,7 +73,9 @@ def create():
         party = data.get('party')
         if not isinstance(party, list):
             raise ValueError('Choose your test companions.')
-        run = new_run(data.get('tier'), party, secrets.randbits(31))
+        if data.get('tier', 'adaptive') not in {*TIERS, 'adaptive'}:
+            raise ValueError('Choose the Void Labyrinth expedition.')
+        run = new_run('adaptive', party, secrets.randbits(31))
         run['creationKey'] = data.get('requestId')
         run_id = str(uuid4())
         state['runs'][run_id] = run
@@ -116,7 +118,7 @@ def mutate(run_id, operation):
             run['receipts'].pop(run['receiptOrder'].pop(0))
         if run['status'] == 'completed':
             first = run['tier'] not in state['firstClears']
-            dust = FIRST_CLEAR_DUST[run['tier']] if first and run['contentVersion'] == VERSION else 0
+            dust = FIRST_CLEAR_DUST[run['tier']] if first and run['contentVersion'] in CLIMB_VERSIONS else 0
             if first:
                 state['firstClears'].append(run['tier'])
             run['reward'] = {'firstClear': first, 'dust': dust, 'message': f'Test clear · {dust} preview Dust. No live wallet was changed.'}

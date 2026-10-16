@@ -43,6 +43,8 @@ from relic_catalog import get_low_tier_relic_types, get_relic_catalog, get_relic
 from market_logic import build_market_board_snapshot, is_market_purchasable, relic_market_quote
 from utils import extract_json
 from game_logic import adjust_based_on_bp
+from forge_contract import FORGE_ANALYSIS_PROMPT, ANALYSIS_SCHEMA, DESIGN_SCHEMA, validate_analysis, validate_design
+from forge_llm import OpenAICompatibleModel
 from battle_logic import run_auto_duel, run_team_duel
 import battle_sessions
 
@@ -62,52 +64,6 @@ try:
 except Exception as exc:
     _database_init_error = exc
     logging.exception("Database schema initialization skipped or failed")
-
-class _LlmTextResponse:
-    def __init__(self, text: str):
-        self.text = text
-
-
-class OpenAICompatibleModel:
-    """OpenAI-compatible chat client used for forge vision + text steps."""
-
-    def __init__(self, client: OpenAI, model_name: str, provider: str):
-        self._client = client
-        self._model_name = model_name
-        self.provider = provider
-
-    def generate_content(self, contents, **kwargs):
-        del kwargs  # Gemini-era kwargs are ignored for OpenAI-compatible calls.
-        messages = self._to_messages(contents)
-        response = self._client.chat.completions.create(
-            model=self._model_name,
-            messages=messages,
-            # Both forge prompts ask for JSON; enforce it at the API level so a
-            # chatty reply cannot slip past extract_json.
-            response_format={"type": "json_object"},
-        )
-        choice = response.choices[0].message if response.choices else None
-        text = (choice.content or "") if choice else ""
-        return _LlmTextResponse(text)
-
-    def _to_messages(self, contents):
-        if isinstance(contents, str):
-            return [{"role": "user", "content": contents}]
-
-        if not isinstance(contents, (list, tuple)):
-            raise TypeError(f"Unsupported LLM contents type: {type(contents)!r}")
-
-        parts = []
-        for item in contents:
-            if isinstance(item, str):
-                parts.append({"type": "text", "text": item})
-            elif isinstance(item, dict) and item.get("type") == "image_png_base64":
-                data_url = f"data:image/png;base64,{item['data']}"
-                parts.append({"type": "image_url", "image_url": {"url": data_url}})
-            else:
-                raise TypeError(f"Unsupported LLM content part: {type(item)!r}")
-        return [{"role": "user", "content": parts}]
-
 
 def _build_forge_llm() -> OpenAICompatibleModel | None:
     if settings.openai_api_key:
@@ -138,36 +94,7 @@ LLM_MODEL_NAME = forge_llm._model_name if forge_llm else ""
 if forge_llm is None:
     logging.warning("OPENAI_API_KEY/KIMI_API_KEY is not configured; /api/forge will be unavailable")
 
-P1_PROMPT = """
-You are a battle power judgment robot, and your task is to evaluate the battle power of a given character.
-Below is a reference battle power level standard:
-
-Human: 100
-Beast (Tiger, Lion): 200
-Monsters (Minotaur, Scorpion-tail Lion, Centaur, etc.): 500
-Elite Humans (Robin Hood, Zorro): 500
-Heroic (Space Marines, Master Chief, Father Anderson, Alien from Sci-Fi works, Predator): 1000
-Demons (Diablo Mephisto, Hydra from Greek Mythology): 2000
-Legends (Tassadar, Hulk): 3000
-Demigods (Dracula, Superman, Alucard, Four Horsemen of the Apocalypse, Lich King): 5000
-Near Gods (Warhammer 40k Primarchs, Loki, Thor, Artemis, Kratos): 10000
-Gods (Satan, Warhammer 40k Emperor, The Hand of God from Berserk, Tyrant, Odin, Zeus): 20000
-
-Next, I will upload an image. Please
-
-- analyze the character's origins and background
-- determine the character's battle power BP level, very carefully and as detailed as possible.
-- based to the description of BP level standard, modified the final battle power BP for about [80% - 120%].
-
-finally, output the results in JSON format:
-
-{
-    "name": "<Character Name>",
-    "description": "<Character Description>",
-    "extra": "<Character Extra Background>",
-    "BP": "<Battle Power>"
-}
-"""
+P1_PROMPT = FORGE_ANALYSIS_PROMPT
 
 P2_PROMPT = """
 you are a game design expert in a turn-based card game.
@@ -264,7 +191,7 @@ You are the backend LLM stage for a turn-based card game.
 Your job is to decide structure and priorities only. Do not finalize numeric values.
 
 This backend is split into two stages:
-1. LLM stage: choose the character name, description, BP, a stat template, stat weights, and the skill structure.
+1. LLM stage: preserve the supplied identity and server-assigned BP; choose a stat template, stat weights, and the skill structure.
 2. Numeric generator stage: a pure rule-based generator with no AI. It will convert the weights and 0/1 markers into final numbers.
 
 Stat templates:
@@ -293,6 +220,8 @@ Pick exactly ONE type for the character's basic attack (state_weights.TYPE). Eac
 
 [State Weights]
 Output weights from 1 to 10 for each stat.
+Use JSON integers, not quoted numbers. Keep the input BP exactly unchanged.
+Rarity is rolled by the server; do not output rarity or change the power tier.
 1 means very low priority, 10 means the highest priority.
 "HP": <1-10>,
 "MP": <1-10>,
@@ -2197,20 +2126,18 @@ def forge():
 
         # Step 1: Analyze Image (P1)
         image_part = _image_part_from_base64(image_base64)
-        p1_response = model_vision.generate_content([P1_PROMPT, image_part])
-        p1_data = extract_json(p1_response.text)
-        if not p1_data:
-            raise ValueError("Failed to analyze image")
+        p1_response = model_vision.generate_content([P1_PROMPT, image_part], response_schema=ANALYSIS_SCHEMA, schema_name='forge_identity')
+        p1_raw = extract_json(p1_response.text)
+        p1_data = validate_analysis(p1_raw)
 
         # Step 2: Generate Stats (P2)
         p2_input = {
             "source": p1_data,
         }
 
-        p2_response = model_text.generate_content(f"{P2_PROMPT_V2}\n\nInput Data:\n{json.dumps(p2_input)}")
-        p2_data = extract_json(p2_response.text)
-        if not p2_data:
-            raise ValueError("Failed to generate stats")
+        p2_response = model_text.generate_content(f"{P2_PROMPT_V2}\n\nInput Data:\n{json.dumps(p2_input)}", response_schema=DESIGN_SCHEMA, schema_name='forge_design')
+        p2_raw = extract_json(p2_response.text)
+        p2_data = validate_design(p2_raw, p1_data)
 
         # Step 3: Scale
         final_hero = adjust_based_on_bp(p2_data)
@@ -2222,13 +2149,13 @@ def forge():
             generation_row = save_hero_generation_history(
                 user,
                 saved_source,
-                {"p1": p1_data, "p2": p2_data},
+                {"p1": p1_data, "p2": p2_data, "p1_raw": p1_raw, "p2_raw": p2_raw},
                 final_hero,
                 template=p2_data.get("template"),
                 bp_requested=int(p2_data.get("BP") or p1_data.get("BP") or final_hero.get("BP") or 0),
                 bp_final=int(final_hero.get("BP") or 0),
                 model_name=LLM_MODEL_NAME,
-                prompt_version="p2_v2",
+                prompt_version="p1_evidence_v3_p2_locked_v3",
                 source_image_hash=hashlib.sha256(base64.b64decode(image_part["data"])).hexdigest(),
                 source_image_url=image_url,
                 status="completed",

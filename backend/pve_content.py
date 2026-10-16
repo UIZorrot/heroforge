@@ -7,10 +7,16 @@ from pathlib import Path
 
 CONTENT = json.loads((Path(__file__).parent / "data/void-labyrinth-v1.json").read_text(encoding="utf-8"))
 THEME = "void_labyrinth"
-VERSION = CONTENT["content_version"]
+FIXED_CLIMB_VERSION = CONTENT["content_version"]
+VERSION = "void-labyrinth-v3-adaptive-1"
+CLIMB_VERSIONS = {FIXED_CLIMB_VERSION, VERSION}
+MIN_TEAM_BP = 1000
+ADAPTIVE_TIER = {"id": "adaptive", "name": "The Void Labyrinth", "minimum_team_bp": MIN_TEAM_BP,
+                 "recommended_team_bp": MIN_TEAM_BP, "honor_bp_band": [MIN_TEAM_BP], "scaling": "entry_stat_budget"}
+ADAPTIVE_RATIOS = {'N1': 80, 'N2': 85, 'N3': 85, 'N5': 90, 'N6': 95, 'N7': 100, 'N8': 105, 'N10': 115}
 TIERS = {t["id"]: t for t in CONTENT["tiers"]}
 NODES = {n["id"]: n for n in CONTENT["nodes"]}
-FIRST_CLEAR_DUST = {'threshold': 75, 'reflection': 150, 'heart': 250}
+FIRST_CLEAR_DUST = {'adaptive': 150, 'threshold': 75, 'reflection': 150, 'heart': 250}
 RELICS = {
     'edge': {'id': 'edge', 'name': 'Ember Edge', 'description': '+5% base ATK for the rest of this climb.'},
     'ward': {'id': 'ward', 'name': 'Stone Memory', 'description': '+8% base maximum HP for the rest of this climb.'},
@@ -23,7 +29,22 @@ def bp_band(tier):
     return (target * 95 // 100, target * 105 // 100)
 
 
-def encounter_for(tier, node, variant="default"):
+def encounter_for(tier, node, variant="default", *, power_bp=None, party_size=None):
+    if tier == 'adaptive':
+        if type(power_bp) is not int or power_bp < MIN_TEAM_BP or type(party_size) is not int or not 1 <= party_size <= 4:
+            raise ValueError('The expedition needs a valid locked entry strength and one to four companions.')
+        profile = 'threshold' if party_size == 1 else 'reflection' if party_size == 2 else 'heart'
+        encounter = encounter_for(profile, node, variant)
+        total = (power_bp * ADAPTIVE_RATIOS[node] + 50) // 100
+        original_total = encounter['enemy_total_bp']
+        shares = [divmod(unit['bp'] * total, original_total) for unit in encounter['enemies']]
+        allocations = [share[0] for share in shares]
+        for index in sorted(range(len(shares)), key=lambda i: (-shares[i][1], i))[:total - sum(allocations)]:
+            allocations[index] += 1
+        for unit, budget in zip(encounter['enemies'], allocations):
+            unit['bp'] = budget
+        encounter.update(id=f'adaptive-{node}-{variant}', tier=profile, scaling='adaptive', enemy_total_bp=total)
+        return encounter
     for encounter in CONTENT["encounters"]:
         if (encounter["tier"], encounter["node"], encounter["variant"]) == (tier, node, variant):
             return copy.deepcopy(encounter)
@@ -74,13 +95,17 @@ def enemy_hero(entry, total_bp):
                           "rarity": "common", "state": state, "skill": {} if role == "anchor" else {"s1": skill}}}
 
 
+def encounter_preview(encounter):
+    return {'tier': 'adaptive' if encounter.get('scaling') == 'adaptive' else encounter['tier'],
+            'node': encounter['node'], 'variant': encounter['variant'], 'enemyTotalBp': encounter['enemy_total_bp'],
+            'enemies': [{'name': CONTENT['archetypes'][unit['role']]['name'], 'slot': unit['slot'], 'role': unit['role']} for unit in encounter['enemies']]}
+
+
 def catalog():
     return {"theme": THEME, "name": "Void Labyrinth", "contentVersion": VERSION, "prototype": True,
-            "tiers": list(TIERS.values()), "nodes": list(NODES.values()), "entryCost": 0,
+            "tiers": [ADAPTIVE_TIER], "legacyTiers": list(TIERS.values()), "minimumTeamBp": MIN_TEAM_BP,
+            "nodes": list(NODES.values()), "entryCost": 0,
             "bestiary": [{"id": role, **{key: creature[key] for key in ("name", "role", "lore", "tactic")}} for role, creature in CONTENT["archetypes"].items()],
-            "rewardPolicy": "Choose a climb-only reward after each non-final battle. First clears award 75 / 150 / 250 Dust once per depth.",
+            "rewardPolicy": "Enemy strength is locked to your entry stat budget. Choose climb rewards; the first adaptive clear awards 150 Dust once.",
             "rewards": list(RELICS.values()), "firstClearDust": FIRST_CLEAR_DUST,
-            "encounters": [{"tier": e["tier"], "node": e["node"], "variant": e["variant"],
-                            "enemyTotalBp": e["enemy_total_bp"],
-                            "enemies": [{"name": CONTENT["archetypes"][unit["role"]]["name"], "slot": unit["slot"], "role": unit["role"]} for unit in e["enemies"]]}
-                           for e in CONTENT["encounters"]]}
+            "encounters": [encounter_preview(e) for e in CONTENT["encounters"]]}

@@ -10,6 +10,7 @@ import pytest
 from PIL import Image
 
 import battle_logic
+from forge_contract import POWER_TIERS
 from market_logic import relic_market_quote
 from relic_catalog import get_relic_catalog
 from relic_catalog import get_low_tier_relic_types
@@ -44,7 +45,7 @@ def _hero_pair(name: str, template: str, bp: int, attack_type: str, s1_name: str
             "description": f"{name} strikes hard.",
             "TYPE": attack_type,
             "TARGET": "Enemy",
-            "TARGET_NUM": "1",
+            "TARGET_NUM": 1,
             "RANGE": "melee",
             "IS_STUN": False,
             "BUFF_TIME": 2,
@@ -65,7 +66,7 @@ def _hero_pair(name: str, template: str, bp: int, attack_type: str, s1_name: str
             "description": f"{name} prepares for the next clash.",
             "TYPE": attack_type,
             "TARGET": "Self",
-            "TARGET_NUM": "1",
+            "TARGET_NUM": 1,
             "RANGE": "self",
             "IS_STUN": False,
             "BUFF_TIME": 2,
@@ -86,6 +87,11 @@ def _hero_pair(name: str, template: str, bp: int, attack_type: str, s1_name: str
             "description": f"{name} is a forged unit for integration tests.",
             "extra": f"{template} archetype",
             "BP": str(bp),
+            "power_tier": next(key for key, anchor in POWER_TIERS.items() if .8 <= bp / anchor <= 1.2),
+            "power_factor": bp / next(anchor for anchor in POWER_TIERS.values() if .8 <= bp / anchor <= 1.2),
+            "identity_status": "original",
+            "identity_confidence": .5,
+            "evidence": ["A visible test adventurer carrying a weapon"],
         },
         "p2": {
             "name": name,
@@ -284,6 +290,41 @@ def test_forge_record_failure_rolls_back_card_and_generation_and_refunds(harness
     assert harness.economy(headers)["wallet"]["dust_balance"] == 500
     assert len(harness.heroes(headers)) == before
     assert harness.db_module.fetch_one("SELECT count(*) AS n FROM hero_generations WHERE user_id=%s", (user_id,))["n"] == 0
+
+
+@pytest.mark.integration
+def test_forge_locks_judged_bp_and_records_the_raw_second_stage(harness):
+    headers = harness.login('forge-locked-power@example.com')
+    pair = _hero_pair('Grounded knight', 'knight', 1000, 'weapon', 'Cut', 'Guard')
+    pair['p2']['BP'] = '999999'
+    pair['p2']['rarity'] = 'mythic'
+    harness.set_forge_sequence([pair])
+    response = harness.client.post('/api/forge', headers=headers, json={'image': _sample_image_base64()})
+    assert response.status_code == 200, response.get_data(as_text=True)
+    history = harness.db_module.fetch_one('SELECT bp_requested,bp_final,llm_payload,prompt_version FROM hero_generations WHERE user_id=%s', (harness.last_user['id'],))
+    assert history['bp_requested'] == history['bp_final'] == 1000
+    assert history['llm_payload']['p2_raw']['BP'] == '999999'
+    assert history['prompt_version'] == 'p1_evidence_v3_p2_locked_v3'
+    assert harness.db_module.get_user_wallet(harness.last_user['id'])['dust_balance'] == 400
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize('malformed', ['identity', 'skill'])
+def test_invalid_structured_forge_refunds_and_persists_no_card(harness, malformed):
+    headers = harness.login(f'forge-invalid-{malformed}@example.com')
+    before = len(harness.heroes(headers))
+    pair = _hero_pair('Unknown knight', 'knight', 1000, 'weapon', 'Cut', 'Guard')
+    if malformed == 'identity':
+        pair['p1']['power_tier'] = 'god'
+    else:
+        pair['p2']['skill']['s1']['DMG'] = 999999
+    harness.set_forge_sequence([pair])
+    response = harness.client.post('/api/forge', headers=headers, json={'image': _sample_image_base64()})
+    assert response.status_code == 500
+    assert len(harness.heroes(headers)) == before
+    user_id = harness.last_user['id']
+    assert harness.db_module.get_user_wallet(user_id)['dust_balance'] == 500
+    assert harness.db_module.fetch_one('SELECT count(*) AS n FROM hero_generations WHERE user_id=%s', (user_id,))['n'] == 0
 
 
 @pytest.mark.integration
@@ -632,7 +673,7 @@ def test_shard_and_relic_kinds_are_enforced(harness):
     headers = harness.login("integration-shard-kind@example.com")
     user_id = harness.last_user["id"]
     harness.set_forge_sequence([
-        _hero_pair("Kind Checker", "mage", 1500, "magic", "Arc Bolt", "Ward"),
+        _hero_pair("Kind Checker", "mage", 1600, "magic", "Arc Bolt", "Ward"),
     ])
     harness.forge(headers, _sample_image_base64())
     hero_id = harness.heroes(headers)[0]["id"]
@@ -1822,7 +1863,7 @@ def test_pvp_matchmaking_rejects_large_bp_gap(harness):
 
     headers_b = harness.login(email_b)
     harness.set_forge_sequence([
-        _hero_pair("Titan", "tank", 1300, "weapon", "Crush", "Fortress"),
+        _hero_pair("Titan", "tank", 1200, "weapon", "Crush", "Fortress"),
     ])
     harness.forge(headers_b, _sample_image_base64((60, 80, 140)), materials={})
     hero_b_id = harness.heroes(headers_b)[0]["id"]

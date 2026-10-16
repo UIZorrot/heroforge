@@ -14,7 +14,6 @@ import { VoidBestiary } from './VoidBestiary';
 import './PvePage.css';
 
 const RUN_KEY = `${STORAGE_NAMESPACE}.pve.lastRun`;
-const challenges = ['A first climb. One starter hero can carry the lantern.', 'Sharper guardians. Find rewards that strengthen your party.', 'Up to six enemies. Survive the name-devouring ritual.'];
 const slotNames = ['Front left', 'Front center', 'Front right', 'Back left', 'Back center', 'Back right'];
 
 export function PvePage({ heroes, token, demoMode = false, onRewardClaimed }: { heroes: SavedHero[]; token?: string | null; demoMode?: boolean; onRewardClaimed?: () => Promise<unknown> }) {
@@ -22,7 +21,7 @@ export function PvePage({ heroes, token, demoMode = false, onRewardClaimed }: { 
   const [catalog, setCatalog] = useState<PveCatalog>(pvePreviewCatalog);
   const [run, setRun] = useState<PveRun | null>(null);
   const [expeditionOpen, setExpeditionOpen] = useState(false);
-  const [tier, setTier] = useState<PveTier>('threshold');
+  const tier: PveTier = 'adaptive';
   const [selection, setSelection] = useState<string[]>([]);
   const [formationDraft, setFormationDraft] = useState<{ id: string; positions: Record<string, number> } | null>(null);
   const [branch, setBranch] = useState('A');
@@ -34,13 +33,13 @@ export function PvePage({ heroes, token, demoMode = false, onRewardClaimed }: { 
   const available = useMemo(() => heroes.filter(hero => !hero.cardStatus || hero.cardStatus === 'active'), [heroes]);
   const selected = available.filter(hero => selection.includes(hero.id));
   const teamBp = selected.reduce((total, hero) => total + Number(hero.character.BP), 0);
-  const targetBp = catalog.tiers.find(item => item.id === tier)?.recommended_team_bp ?? 1000;
-  const eligibility = pveBpEligibility(teamBp, targetBp, selected.length);
+  const eligibility = pveBpEligibility(teamBp, selected.length);
+  const runName = catalog.tiers.find(item => item.id === run?.tier)?.name ?? catalog.legacyTiers?.find(item => item.id === run?.tier)?.name ?? 'The Void Labyrinth';
   const catalogNode = catalog.nodes.find(node => node.id === `N${run?.node}`);
   const shownFloor = run?.pendingReward?.floor ?? run?.node ?? 0;
   const shownNode = catalog.nodes.find(node => node.id === `N${shownFloor}`);
   const currentNode = run?.legacy && catalogNode && ['event', 'shop'].includes(catalogNode.kind) ? { ...catalogNode, kind: 'battle' } : catalogNode;
-  const previewEncounter = run && currentNode ? catalog.encounters?.find(item => item.tier === run.tier && item.node === currentNode.id && item.variant === (currentNode.variants ? run.branches[currentNode.id] ?? branch : 'default')) : null;
+  const previewEncounter = run && currentNode ? (currentNode.variants ? run.encounterChoices?.[run.branches[currentNode.id] ?? branch] : run.nextEncounter) ?? catalog.encounters?.find(item => item.tier === run.tier && item.node === currentNode.id && item.variant === (currentNode.variants ? run.branches[currentNode.id] ?? branch : 'default')) : null;
   const room = run?.battleSession;
   const preparing = room?.status === 'preparing';
   const battle = useMemo(() => {
@@ -132,9 +131,7 @@ export function PvePage({ heroes, token, demoMode = false, onRewardClaimed }: { 
         <p className="void-eyebrow">CHAPTER I / THE VOID LABYRINTH</p>
         <button className="void-primary" type="button" onClick={() => setExpeditionOpen(true)}>{run ? 'Continue expedition' : 'Prepare expedition'}<ChevronRight size={16} /></button>
         {preview && <small>TEST REALM · LOCAL PROGRESS</small>}
-      </div> : !run ? <div className="void-tier-list" role="group" aria-label="Choose a labyrinth depth">{catalog.tiers.map((item, index) => <button key={item.id} type="button" aria-pressed={tier === item.id} onClick={() => setTier(item.id as PveTier)}>
-        <span className="void-tier-list__number">DEPTH 0{index + 1}</span><strong>{item.name}</strong><span className="void-tier-list__bp">{item.recommended_team_bp.toLocaleString()}<small>TEAM BP</small></span><small className="void-tier-list__challenge">{challenges[index]}</small>
-      </button>)}</div> : <div className="void-world-caption"><span>{catalog.tiers.find(item => item.id === run.tier)?.name}</span><strong>{shownNode?.name ?? 'The journey ends'}</strong></div>}
+      </div> : !run ? <div className="void-journey-intro"><p className="void-eyebrow">ONE LABYRINTH / YOUR EXPEDITION</p><p>Bring 1–4 companions with at least 1,000 total BP.<br />The labyrinth meets your party's strength.</p></div> : <div className="void-world-caption"><span>{runName}</span><strong>{shownNode?.name ?? 'The journey ends'}</strong></div>}
     </div>
     {expeditionOpen && <div className="void-content">
     <button className="void-return-to-realm" type="button" onClick={() => setExpeditionOpen(false)}>Return to the realm</button>
@@ -144,20 +141,20 @@ export function PvePage({ heroes, token, demoMode = false, onRewardClaimed }: { 
     {preview && <p className="void-notice">{CAN_PLAY_PVE_PREVIEW ? 'Local test realm — play the climb with the real combat rules. Progress saves locally; rewards never affect a live wallet.' : 'Preview realm — explore the depths and companions. Connect to a live account to begin a saved climb.'}</p>}
     {!run && <>
       <div className="void-preparation"><div className="void-section-title"><h2>Gather your companions</h2><span>{selected.length} / 4 companions · {teamBp.toLocaleString()} BP</span></div>
-        <p>Choose 1–4 companions. Team BP must be within ±5% of this depth. Arrange your cards on the battlefield before every encounter.</p>
+        <p>Choose one to four companions with at least 1,000 total BP. Enemies scale to your party's starting strength. Arrange positions on the battlefield before every fight.</p>
         {available.length === 0 && <p>No companions are available. Forge a hero or claim your starter cards.</p>}
         <div className="void-roster">{available.map(hero => <div key={hero.id} className="void-roster__hero" data-selected={selection.includes(hero.id)}>
           <button type="button" aria-pressed={selection.includes(hero.id)} disabled={!selection.includes(hero.id) && selection.length >= 4} onClick={() => toggleHero(hero.id)}>
             {hero.image && <img src={hero.image} alt="" loading="lazy" />}<span><strong>{hero.character.name}</strong><small>{Number(hero.character.BP).toLocaleString()} BP</small></span>
           </button>
         </div>)}</div>
-        <div className="void-entry-summary" data-eligible={eligibility.eligible}><div><p className="void-eyebrow">TEAM BP / {targetBp.toLocaleString()} TARGET</p><strong>{teamBp.toLocaleString()} <span>BP</span></strong><p aria-live="polite">{!selected.length ? 'Choose your companions to begin.' : eligibility.eligible ? 'Within the entry band. A full party is optional.' : teamBp < eligibility.lower ? `Need ${(eligibility.lower - teamBp).toLocaleString()} more BP to enter.` : `${(teamBp - eligibility.upper).toLocaleString()} BP above the entry limit.`}<br />Allowed: {eligibility.lower.toLocaleString()}–{eligibility.upper.toLocaleString()} BP · 1–4 heroes</p></div>
+        <div className="void-entry-summary" data-eligible={eligibility.eligible}><div><p className="void-eyebrow">YOUR TEAM / ADAPTIVE EXPEDITION</p><strong>{teamBp.toLocaleString()} <span>BP</span></strong><p aria-live="polite">{!selected.length ? 'Choose your companions to begin.' : eligibility.eligible ? 'Ready to enter. No exact BP band or full party required.' : `Need ${(eligibility.minimum - teamBp).toLocaleString()} more BP to enter.`}<br />Minimum: 1,000 BP · 1–4 heroes · Enemy strength locks when you enter.</p></div>
         <button className="void-primary" type="button" disabled={busy || loading || preview && !CAN_PLAY_PVE_PREVIEW || !eligibility.eligible} onClick={() => void start()}>{busy ? 'Lighting the lantern…' : 'Enter the labyrinth'}<ChevronRight size={16} /></button></div>
       </div>
     </>}
 
     {run && <>
-      <div className="void-run-heading"><div><p className="void-eyebrow">FLOOR {Math.min(shownFloor, 10)} / 10 · {catalog.tiers.find(item => item.id === run.tier)?.name} · {run.teamBp.toLocaleString()} BP</p><h2>{run.status === 'completed' ? 'Your name endures' : shownNode?.name ?? 'The journey ends'}</h2><p>{run.legacy ? 'Resumed expedition · original entry rules' : 'BP entry verified · your climb rewards stay in this expedition'} · Retries: {run.retries}</p></div><span className="void-saved">{run.lumens ?? 0} Lumens · {preview ? 'Local test save' : 'Journey saved'}</span></div>
+      <div className="void-run-heading"><div><p className="void-eyebrow">FLOOR {Math.min(shownFloor, 10)} / 10 · {runName} · {run.teamBp.toLocaleString()} BP</p><h2>{run.status === 'completed' ? 'Your name endures' : shownNode?.name ?? 'The journey ends'}</h2><p>{run.tier === 'adaptive' ? 'Enemy strength locked at entry · rewards strengthen your expedition' : 'Resumed expedition · original difficulty preserved'} · Retries: {run.retries}</p></div><span className="void-saved">{run.lumens ?? 0} Lumens · {preview ? 'Local test save' : 'Journey saved'}</span></div>
       <div className="void-climb-layout"><aside className="void-route"><p className="void-eyebrow">ASCEND / TEN FLOORS</p>
       <ol className="void-map" aria-label="Journey route">{catalog.nodes.map((node, index) => <li key={node.id} data-current={shownFloor === index + 1} data-cleared={run.clearedNodes.includes(index + 1)} aria-current={shownFloor === index + 1 ? 'step' : undefined}>
         <span className="void-map__glyph">{node.kind === 'camp' ? <Flame size={19} /> : node.kind === 'event' ? <ScrollText size={19} /> : node.kind === 'shop' ? <Coins size={19} /> : node.kind === 'boss' ? <Skull size={19} /> : node.kind === 'elite' ? <Shield size={19} /> : <Swords size={17} />}</span><span><small>FLOOR {String(index + 1).padStart(2, '0')} · {node.kind}</small>{node.name}</span>

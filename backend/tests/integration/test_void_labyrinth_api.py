@@ -70,12 +70,14 @@ def test_pve_full_route_first_clear_ledger_and_repeat_clear(harness):
     headers = harness.login('void-full-route@example.com')
     for hero in harness.heroes(headers)[:4]:
         payload = hero['hero_payload']
-        payload['state'].update(HP='100000', ATK='100000', SPEED='1000', TYPE='Ranged')
+        payload['state'].update(HP='100000', ATK='100000', MP='100', SPEED='1000', PI='80', AC='100', EV='100', TYPE='Ranged')
+        payload['skill'] = {'s1': {'name': 'Sweeping test volley', 'TYPE': 'magic', 'TARGET': 'Enemy',
+            'RANGE': 'enemy', 'TARGET_NUM': 6, 'DMG': 0, 'MP_COST': 25}}
         harness.db_module.execute('UPDATE heroes SET hero_payload=%s::jsonb WHERE id=%s', (json.dumps(payload), hero['id']))
     user_id = harness.last_user['id']
     wallet_before = harness.db_module.get_user_wallet(user_id)['dust_balance']
     for attempt in range(2):
-        run, _ = create(harness, headers)
+        run, _ = create(harness, headers, 'reflection')
         last_body = None
         while run['status'] == 'active':
             room = run['battleSession']
@@ -86,14 +88,14 @@ def test_pve_full_route_first_clear_ledger_and_repeat_clear(harness):
                     input_data['positions'] = {unit['tag']: unit['slot'] for unit in room['board']['bottom'] if unit}
                 elif room['actionOptions']:
                     operation = 'action'
-                    option = room['actionOptions'][0]
-                    input_data['action'] = {'actorTag': room['activeActorTag'], 'kind': 'attack',
+                    option = next((item for item in room['actionOptions'] if item['kind'] == 'skill' and not item.get('disabled')), room['actionOptions'][0])
+                    input_data['action'] = {'actorTag': room['activeActorTag'], 'kind': option['kind'], 'skillSlot': option.get('skillSlot'),
                                            'targetTag': option['targets'][0], 'expectedEventCount': len(room['events'])}
                 else:
                     operation = 'advance'
             elif run.get('pendingReward'):
                 operation = 'reward'
-                input_data['choice'] = 'edge'
+                input_data['choice'] = 'renewal'
             elif run['node'] == 3:
                 operation = 'event'
                 input_data['choice'] = 'study'
@@ -102,7 +104,10 @@ def test_pve_full_route_first_clear_ledger_and_repeat_clear(harness):
                 input_data['choice'] = 'ward'
             elif run['node'] in {4, 9}:
                 operation = 'camp'
-                input_data['choice'] = 'boon'
+                input_data['choice'] = 'rest'
+                dead = [hero_id for hero_id, resource in run['resources'].items() if resource['hp'] <= 0]
+                if dead:
+                    input_data['reviveHeroId'] = dead[0]
             else:
                 operation = 'enter'
                 input_data['branch'] = 'B' if run['node'] in {2, 6} else 'default'
@@ -113,11 +118,11 @@ def test_pve_full_route_first_clear_ledger_and_repeat_clear(harness):
             run = response.get_json()['data']
         assert run['status'] == 'completed' and run['clearedNodes'] == list(range(1, 11))
         assert run['reward']['firstClear'] is (attempt == 0)
-        assert run['reward']['dust'] == (75 if attempt == 0 else 0)
+        assert run['reward']['dust'] == (150 if attempt == 0 else 0)
         duplicate = harness.client.post(url, headers=headers, json=last_body)
         assert duplicate.status_code == 200 and duplicate.get_json()['data']['revision'] == run['revision']
     count = harness.db_module.fetch_one('SELECT count(*) AS n FROM pve_first_clears WHERE user_id=%s', (user_id,))
     assert count['n'] == 1
-    assert harness.db_module.get_user_wallet(user_id)['dust_balance'] == wallet_before + 75
+    assert harness.db_module.get_user_wallet(user_id)['dust_balance'] == wallet_before + 150
     transactions = harness.db_module.fetch_one("SELECT count(*) AS n FROM resource_transactions WHERE user_id=%s AND reason='void_labyrinth_first_clear'", (user_id,))
     assert transactions['n'] == 1
